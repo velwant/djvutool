@@ -1,0 +1,1177 @@
+#!/bin/bash
+# -*- mode: sh -*-
+
+# convertor - tool for conversion and work DjVu files
+#
+# Author: Aleš Kapica <kapica@fel.cvut.cz>, 2015
+#
+# Použití...
+# convertor [test] image
+#	provede testovací konverzi pro všechny dostupné separační algoritmy didjvu
+shopt -s extglob
+
+# Changelog
+# - ošetřena situace, kdy není nainstalován ocrodjvu
+# - ošetřit situaci, kdy soubor neobsahuje žádný textový obsah a soubor dsed, ani xml neexistuje
+# - mezi klíčové operace přidáno delete a insert
+# - OCR zpracované do samostatné funkce
+# - výchozí algoritmus djvu; testovací konverze pro všechny algoritmy se
+#   provede pouze je-li uveden parametr --test-conversion
+# - implementována rotace stránky
+
+# ToDo
+# doplnit nápovědu k rotaci stránky (akce rotate)
+# dodělat přesuny stránek
+# generuje se THUMBNAIL soubor, i když je hotový - divné, měl by jen když exportuje xml
+# opravit volby --algoritmus a --view
+NAME="convertor"
+[ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
+
+LOG="${LOG=/dev/null}"
+XML="${XML=no}"
+DSED="${DSED=no}"
+INDIRECT="${INDIRECT=no}"
+FORCE="no"
+RENAME="no"
+SUFFIX=".djvu"
+THUMBNAIL="${INDIRECT=yes}"
+INSERTTEXT="${INDIRECT=no}"
+ALG="${INDIRECT=djvu}"
+
+trap '''CHYBA=$? ;
+case $CHYBA in
+ 20) echo "Není nainstalován balík djvu-tools"
+ ;;
+ 21) echo "ERROR: mimetype - tool for detection type of image"
+ ;;
+ 22) echo "ERROR: readlink - tool for detection absolute path of directory"
+ ;;
+ 23) echo "Není nainstalován balík netpbm-sf"
+ ;;
+ 24) "ERROR: imagemagick - tool for image convert is not installed"
+ ;;
+ 31) echo "Není nainstalován balík ocrodjvu, na djvu soubory nelze aplikovat OCR. Buďto jej doinstalujte, nebo odstraňte z příkazové řádky parametr -o (--ocr)" >> /dev/stderr
+ ;;
+ 32) echo "Pokud má při operaci zpracovat do DjVu bitmapový soubor, je třeba uvést na příkazové řádce parametrem -a jaký se má použít algoritmus. Jaké parametry lze použít se dozvíte pokud místo jména algoritmu napíšete znak ?" >> /dev/stderr
+ ;;
+ 33) NORMDIR=yes
+ ;;
+esac
+[ $NORMDIR ] || rm -rf -- "$TEMPDIR"
+exit $CHYBA
+''' EXIT
+
+TEMPDIR=$(mktemp -d -p /tmp ${NAME}-XXX) || exit 1
+
+#=== testy závislostí ===
+# Dependencies:
+#   * feh      ( http://feh.finalrewind.org/ )
+#   * exiftool ( http://www.sno.phy.queensu.ca/~phil/exiftool ) in Debian package: libimage-exiftool-perl 
+#   * yad      ( http://sourceforge.net/projects/yad-dialog )
+DIDJVU=$(which didjvu)
+[ ! ${DIDJVU} ] && echo 'Není nainstalován balík didjvu, nebude možné aplikovat pokročilé algoritmy pro separaci popředí při konverzi do DjVu' >> /dev/stderr && DIDJVU=false
+OCRODJVU=$(which ocrodjvu)
+[ ! ${OCRODJVU} ] && OCRODJVU=31
+DJVIEW=$(which djview)
+[ ! ${DJVIEW} ] && echo 'Není nainstalován balík djview, nebude fungovat testovací zobrazení djvu.souborů' >> /dev/stderr && DJVIEW=false
+DDJVU=$(which ddjvu)
+[ ! ${DDJVU} ] && exit 20
+DJVUTXT=$(which djvutxt)
+[ ! ${DJVUTXT} ] && exit 20
+DJVUSED=$(which djvused)
+[ ! ${DJVUSED} ] && exit 20
+DJVUTOXML=$(which djvutoxml)
+[ ! ${DJVUTOXML} ] && exit 20
+DJVUXMLPARSER=$(which djvuxmlparser)
+[ ! ${DJVUXMLPARSER} ] && exit 20
+DJVUDUMP=$(which djvudump)
+[ ! ${DJVUDUMP} ] && exit 20
+DJVMCVT=$(which djvmcvt)
+[ ! ${DJVMCVT} ] && exit 20
+DJVM=$(which djvm)
+[ ! ${DJVM} ] && exit 20
+CJB2=$(which cjb2)
+[ ! ${CJB2} ] && exit 20
+DJVUMAKE=$(which djvumake)
+[ ! ${DJVUMAKE} ] && exit 20
+#YAD=$(which yad)
+#[ ! ${YAD} ] && echo 'Není nainstalován balík yad' && exit 1
+MIME=$(which mimetype)
+[ ! -x "${MIME}" ] && exit 21
+STAT=$(which readlink)
+[ ! -x "${STAT}" ] && exit 22
+
+NETPBM=0
+PNMSCALE=$(which pnmscale)
+[ ! -x "${PNMSCALE}" ] && NETPBM=1
+if (( $NETPBM == 0 )); then
+    VERSION=($(${PNMSCALE} -version 2>&1 | head -1))
+    case ${VERSION[$((${#VERSION[@]} - 1))]} in
+	10.0*|9*) echo "WARNING: Version Netpbm pnmacele don't support filters. I must use imagemagick convert" >> /dev/stderr
+	    NETPBM=1
+	    ;;
+	*)  NETPBM=0
+	    BMPTOPNM=$(which bmptopnm)
+	    [ ! -x "${BMPTOPNM}" ] && exit 23
+	    JPEGTOPNM=$(which jpegtopnm)
+	    [ ! -x "${JPEGTOPNM}" ] && exit 23
+	    GIFTOPNM=$(which giftopnm)
+	    [ ! -x "${GIFTOPNM}" ] && exit 23
+	    PNGTOPNM=$(which pngtopnm)
+	    [ ! -x "${PNGTOPNM}" ] && exit 23
+	    PNMTOJPEG=$(which pnmtojpeg)
+	    [ ! -x "${PNMTOJPEG}" ] && exit 23
+	    TIFFTOPNM=$(which tifftopnm)
+	    [ ! -x "${TIFFTOPNM}" ] && exit 23
+	    PNMTOPNG=$(which pnmtopng)
+	    [ ! -x "${PNMTOPNG}" ] && exit 23
+	    PNMTOPLAINPNM=$(which pnmtoplainpnm)
+	    [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
+	    PPMTOPGM=$(which ppmtopgm)
+	    [ ! -x "${PPMTOPGM}" ] && exit 23
+	    PGMTOPBM=$(which pgmtopbm)
+	    [ ! -x "${PGMTOPBM}" ] && exit 23
+	    ;;
+    esac
+fi
+if (( $NETPBM == 1 )) ; then
+    CONVERT=$(which convert)
+    [ ! -x "${CONVERT}" ] && echo exit 24
+fi
+#=== konec testu závislostí ===
+
+function exportdsed {
+	TEXT=$(${DJVUTXT} ${1})
+	if [ "${TEXT}" ] ; then
+		${DJVUSED} ${1} -e output-all > ${1/.djvu/.dsed}
+		return 0
+	else
+		echo "Stránka $1 žádný text neobsahuje; buďto na ni nebylo aplikováno OCR, nebo se ho nepodařilo rozpoznat" >> /dev/stderr
+		return 1
+	fi
+}
+
+function exportxml {
+	TEXT=$(${DJVUTXT} ${1})
+	if [ "${TEXT}" ] ; then
+		${DJVUTOXML} ${1} ${1/.djvu/.xml}
+		return 0
+	else
+		echo "Stránka $1 žádný text neobsahuje; buďto na ni nebylo aplikováno OCR, nebo se ho nepodařilo rozpoznat" >> /dev/stderr
+		return 1
+	fi
+}
+
+function thumbnail {
+	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
+	# Náhled se generuje buď samostatně, nebo současně xml výstupem
+	# Znovu se generuje pouze za předpokladu, že je nastaven parametr FORCE
+	if [ -f "${1/.djvu/.png}" ] ; then
+		if [ ${FORCE} != "no" ] ; then
+			${DDJVU} --format=pnm ${1} | ${PNMTOPNG} > ${1/.djvu/.png}
+#			${DDJVU} --format=tiff "$1" "${1/.djvu/.tiff}" && ${CONVERT} "${1/.djvu/.tiff}" "${1/.djvu/.png}" && rm "${1/.djvu/.tiff}"
+		fi
+	else
+		${DDJVU} --format=pnm ${1} | ${PNMTOPNG} > ${1/.djvu/.png}
+#		${DDJVU} --format=tiff "$1" "${1/.djvu/.tiff}" && ${CONVERT} "${1/.djvu/.tiff}" "${1/.djvu/.png}" && rm "${1/.djvu/.tiff}"
+	fi
+}
+
+function inserttext {
+	if [ -f ${1/.djvu/.xml} ] ; then
+		${DJVUXMLPARSER} -o ${1} ${1/.djvu/.xml}
+	elif [ -f ${1/.djvu/.dsed} ] ; then
+		${DJVUSED} ${1} -f ${1/.djvu/.dsed} -s
+	fi
+}
+
+function insertxmp {
+	if [ -f ${1/.djvu/.xmp} ] ; then
+		echo "Vkládám xmp informace, pokud jsou.."
+	fi
+}
+
+function konvertor {
+	# $1 - vstup
+	# $2 - výstup
+	# je-li na vstupu djvu provede pouze operace spojené s vyexportováním XML, DSED a náhledu v png
+	# je-li na vstupu něco jiného než png, djvu, dsed, xml, mng, tiff, xcf či pdf  ověří zda-li jde o obrázek
+	if [ -f "$1" ] ; then
+		if [ "${1##*.}" == "djvu" ] ; then
+			FROM="$1"
+		else
+			# konverze a výsledek bude ve from..
+			# SEPARATE - rozdělení na vrstvy  yes (default) | no
+			# DPI - 300 (default)
+			# ALG
+			todjvu "$1" "$2"
+			if [ "$?" !=  "0" ]  ; then
+				exit 40
+			fi
+		fi
+		if [ -f "$2" ] && [ "${TEST}" != "yes" ]; then
+			if [ ${DSED} == "yes" ] ; then
+				if [ -f "${2/.djvu/.dsed}" ] ; then
+					if [ ${FORCE} != "no" ] ; then
+						rm ${2/.djvu/.dsed}
+						exportdsed ${2}
+					fi
+				else
+					exportdsed ${2}
+				fi
+			fi
+			if [ ${XML} == "yes" ] ; then
+				THUMBNAIL=yes
+				if [ -f "${2/.djvu/.xml}" ] ; then
+					if [ ${FORCE} != "no" ] ; then
+						# exportuji textovou vrstvu v xml, pouze pokud neexistuje, nebo je-li uveden parametr -f (--force)
+						# XML ve výchozím stavu exportuje jak text tak hyperlinky. Neexportuje všechna metadata!!!
+						rm ${2/.djvu/.xml}
+						exportxml ${2}
+					fi
+				else
+					exportxml ${2}
+				fi
+			fi
+			if [ ${THUMBNAIL} == "yes" ] ; then
+				thumbnail ${2}
+			fi
+			if [ ${INSERTTEXT} == "yes" ] && [ ${#OCR} != "3" ] ; then
+				inserttext ${2}
+			elif [ ! ${OCR} ] ; then
+				inserttext ${2}
+			fi
+		fi
+	fi
+}
+
+function getocr {
+	# $1 - jméno djvu souboru 
+	if [ "${OCR}" ] ; then
+		[ "${OCRODJVU%%+([0-9])}" == "" ] && exit ${OCRODJVU} || ${OCRODJVU} --in-place -l ${OCR} "$1"
+	fi
+}
+
+function identifypage {
+	# Funkce vrací pořadové číslo stránky
+	# $1 soubor
+	# $2 testovaná hodnota
+	if [ "${2%%+([0-9])}" == "" ] ; then
+		PAGE="\[P$2\]"
+	else
+		PAGE="\{$2\}"
+	fi
+#	echo "$PAGE" >> /dev/stderr
+	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep $PAGE))
+	echo ${OUTPUT[@]} >> /dev/null
+	return ${OUTPUT[3]//+([\]P\[])/}
+}
+
+function namepage {
+	# Funkce vrací jméno stránky na základě pořadového čísla stránky
+	# $1 soubor
+	# $2 číslo stránky
+	if [ "${2%%+([0-9])}" == "" ] ; then
+		PAGE="\[P$2\]"
+		OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep $PAGE))
+#		echo ${OUTPUT[@]} >> /dev/stderr
+		echo ${OUTPUT[2]//+([\{\}])/}
+	else
+		return 1
+	fi
+}
+
+function lastpage {
+	# Funkce vrací číslo poslední stránky
+	# $1 jméno vícestránkového djvu souboru
+	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | tail -1))
+	return ${OUTPUT[3]//+([\]P\[])/}
+}
+
+function insertpage {
+	# $1 - soubor se kterým se pracuje
+	# $2 - djvu soubor co se má vložit
+	# $3 - identifikátor stránky před kterou se má vložit
+	identifypage ${1} ${3}
+	PAGE=$?
+#	echo $PAGE
+	if [ ${PAGE} -gt "0" ] ; then
+		${DJVM} -i $1 $2 $PAGE
+	else
+		${DJVM} -i $1 $2
+	fi
+}
+
+function deletepage {
+	# $1 - soubor se kterým se pracuje
+	# $2 - číslo, nebo název strany co se má odstranit
+	identifypage ${1} ${2}
+	PAGE=$?
+#	echo $PAGE
+	if [ ${PAGE} -gt "0" ] ; then
+		echo "Odstraňuji stránku $2"
+		${DJVM} -d $1 $PAGE
+	else
+		echo "Stránka $2 v souboru není. Nezapomeňte, že konvertovanému souboru se mění přípona!!"
+		exit 1
+	fi
+}
+
+function rotatepage {
+	# $1 - soubor se kterým se pracuje
+	# $2 - číslo, nebo název strany která se má rotovat
+	# $3 - hodnota rotace
+	identifypage ${1} ${2}
+	PAGE=$?
+#	echo $PAGE
+	if [ ${PAGE} -gt "0" ] ; then
+#		echo "Otáčím stránku $2 o $3" >> /dev/stderr
+		[ "$3" == "" ] && echo "Je třeba parametrem určit natočení stránky, nebo alespoň směr rotace. Při uvedení směru rotace se stránka pootočí o 90°" && exit 0
+		echo "${DJVUSED} -e \'select $PAGE; set-rotation $3; save\' $1" >> /dev/stderr
+		case "$3" in
+			0|1|2|3)  ${DJVUSED} -e "select $PAGE; set-rotation $3; save" $1
+			;;
+			left) ${DJVUSED} -e "select $PAGE; set-rotation +1; save" $1
+			;;
+			right) ${DJVUSED} -e "\'select $PAGE; set-rotation -1" $1
+			;;
+			180) ${DJVUSED} -e "\'select $PAGE; set-rotation +2" $1
+			;;
+			*) echo "Rotace akceptuje absolutní hodnoty 0, 1 (vpravo), 2 (vzhůru nohama), 3 (vlevo) a left (pro otáčení stránky o 90° směrem doleva) a right (pro otáčení stránky o 90° směrem doprava). Každá jiná hodnota parametru vede k tomu, že je rotace ignorována."
+			;;
+		esac
+	else
+		echo "Stránka $2 v souboru není. Nezapomeňte, že u konvertovaného souboru se mění přípona!!"
+		exit 1
+	fi
+}
+
+function forwardpage {
+	# $1 - soubor
+	# $2 - stránka k přesunu
+	# $3 - pozice k přesunu
+	echo "před" >> /dev/stderr
+	identifypage $1 $2
+	AORDER=$?
+	A=$(namepage $1 $AORDER)
+	B=$(namepage $1 $3)
+	echo "Přesouvám $A před $B"
+	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
+	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
+	# Rozbaleno.. mohu začít mazat..
+	deletepage ${1} ${AORDER}
+	if [ "${3}" == "" ] ; then
+		echo "Přesouvám $2 o stránku vpřed.."
+		if [ ${AORDER} == "1" ] ; then
+			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+		else
+			insertpage ${1} "${TEMPDIR}/${A}" $((AORDER-1))
+		fi
+	else
+		# Nejprve musím zjistit aktuální pozici B
+		identifypage $1 $B
+		BORDER=$?
+		if [ ${#B} -eq "0" ] ; then
+			echo "Vkládám stránku $A na původní pozici, protože předaný indentifikační parametr nové pozice je neplatný" >> /dev/stderr
+			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+		else
+			# A pak mohu začít vkládat..
+#			if [ ${BORDER} == "1" ] ; then
+#				insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+#			else
+				insertpage ${1} "${TEMPDIR}/${A}" $((BORDER-1))
+#			fi
+#			echo "Mohu začít vkládat" >> /dev/stderr
+#			insertpage ${1} "${TEMPDIR}/${A}" $BORDER
+		fi
+	fi
+	exit 33
+}
+
+function backpage {
+	# $1 - soubor
+	# $2 - stránka k přesunu
+	# $3 - pozice k přesunu
+	identifypage $1 $2
+	AORDER=$?
+	A=$(namepage $1 $AORDER)
+	B=$(namepage $1 $3)
+	echo "Přesouvám $A za $B"
+	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
+	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
+	# Rozbaleno.. mohu začít mazat..
+	deletepage ${1} ${AORDER}
+	if [ "${3}" == "" ] ; then
+		echo "Přesouvám $2 o stránku zpět.." >> /dev/stderr
+		insertpage ${1} "${TEMPDIR}/${A}" $((AORDER+1))
+	else
+		# Nejprve musím zjistit aktuální pozici B
+		identifypage $1 $B
+		BORDER=$?
+		if [ ${#B} -eq "0" ] ; then
+#			echo "Vkládám stránku $A na původní pozici, protože předaný indentifikační parametr nové pozice je neplatný" >> /dev/stderr
+			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+		else
+			# A pak mohu začít vkládat..
+#			echo "Mohu začít vkládat" >> /dev/stderr
+			insertpage ${1} "${TEMPDIR}/${A}" $BORDER
+		fi
+	fi
+}
+
+function movepage {
+	# Když smažu 25, odstraní ve skutečnosti předchozí pozici.. (24)
+	# a když vložím na pozici 25, tak ho stutečně vloží, ale stávající soubor odsune až za...
+	# takže...
+	# má-li stranu 3 dát před stranu 7...
+	# 1, rozbalí...
+	# 2, odstraní stranu (3 - 1) tedy pozici 2...
+	# 3, vyhledá pozici strany 7 (ta se mezi tím přesunula na pozici 6)
+	# 4, vloží soubor, který byl původně na pozici 3 na pozici 6
+	# to je přesun before...
+	# ...
+	# Přesun after..
+	# 1, - 3, je stejné
+	# 4, jelikož je strana 7 nyní na pozici 6 a má předcházet vložené stránce, je třeba...
+	# 5, vložit soubor, který byl původně na pozici 3 na pozici 7 ...
+	# $1 vstupní soubor
+	# $2 stránka přesouvaná
+	# $3 stránka cílová
+	echo "Funkce movepage.."
+	# Ze $1 udělat indirect do adresáře temporar
+	# vytáhnout jména souborů 
+	namepage $1 $2
+	namepage $1 $3
+	# ${DJVM} -d $1 $2
+	# identifypage $1 $NAMETARGET
+	# NUMTARGET=$?
+	# ${DJVM} -i $1 temporar/$INSERT $NUMTARGET
+}
+
+function djvubundle {
+	# Funkce pro vytvoření svazku..
+	# $1 - vzorek podle kterého se mají vybrat soubory
+	# $2 - cílový DjVu soubor
+	# $FORCE - ovlivňuje jestli se má přepsat cílový soubor, nebo ne
+	# $INDIRECT - ovlivňuje typ svazku
+	# $SUFFIX - je přípona výchozích souborů
+	echo $@
+	if [ -f "$1" ] ; then
+		if [ -f "$2" ] ; then 
+			if [ ${FORCE} == "no" ] ; then
+				echo "použiju djvmcvt"
+				help existed "$2"
+				exit 0
+			else
+				${DJVMCVT} -${INDIRECT} "$1" "$2"
+			fi
+		fi
+	else
+		if [ -f "$2" ] ; then 
+			if [ ${FORCE} == "no" ] ; then
+				help existed "$2"
+				exit 0
+			else
+				rm -rf "$2"
+			fi
+		fi
+		if [ ${RENAME} == "no" ] ; then
+			echo "Výchozí soubory jsou identifikovány vzorkem a nepřejmenují se"
+			for i in $(ls -1 | grep -E "([0-9])\1?$SUFFIX\$" | sed "s/$1//" | sort -n) ; do
+				#echo "$2 $1$i"
+				ORIGSOUBOR="$1$i"
+				DJVUSOUBOR=${ORIGSOUBOR/$SUFFIX/.djvu}
+				if [ -f "$ORIGSOUBOR" ] ; then
+					if [ ! -f "$DJVUSOUBOR" ] ; then
+						todjvu "$ORIGSOUBOR"
+					fi
+				fi
+				if [ -f "$2" ] ; then
+					${DJVM} -i "$2" "$DJVUSOUBOR"
+				else
+					${DJVM} -c "$2" "$DJVUSOUBOR"
+				fi
+			done 
+		else
+#		RENAME
+			if [ "${RENAME}" == "0" ] ; then
+				#echo "numerické číslování, název souborů se - až na číslo zachová "
+				INPUT=""
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						NUMBER="${RAWNUMBER##+(0)}"
+						if [ "${NUMBER}" == "" ] ; then
+							TARGET="${INPUT}0${SUFFIX}"
+						else
+							TARGET="${INPUT}${NUMBER}${SUFFIX}"
+						fi
+						if [ "$3" ] ; then
+							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
+								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							fi
+						else
+							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+						fi
+					done
+#					echo "NUMERIC - soubor stejný"
+			elif [ ! "${RENAME//0/}" ] ; then
+				MAX="0"
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						if [ "${#RAWNUMBER}" -gt  "${#MAX}" ] ; then
+							MAX="${RAWNUMBER}"
+						fi
+					done
+				if [ "${#MAX}" -gt "${#RENAME}" ] ; then
+					BASE="${MAX//[0-9]/0}"
+				else
+					BASE="${RENAME}"
+				fi
+				INPUT=""
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						NUMBER="${RAWNUMBER##+(0)}"
+						if [ "${NUMBER}" == "" ] ; then
+							TARGET="${INPUT}${BASE}${SUFFIX}"
+						else
+							TARGET="${INPUT}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${SUFFIX}"
+						fi
+						if [ "$3" ] ; then
+							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
+								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							fi
+						else
+							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+						fi
+					done
+#				echo "BASE - soubor stejný"
+			else
+				# VZOR + BASE z RENAME
+				VZOR="${RENAME%%+(0)}"
+				BASE="${RENAME#$VZOR}"
+				if [ "${#BASE}" == "1" ] ; then
+					INPUT=""
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						NUMBER="${RAWNUMBER##+(0)}"
+						if [ "${NUMBER}" == "" ] ; then
+							TARGET="${VZOR}0${SUFFIX}"
+						else
+							TARGET="${VZOR}${NUMBER}${SUFFIX}"
+						fi
+						if [ "$3" ] ; then
+							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
+								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							fi
+						else
+							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+						fi
+					done
+#					echo "NUMERIC - vzor"
+				else
+					INPUT=""
+					MAX="0"
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							echo "Soubor $i nevyhovuje zvolenému vzoru $1 přeskakuji jej" >> /dev/stderr
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						if [ "${#RAWNUMBER}" -gt  "${#MAX}" ] ; then
+							MAX="${RAWNUMBER}"
+						fi
+					done
+					ORIGBASE="${MAX//[0-9]/0}"
+					if [ "${#ORIGBASE}" -gt "${#BASE}" ] ; then
+						BASE="$ORIGBASE"
+						echo "ORIGBASE - vzor"
+					fi
+					#	Seznam setříděný podle délky řetězců $(ls -1 $1* | grep -E "([0-9])\1?$SUFFIX\$" | sed "s/$1//" | sort -n)
+					# for i in $(ls -1 | grep -E "([0-9])\1?$SUFFIX\$" | awk '{ print length, $0 }' | sort -n ) ; do
+					INPUT=""
+					for i in $(ls -1 $1*${SUFFIX} ) ; do
+						if [ "$INPUT" == "" ] ; then
+							INPUT="${i%%+([0-9${SUFFIX}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							continue
+						else
+							echo "zpracuji $i" > /dev/null
+						fi
+						STRING="${i#${INPUT}}"
+						RAWNUMBER="${STRING%${SUFFIX}}"
+						NUMBER="${RAWNUMBER##+(0)}"
+						if [ "${NUMBER}" == "" ] ; then
+							TARGET="${VZOR}${BASE}${SUFFIX}"
+						else
+							TARGET="${VZOR}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${SUFFIX}"
+						fi
+						if [ "$3" ] ; then
+							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
+								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							fi
+						else
+							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+						fi
+					done
+#					echo "VZOR BASE"
+				fi
+			fi
+		fi
+	fi
+}
+
+function fromxcf {
+	if [ "${1##*.}" == "xcf" ] ; then
+		TEMPORARY="/tmp/$WINDOWID$BASHPID"
+		mkdir $TEMPORARY
+		convert ${1} ${TEMPORARY}/test.png
+		pushd $TEMPORARY
+			BUNDLE=" "
+			for i in $(ls -cr -1) ; do
+				todjvu $i
+				BUNDLE="$BUNDLE ${i/.png/.djvu}"
+			done
+			djvm -c out.djvu $BUNDLE
+		popd
+		mv $TEMPORARY/out.djvu ./
+		rm -rf $TEMPORARY
+	fi
+}
+
+function help {
+	echo """[1mNápověda pro [1m[2m${0##*/}[0m :"""
+	case "$1" in
+		indirect) echo"""
+[1mVolba[0m
+         --indirect Volba, kterou lze změnit výchozí typ vícestránkového 
+                    DjVu svazku (bundeled)
+
+  Volbu je třeba aplikovat pokud chcete rozbalit stvávající DjVu svazek 
+  do podoby volného svazku, nebo pokud chcete při konverzi bitmapových
+  souborů rovnou sestavit DjVu svazek jako volný
+
+  Výhodou volného svazku je, že lze dodatečně upravovat jednotlivé stránky
+  jako samostatné DjVu soubory, aniž by je bylo nutné exportovat.
+
+  Pro finalizaci DjVu svazku je pak lepší svazek překonvertovat na typ
+  bundled, kdy je vše zabaleno v jednom souboru
+"""
+		;;
+		existed) echo """
+  Soubor $2 existuje. Pokud se má přepsat, musí být
+  uveden parametr -f (--force)
+"""
+		;;
+		dpi) echo"""
+[1mParametr[0m
+         --dpi  <[2mčíslo[22m> Hodnota DPI, která se má použít při zpracování obrázku.
+                               při konverzi. Optimální je zjistit hodnotu přímo ze vstupního
+                               obrázku. Před nastavením této hodnoty pro finální konverzi. lze vyzkoušet
+                               optimální nastavení na některém ze souborů s využitím parametru
+                               --test
+
+  Rozsah číselné hodnoty je od 72 do 6000 dpi. Výchozí hodnota 300 se použije 
+  v případě, že parametr --dpi není vůbec uveden.
+  Vliv dpi na zpracování obrazu..
+"""
+		;;
+		level) echo"""
+[1mParametr[0m
+         -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
+                               při konverzi. Před nastavením této hodnoty vyzkoušejte
+                               optimální nastavení na některém ze souborů a s parametrem
+                               --test
+
+  Kromě číselné hodnoty, která musí být menší než 200 lze úroveň ztrát
+  nastavit i pomocí některého z následujících parametrů - v případě že 
+  jich bude uvedeno víc, má prioritu poslední z nich.
+
+        --lossless     0 - žádné ztráty (default)
+        --clean        1 - ignorují se body o velikosti 1 pixelu
+        --lossy        100 - ignorují se plochy
+"""
+		;;
+		keywords) echo """
+[1mKlíčová slova[0m
+
+  Ke zpracování dojde pouze tehdy, mohou-li být akce avizované klíčovým slovem a příslušnými paramery realizovány. Za klíčovým slovem následuje pořadové číslo stránky v souboru, nebo její celý název, včetně přípony. Nikoliv pouze číslo stránky, které je součástí názvu vloženého DjVu souboru. 
+
+  delete {<num>|<name>}             - z DjVu svazku se odstraní stránka
+                                      identifikovaná svou pozicí čí názvem
+  insert <file> [<num>|<name>]      - do Djvu svazku se vloží soubor, jako
+                                      nová stránka. Pokud není soubor typu
+                                      DjVu, provede se jeho konverze.
+
+  POZOR: Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje,
+         Dojde při vložení k přejmenování souboru - za název se přidá
+         podtržítko a pořadové číslo výskytu.
+         K takové situaci může dojít také v případě, že je operace insert
+         zopakována se stejnými parametry. Pak se přidané číslo postupně
+         zvyšuje. Takto..
+              insert test01.jpg => test01.djvu
+              insert test01.jpg => test01_1.djvu
+              insert test01.jpg => test01_2.djvu
+              ...
+  Je-li uveden jako další parametr název, nebo pozice některé ze stránek
+  v DjVu svazku, tak se soubor vloží před tuto stránku. Pokud takový
+  parametr uveden není, vloží se stránka vždy na konec DjVu svazku.
+
+  forward {<num>|<name>} [<num>|<name>] - při této akci se stránka v DjVu
+          svazku, identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
+          před stránku, která jí předchází.
+          V případě, že jde o první stránku DjVu svazku se nestane nic.
+          Má-li se přesunout před jinou, než předchozí stránku, pak musí být
+          uvedeno jako další parametr pořadové číslo, nebo název této stránky
+
+  back  {<num>|<name>} [<num>|<name>] - při této akci se stránka v v rámci DjVu
+          svazku identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
+          za stránku, která jí předchází.
+          V případě, že jde o poslední stránku DjVu svazku se nestane nic.
+          Má-li se přesunout před jinou stránku, než tu která ji následuje
+          pak musí být uvedeno jako další parametr pořadové číslo, nebo
+          název stránky, za kterou se má přesunout.
+
+Akceptované rozsahy, nebo hodnoty:
+
+  forward - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
+  back    - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
+  delete  - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
+  rotate  - 0 left right 180
+"""
+		;;
+		rename) echo """
+[1mParametr[0m
+         -r|--rename  <[2mvzor[22m>  Vzor, podle jakého se mají přejmenovat
+                              dílčí DjVu soubory, ze kterých se pak bude
+                              sestavovat DjVu svazek.
+[4mPopis:[24m
+  Pomocí [2mvzoru[22m lze upravit názvy zkonvertovaných DjVu souborů
+  před jejich sestavením do DjVu svazku. [2mVzor[22m může být tvořen:
+    1, Pouze jednou, nebo více nulami - 000
+    2, Nebo řetězcem, následovaným nulami - soubor_00
+
+[3mPoznámka:[23m
+  Je-li uvedena pouze jedna nula, budou stránky očíslovány [4mnumericky[24m,
+  t.j. od čísla 1 dále. Je-li nul více, pak bude číslo interpretováno
+  jako [4mřetězec[24m. tedy 001 a dále. Pokud by číslování stránek přesáhlo
+  nastavený počet čísel, bude upraven dle maximálního čísla.
+
+[3mUkázkové vzory : a výsledný efekt..[23m
+   soubor-0000 : soubor-0001.djvu .. soubor-0123.djvu
+   soubor_0    : soubor_1.djvu    .. soubor_123.djvu
+   soubor000   : soubor0001.djvu  .. soubor1234.djvu
+"""
+			;;
+		suffix) echo """
+[1mParametr[0m
+         -s|--suffix  <[2msuffix[22m>  Přípona souborů, ze kterých se má sestavit 
+                                DjVu soubor.
+[4mPopis:[24m
+  [2mSuffix[22m je nutné uvést pouze v případě, že soubory s názvem odpovídajícím
+  vzorku dosud nebyly do DjVu zkonvertovány. Jinak se vždy předpokládá, že
+  se bude pracovat s již konvertovanými DjVu soubory.
+
+  Je-li [2msuffix[22m uveden, budou konvertovány soubory vyhovující vzorku.
+  Pokud některé z nich již konvertovány byly, tak se se fáze konverze
+  přeskočí. Pracuje se pak s již existujícím DjVu souborem.
+
+  Konvertovány jsou pouze soubory, které chybí. Kvalitu konverze lze
+  ovlivnit  dalšími parametry. Mají-li být soubory překonvertovány znovu,
+  lze si to vynutit parametrem -f (--force) a stávající soubory  přepsat.
+
+  Akceptované sufixy: 
+     djvu (default), jpg, gif, png, bmp, pnm, pbm, pgm.
+  Vícevrstvé soubory:
+     xcf, tiff, pdf 
+"""
+			;;
+		*) echo """
+[1mPoužití[0m ${0##/}:
+
+ [1m${0##/}[0m [volby] {vzorek|dir/|name} docin.djvu
+
+Parametry:
+    docin.djvu - vstupní djvu dokument se kterým se má pracovat
+    dir/       - jméno adresáře se liší od jména či vzorku lomítkem 
+    vzorek     - řetězec, kterým se mají vyselektovat soubory s nimiž se
+                 má pracovat - je to část jména souboru, která předchází
+                 jeho pořadovému číslu
+
+Volby: 
+  -h|--help     Nápověda
+  -f|--force
+  -i|--indirect Výsledekm zpracování bude volný svazek
+  -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
+  -d|--dsed Při práci s textovou vrstvou se bude pracovat s formátem
+              dsed (lisp)
+  -x|--xml  Při práci s textovou vrstvou se bude pracovat s formátem
+              xml
+  --pdf   Pro konverzi PDF souboru se použije nástroj pdf2djvu, který je
+  schopen převést i textovou vrstvu - pokud v PDF souboru existuje.
+
+Parametrické volby:
+   -n|--name    parametr zajistí, že se soubory přejmenují
+   -r|--rename  řetězec, který se má použít k pojmenování souborů místo 
+                stávajících názvů souborů při sestavení svazku 
+                soubor_0000 - soubor_0001.djvu .. soubor_0123.djvu
+                soubor_0 -    soubor_1.djvu ,, soubor_123.djvu
+
+Rozbalení do volného svazku:
+
+$0 [volby] dirname/ [index.djvu] [name] docin.djvu
+
+    dirname/ - jméno adresáře, který nemusí existovat
+    docin.djvu - vstupní DjVu soubor (musí existovat)
+
+Sbalení do svazku:
+
+$0 [volby] index.djvu bundle.djvu
+
+    bundle.djvu - jméno cílového svazku (nemusí existovat)
+
+Vytvoření nového svazku:
+
+$0 [volby] vzor docout.djvu
+
+    vzor - nesmí odpovídat jménu existujícího adresáře nebo souboru
+    docout.djvu - jméno cílového djvu svazku (typ určuje volba)
+    -b - 
+    -i - volný svazek
+    -n - parametr zajistí, že se soubory přejmenují
+
+Svazek sestavuje z djvu souborů s názvem vyhovujícím vzorku. Příklad:
+
+    $0 -i test novysoubor.djvu
+
+Vyhledá soubory test-1.djvu, test-2.djvu, ... a sestaví do volného svazku
+s indexovým souborem novysoubor.djvu.
+
+Pokud je uveden parametr -n, budou dílčí dokumenty přejmenovány tak, aby
+odpovídaly názvu svazku: novysoubor-001.djvu, novysoubor-002.djvu, ...
+
+"""
+		;;
+	esac
+}
+
+function todjvu {
+	if [ "${TEST}" == "yes" ] ; then
+		for i in ${ALG[@]} ; do 
+			didjvu encode -o "${2/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "$1"
+			getocr ${2/.djvu/.$i.djvu}
+		done
+	else
+		if [ -f "$1" ] ; then
+			didjvu encode -o "$2" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "$1"
+			getocr ${2}
+		fi
+	fi
+}
+
+function todotest {
+	for i in ${ALG[@]} ; do 
+		didjvu encode -o "${1%.*}-$i.djvu" -d 300 -m "$i" "$1"
+	done
+}
+
+function todoview {
+	for i in ${ALG[@]} ; do 
+		(djview ${1%.*}-$i.djvu &)
+	done
+}
+
+function todjvuclassic {
+    RANDOMKEY=$[ 8000 + $[ RANDOM % 1000 ]]
+    TEMP_DIR="${TEMPDIR}/$WINDOWID$BASHPID$RANDOMKEY"
+    mkdir $TEMP_DIR
+    TEMP_IMG="$TEMP_DIR/temp.ppm"
+    TEMP_MASK="$TEMP_DIR/mask.pbm"
+    DJVU_MASK="$TEMP_DIR/mask.djvu"
+
+    case ${1##*.} in
+        tiff|tif) KONVERT="${TIFFTOPNM}";;
+        png) KONVERT="${PNGTOPNM}";;
+        jpg) KONVERT="${JPEGTOPNM}" ;;
+    esac
+
+    $KONVERT $1 | tee $TEMP_IMG | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.${3-5} | ${PNMTOPLAINPNM} > $TEMP_MASK;
+    ${CJB2} -lossy -clean $TEMP_MASK $DJVU_MASK;
+    ${DJVUMAKE} ${1/.png/.djvu} Sjbz=$DJVU_MASK PPM=$TEMP_IMG;
+    getocr ${1/.png/.djvu}
+    rm -rf $TEMP_DIR
+}
+
+# Zpracování parametrů předaných při startu skriptu
+function main {
+while [ $# -gt 0 ]
+do case "$1" in
+	---indirect) if [ "$2" == "?" ] ; then
+				help indirect && exit 0
+			else
+				INDIRECT=yes
+			fi
+		;;
+	-d|--dsed) DSED=yes
+		;;
+	--no-thumbnail) THUMBNAIL=no
+		;;
+	--dpi) if [ "$2" -ge "72" ] || [ "$2" -le "6000" ] ; then
+				DPI="$2"
+				shift
+			else
+				help dpi && exit 0
+			fi
+		;;
+	-x|--xml) XML=yes
+		;;
+	-f|--force) FORCE=yes
+		;;
+    -h|--help) help && exit 0
+		;;
+	--clean) LEVEL="--loss-level=1"
+		;;
+	--lossy) LEVEL="--loss-level=100"
+		;;
+	--lossless) LEVEL="--loss-level=0"
+		;;
+	--loss-level) if [ "$2" -ge "0" ] || [ "$2" -lt "200" ] ; then
+				LEVEL="--loss-level=1"
+				shift
+			else
+				help level && exit 0
+			fi
+		;;
+	-m|--manual) [ -f $0.manual ] && less -R $0.manual
+		exit 0
+		;;
+	--pdf) PDF2DJVU=$(which pdf2djvu)
+[ ! ${PDF2DJVU} ] && echo 'Není nainstalován balík pdf2djvu, který je nezbytný pokud chcete provést přímou konverzi PDF souboru do DjVu formátu' && PDF2DJVU=false
+	;;
+	-r|--rename) case "$2" in
+		*0) RENAME="$2" && shift
+				;;
+		*) help rename && exit 0
+			;;
+		esac
+		;;
+	-s|--sufix) case "$2" in
+			jpg|jpeg|png|tiff|pnm|pbm|gif|djvu) SUFFIX=".$2" && shift
+				;;
+				*) help suffix && exit 0
+				;;
+			esac
+		;;
+	--test) TEST="yes"
+		;;
+	--test-conversion) ALG="abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction"
+		TEST="yes"
+		;;
+	--view) # Zobrazení souboru
+			echo "Ještě neimplementováno"
+			exit 100
+			if [ -f "$2" ] ; then
+				# Předává se soubor... obrázek či něco jiného?
+				todoview "${2}"
+			elif [ -d "$2" ] ; then
+				# Předává se adresář
+				echo "Ještě není implementováno"
+			else
+				$0 -h
+				exit 0
+			fi
+		;;
+	-a|--algorithm) [ "$2" == "?" ] && for i in ${ALG[@]} ; do 
+					echo "$i"
+				done && exit 0 || ALG="$2" ; shift
+		;;
+	-o|--ocr) if [ "$2" == "?" ] ; then
+				help ocr && exit 0
+			elif [ "${#2}" == "3" ] ; then
+				OCR="$2"
+				shift
+			else
+				OCR="ces"
+			fi
+			# aplikovat na soubor OCR
+			# je-li předaný djvu soubor - provede se pouze OCR
+			# je-li předaný obrázek - provede se předtím nejprve konverze..
+			# je
+		;;
+	*) if [ -f "${1}" ] ; then
+			# Předává se soubor...
+			# je-li to obrázek - konvertovat
+			# je-li to djvu zpracovat
+			## echo "zpracovávám podle parametrů"
+			## echo "mohou následovat další soubory"
+			case "${1##*.}" in
+				djvu|DJVU) echo "má-li první soubor příponu djvu.. ${2//[0-9]/}"
+					if [ "${2//[0-9,-]/}" == "" ] ; then
+						echo "Extrakce stránek vybraných číselným rozsahem z DjVu svazku"
+						exit 0
+					elif [ -f ${2} ] ; then
+						case ${2##*.} in
+							dsed|xml) echo "následuje textový soubor $2, nejspíš ho chci vložit do $1"
+							;;
+							djvu) echo "následuje djvu soubor $2"
+							;;
+							*) echo "Nedělám nic - nejspíš chyba.." && exit 7
+							;;
+						esac
+					else
+						# nejspíš se předá klíčové slovo
+						case ${2} in
+							forward) echo """stránka identifikovaná číslem, nebo názvem se přesune kupředu.
+							Je-li to stránka existující v souboru, přesouvá se tato stránka
+							je-li to stránka neexistující pak se vloží na začátek souboru
+							jako další parametr je akceptáno číslo, nebo název stránky  """
+							;;
+								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+								forwardpage ${1} ${3} ${4}
+								exit 0
+							back) echo """stránka identifikovaná číslem, nebo názvem se přesune vzad.
+							Je-li to stránka existující v souboru, přesouvá se tato stránka
+							je-li to stránka neexistující pak se vloží na konec souboru
+							jako další parametr je akceptáno číslo, nebo název stránky - za kterou se má vložit"""
+								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+								backpage ${1} ${3} ${4}
+								exit 0
+							;;
+							rotate) rotatepage ${1} ${3} ${4}
+								exit 0
+							;;
+							delete) deletepage ${1} ${3}
+								exit 0
+							;;
+							insert) echo """soubor se na konec souboru. Jako další parametr je akceptáno číslo, nebo název stránky, pokud se má soubor vložit na jinou, než poslední pozici """
+								if [ -f ${3} ] ; then
+									[ "${#ALG[@]}" == "1" ] || exit 32
+									TEMPFILE="$TEMPDIR/${3%.*}.djvu"
+									todjvu ${3} ${TEMPFILE}
+									if [ $? -gt "0" ] ; then
+										echo "Soubor ${3} se nepodařilo zkonvertovat do souboru ${TEMPFILE}"
+										exit 33
+									else
+										insertpage ${1} ${TEMPFILE} ${4}
+									fi
+								else
+									echo "Vložit lze pouze existující djvu soubor"
+									exit 1
+								fi
+								exit 0
+							;;
+							*) help keywords && exit 0
+						esac
+					fi
+				echo '''Pokud následuje djvu soubor'''
+				echo '''Pokud následuje adresář'''
+				echo '''to je existující soubor typu bundle a:
+				- nenásleduje žádný další existující soubor typu djvu, nebo adresář
+				  a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
+				- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
+					- djvu soubor, má se připojit
+					- xml soubor, má se vložit
+					- soubor typu dsed má se zpracovat
+					- jiný soubor - obrázek, který se má převést a vložit
+				'''
+				
+				;;
+				xcf|XCF) echo "má-li první soubor příponu xcf"
+				;;
+				xml|XML) echo "má-li první soubor příponu xml"
+				;;
+				*) echo "má-li příponu ${1##*.} soubor $1 něco něco jiného"
+				;;
+			esac
+		elif [ -d "${1}" ] ; then
+			# Předává se adresář
+				echo "Je-li toto existující adresář, tak to může znamenat, že se bude dále pracovat v něm, nebo s ním - záleží na dalším parametru"
+				DIRECTORY="${1:0:$((${#1}-1))}"
+		elif [ "${2}" ] ; then
+			# Sem se spadne, pokud předcházející položka vede na neexistující soubor
+			if [ "${1:$((${#1}-1)):1}" == "/" ] ; then
+				if [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
+					echo "Rozbalení DjVu svazku : První položka je jméno adresáře a druhá DjVu soubor, který se má rozbalit"
+					djvuunbundle "$1" "$2" 
+					exit 0
+				else
+					if [ -f "{2}" ] ; then
+						echo "? : První položka je jméno adresáře a druhá jméno existujícího souboru, který není typu DjVu"
+					else
+						echo "? : První položka je jméno adresáře a druhá řetězec - pravděpodobně bude následovat položka třetí... to mohl být vzorek"
+					fi
+				fi
+			elif [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
+				#echo "Vytvoření DjVu svazku - konverze, OCR, textové soubory, náhled, integrace a nakonec sestavení"
+				# $1 vzorek
+				# $2 jméno budoucího DjVu svazku
+				# $2 číslo souboru, který se má zpracovat (není-li uvedeno, zpracují se všechny)
+				djvubundle "$1" "$2" "$3"
+				exit 0
+			else
+				# Sem to propadne, když soubor neexistuje.. jméno vzorku...
+				case "${2:$((${#2}-3))}" in
+					tiff) echo "Soubor $1 se bude exportovat do souboru $2"
+						;;
+					pdf) echo "Soubor $1 se bude exportovat do souboru $2"
+						;;
+					xcf) echo "za řetězcem následuje jméno xcf souboru, takže pokud neexistuje $DIRECTORY, je $1 - jméno budoucího djvu souboru a $2 jméno vícevrstvého xcf souboru."
+						echo "zavolat funkci pro konverzi xcf2djvu a skončit"
+						exit 0
+						;;
+					mng) echo "Soubor $1 se bude exportovat do souboru $2"
+						;;
+					*) echo "sem nic ${1} - ${2} - ${2:$((${#2}-3))}"
+						exit  200
+						;;
+				esac
+			fi
+		else
+			$0 -h
+			exit 0
+		fi
+	;;
+	esac
+	shift
+done
+}
+
+main $@
+
+exit 0

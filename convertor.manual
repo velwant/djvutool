@@ -1,0 +1,80 @@
+[1mNápověda..
+
+Vložení znaku ESC - Ctrl+Shift+u
+Formátování výstupu
+ESC[<číslo>m
+
+ convertor - je konzolová nadstavba nad standardními nástroji pro práci
+             s DjVu a dalšími utilitami.
+
+Co umí?
+
+  * odstraňovat stránky z DjVu svazku na základě jejich jména nebo pořadí
+  * přesouvat DjVu stránky v rámci svazku
+  * vkládat do DjVu svazku stránky z nových souborů
+  * konvertovat bitmapové soubory do djvu s aplikací OCR
+  * exportovat a importovat textovou vrstvu DjVu stránek 
+  * dekompletovat a kompletovat DjVu svazek
+  * přečíslovávat a přejmenovávat stránky DjVu souboru na základě vzorku
+
+
+[3mPoužití ${0##/}:
+
+ ${0##/} [volby] {vzorek|dir/|name} docin.djvu
+
+[1mParametry:
+    docin.djvu - vstupní djvu dokument se kterým se má pracovat
+    dir/       - jméno adresáře se liší od jména či vzorku lomítkem 
+    vzorek     - řetězec, kterým se mají vyselektovat soubory s nimiž se
+                 má pracovat - je to část jména souboru, která předchází
+                 jeho pořadovému číslu
+
+Volby: 
+  -h|--help     Nápověda
+  -f|--force
+  -i|--indirect Výsledekm zpracování bude volný svazek
+  -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
+  -d|--dsed Při práci s textovou vrstvou se bude pracovat s formátem
+              dsed (lisp)
+  -x|--xml  Při práci s textovou vrstvou se bude pracovat s formátem
+              xml
+
+Parametrické volby:
+   -n|--name    parametr zajistí, že se soubory přejmenují
+   -r|--rename  řetězec, který se má použít k pojmenování souborů místo 
+                stávajících názvů souborů při sestavení svazku 
+                soubor_0000 - soubor_0001.djvu .. soubor_0123.djvu
+                soubor_0 -    soubor_1.djvu ,, soubor_123.djvu
+
+Rozbalení do volného svazku:
+
+$0 [volby] dirname/ [index.djvu] [name] docin.djvu
+
+    dirname/ - jméno adresáře, který nemusí existovat
+    docin.djvu - vstupní DjVu soubor (musí existovat)
+
+Sbalení do svazku:
+
+$0 [volby] index.djvu bundle.djvu
+
+    bundle.djvu - jméno cílového svazku (nemusí existovat)
+
+Vytvoření nového svazku:
+
+$0 [volby] vzor docout.djvu
+
+    vzor - nesmí odpovídat jménu existujícího adresáře nebo souboru
+    docout.djvu - jméno cílového djvu svazku (typ určuje volba)
+    -b - 
+    -i - volný svazek
+    -n - parametr zajistí, že se soubory přejmenují
+
+Svazek sestavuje z djvu souborů s názvem vyhovujícím vzorku. Příklad:
+
+    $0 -i test novysoubor.djvu
+
+Vyhledá soubory test-1.djvu, test-2.djvu, ... a sestaví do volného svazku
+s indexovým souborem novysoubor.djvu.
+
+Pokud je uveden parametr -n, budou dílčí dokumenty přejmenovány tak, aby
+odpovídaly názvu svazku: novysoubor-001.djvu, novysoubor-002.djvu, ...
