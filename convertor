@@ -18,10 +18,10 @@ shopt -s extglob
 # - výchozí algoritmus djvu; testovací konverze pro všechny algoritmy se
 #   provede pouze je-li uveden parametr --test-conversion
 # - implementována rotace stránky
+# - implementovány přesuny stránek (akce forward a back)
 
 # ToDo
 # doplnit nápovědu k rotaci stránky (akce rotate)
-# dodělat přesuny stránek
 # generuje se THUMBNAIL soubor, i když je hotový - divné, měl by jen když exportuje xml
 # opravit volby --algoritmus a --view
 NAME="convertor"
@@ -396,24 +396,17 @@ function backpage {
 	AORDER=$?
 	A=$(namepage $1 $AORDER)
 	B=$(namepage $1 $3)
-	echo "Přesouvám $A za $B"
-	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
+#	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
 	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-	# Rozbaleno.. mohu začít mazat..
 	deletepage ${1} ${AORDER}
 	if [ "${3}" == "" ] ; then
-		echo "Přesouvám $2 o stránku zpět.." >> /dev/stderr
 		insertpage ${1} "${TEMPDIR}/${A}" $((AORDER+1))
 	else
-		# Nejprve musím zjistit aktuální pozici B
 		identifypage $1 $B
 		BORDER=$?
 		if [ ${#B} -eq "0" ] ; then
-#			echo "Vkládám stránku $A na původní pozici, protože předaný indentifikační parametr nové pozice je neplatný" >> /dev/stderr
 			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
 		else
-			# A pak mohu začít vkládat..
-#			echo "Mohu začít vkládat" >> /dev/stderr
 			insertpage ${1} "${TEMPDIR}/${A}" $((BORDER+1))
 		fi
 	fi
@@ -728,52 +721,111 @@ function help {
         --lossy        100 - ignorují se plochy
 """
 		;;
-		keywords) echo """
-[1mKlíčová slova[0m
+		keywords-set) echo """
+  <svazek> set <key> ... - Do metainformací Djvu svazku vloží klíč s příslušným obsahem
 
-  Ke zpracování dojde pouze tehdy, mohou-li být akce avizované klíčovým slovem a příslušnými paramery realizovány. Za klíčovým slovem následuje pořadové číslo stránky v souboru, nebo její celý název, včetně přípony. Nikoliv pouze číslo stránky, které je součástí názvu vloženého DjVu souboru. 
+Příklad:
+   svazek.djvu set author 'John Doe'
+"""
+		;;
+		keywords-print) echo """
+  <svazek> print [[<num>|<name>] <key>] Vypíše obsah klíče z metainformací Djvu svazku. Bez klíčového slova vypíše všechny
 
-  delete {<num>|<name>}             - z DjVu svazku se odstraní stránka
-                                      identifikovaná svou pozicí čí názvem
-  insert <file> [<num>|<name>]      - do Djvu svazku se vloží soubor, jako
-                                      nová stránka. Pokud není soubor typu
-                                      DjVu, provede se jeho konverze.
+Příklad:
+   svazek.djvu print author
+"""
+		;;
+		keywords-rotate) echo """
+  <svazek> rotate {<num>|<name>} [<key>] Otočení stránky Djvu svazku.
+
+Příklad:
+   svazek.djvu rotate 1 left
+"""
+		;;
+		keywords-export) echo """vytvoření xml, dsed a náhledu
+  <svazek>  export {<num>|<name>} [<vzor>] - z Djvu svazku vyexportuje soubory, potřebné pro zpracování textové vrstvy (default je xml)
+  <svazek> export [<xmlfile>|<dsedfile>] - Vyexportuje kompletní textovou vrstvu pro celý DjVu dokument, tedy včetně XMP tagů
+"""
+		;;
+		keywords-import) echo """Import xml souboru
+  <svazek> import {<num>|<name>} [<xmlfile>|<dsedfile>] - z Djvu svazku naimportuje upravenou textovou vrstvu (default je xml) 
+  <svazek> import [<xmlfile>|<dsedfile>] - Naimportuje soubory skryté textové vrstvy pro celý DjVu dokument, tedy včetně XMP
+  
+"""
+		;;
+		keywords-insert) echo """
+  Vložení nové stránky do Djvu svazku. Je-li na vstupu nekonvertovovaný
+  obrázek, dojde ke konverzi. Není-li uvedeno pořadové číslo, nebo název
+  stránky před kterou se má stránka vložit, je připojena na konec DjVu svazku
+
+[1mPoužití[0m
+
+  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
+
+         num  - pořadové číslo stránky
+         name - jméno stránky
+         file - jméno DjVu stránky, nebo skenu
 
   POZOR: Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje,
          Dojde při vložení k přejmenování souboru - za název se přidá
          podtržítko a pořadové číslo výskytu.
          K takové situaci může dojít také v případě, že je operace insert
          zopakována se stejnými parametry. Pak se přidané číslo postupně
-         zvyšuje. Takto..
+         zvyšuje. Takto:
+
               insert test01.jpg => test01.djvu
               insert test01.jpg => test01_1.djvu
               insert test01.jpg => test01_2.djvu
               ...
-  Je-li uveden jako další parametr název, nebo pozice některé ze stránek
-  v DjVu svazku, tak se soubor vloží před tuto stránku. Pokud takový
-  parametr uveden není, vloží se stránka vždy na konec DjVu svazku.
+"""
+		;;
+		keywords-delete) echo """
+  Odstranění stránky z DjVu svazku
 
-  forward {<num>|<name>} [<num>|<name>] - při této akci se stránka v DjVu
+[1mPoužití[0m
+
+  [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
+
+         num  - pořadové číslo stránky
+         name - jméno stránky
+"""
+		;;
+		keywords-forward) echo """
+  <svazek> forward {<num>|<name>} [<num>|<name>] - při této akci se stránka v DjVu
           svazku, identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
           před stránku, která jí předchází.
           V případě, že jde o první stránku DjVu svazku se nestane nic.
           Má-li se přesunout před jinou, než předchozí stránku, pak musí být
           uvedeno jako další parametr pořadové číslo, nebo název této stránky
-
-  back  {<num>|<name>} [<num>|<name>] - při této akci se stránka v v rámci DjVu
+"""
+		;;
+		keywords-back) echo """
+  <svazek>  back {<num>|<name>} [<num>|<name>] - při této akci se stránka v v rámci DjVu
           svazku identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
           za stránku, která jí předchází.
           V případě, že jde o poslední stránku DjVu svazku se nestane nic.
           Má-li se přesunout před jinou stránku, než tu která ji následuje
           pak musí být uvedeno jako další parametr pořadové číslo, nebo
           název stránky, za kterou se má přesunout.
+"""
+		;;
+		keywords) echo """
+  [1m${0##*/}[0m [volby] {DjVu svazek} <keyword> [?|...]
 
-Akceptované rozsahy, nebo hodnoty:
+  [1m      keyword - popis akce[0m
 
-  forward - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
-  back    - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
-  delete  - 1 až pořadí poslední stránky v souboru, nebo jméno stránky
-  rotate  - 0 left right 180
+         delete - odstraní stránku ze svazku
+         insert - vloží novou stránku do svazku
+  forward, back - přesune stránku v rámci svazku
+         rotate - mění orientaci vybrané stránky
+            set - nastavuje metainformace DjVu stránek a svazku
+          print - vypisuje metainformace z DjVu stránek a svazku
+         export - exportuje djvu stránku, dsed nebo xml soubor s obsahem
+                  textové vrstvy, náhled stránky v png, atp.
+         import - importuje do DjVu stránky či svazku obsah skryté textové
+                  vrstvy z xml stránky
+
+[2mPoznámka:[0m Pro podrobnější nápovědu uveďte za klíčovým slovem znak ? 
 """
 		;;
 		rename) echo """
@@ -1029,19 +1081,10 @@ do case "$1" in
 			else
 				OCR="ces"
 			fi
-			# aplikovat na soubor OCR
-			# je-li předaný djvu soubor - provede se pouze OCR
-			# je-li předaný obrázek - provede se předtím nejprve konverze..
-			# je
 		;;
 	*) if [ -f "${1}" ] ; then
-			# Předává se soubor...
-			# je-li to obrázek - konvertovat
-			# je-li to djvu zpracovat
-			## echo "zpracovávám podle parametrů"
-			## echo "mohou následovat další soubory"
 			case "${1##*.}" in
-				djvu|DJVU) echo "má-li první soubor příponu djvu.. ${2//[0-9]/}"
+				djvu|DJVU) # echo "má-li první soubor příponu djvu.. ${2//[0-9]/}"
 					if [ "${2//[0-9,-]/}" == "" ] ; then
 						echo "Extrakce stránek vybraných číselným rozsahem z DjVu svazku"
 						exit 0
@@ -1055,31 +1098,47 @@ do case "$1" in
 							;;
 						esac
 					else
-						# nejspíš se předá klíčové slovo
-						case ${2} in
-							forward) echo """stránka identifikovaná číslem, nebo názvem se přesune kupředu.
-							Je-li to stránka existující v souboru, přesouvá se tato stránka
-							je-li to stránka neexistující pak se vloží na začátek souboru
-							jako další parametr je akceptáno číslo, nebo název stránky  """
+						# Keywords
+						case "${2}" in
+							export) [ ${3} == "?" ] && help keywords-export && exit 0
+								echo "vytvoření xml, dsed a náhledu"
+								echo "To Do"
+								exit 0
+							;;
+							import) [ ${3} == "?" ] && help keywords-import && exit 0
+								echo "vložení xml"
+								echo "ToDo"
+								exit 0
+							;;
+							set) [ ${3} == "?" ] && help keywords-set && exit 0
+								echo "vložení metainformace"
+								echo "ToDo"
+								exit 0
+							;;
+							print) [ ${3} == "?" ] && help keywords-print && exit 0
+								echo "Výpis metainformace"
+								echo "ToDo"
+								exit 0
+							;;
+							forward) [ ${3} == "?" ] && help keywords-forward && exit 0
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								forwardpage ${1} ${3} ${4}
 								exit 0
 							;;
-							back) echo """stránka identifikovaná číslem, nebo názvem se přesune vzad.
-							Je-li to stránka existující v souboru, přesouvá se tato stránka
-							je-li to stránka neexistující pak se vloží na konec souboru
-							jako další parametr je akceptáno číslo, nebo název stránky - za kterou se má vložit"""
+							back) [ ${3} == "?" ] && help keywords-back && exit 0
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								backpage ${1} ${3} ${4}
 								exit 0
 							;;
-							rotate) rotatepage ${1} ${3} ${4}
+							rotate)  [ ${3} == "?" ] && help keywords-rotate && exit 0
+								rotatepage ${1} ${3} ${4}
 								exit 0
 							;;
-							delete) deletepage ${1} ${3}
+							delete)  [ ${3} == "?" ] && help keywords-delete && exit 0
+								deletepage ${1} ${3}
 								exit 0
 							;;
-							insert) echo """soubor se na konec souboru. Jako další parametr je akceptáno číslo, nebo název stránky, pokud se má soubor vložit na jinou, než poslední pozici """
+							insert) [ ${3} == "?" ] && help keywords-insert && exit 0
 								if [ -f ${3} ] ; then
 									[ "${#ALG[@]}" == "1" ] || exit 32
 									TEMPFILE="$TEMPDIR/${3%.*}.djvu"
