@@ -379,7 +379,7 @@ function forwardpage {
 #			if [ ${BORDER} == "1" ] ; then
 #				insertpage ${1} "${TEMPDIR}/${A}" $AORDER
 #			else
-				insertpage ${1} "${TEMPDIR}/${A}" $((BORDER-1))
+				insertpage ${1} "${TEMPDIR}/${A}" $BORDER
 #			fi
 #			echo "Mohu začít vkládat" >> /dev/stderr
 #			insertpage ${1} "${TEMPDIR}/${A}" $BORDER
@@ -414,7 +414,7 @@ function backpage {
 		else
 			# A pak mohu začít vkládat..
 #			echo "Mohu začít vkládat" >> /dev/stderr
-			insertpage ${1} "${TEMPDIR}/${A}" $BORDER
+			insertpage ${1} "${TEMPDIR}/${A}" $((BORDER+1))
 		fi
 	fi
 }
@@ -1061,10 +1061,10 @@ do case "$1" in
 							Je-li to stránka existující v souboru, přesouvá se tato stránka
 							je-li to stránka neexistující pak se vloží na začátek souboru
 							jako další parametr je akceptáno číslo, nebo název stránky  """
-							;;
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								forwardpage ${1} ${3} ${4}
 								exit 0
+							;;
 							back) echo """stránka identifikovaná číslem, nebo názvem se přesune vzad.
 							Je-li to stránka existující v souboru, přesouvá se tato stránka
 							je-li to stránka neexistující pak se vloží na konec souboru
