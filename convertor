@@ -19,10 +19,12 @@ shopt -s extglob
 #   provede pouze je-li uveden parametr --test-conversion
 # - implementována rotace stránky
 # - implementovány přesuny stránek (akce forward a back)
+# - implementováno generování náhledů do exportu
+# - upraveny funkce pro export náhledů a souborů textové vrstvy
 
 # ToDo
+# - implementovat import
 # doplnit nápovědu k rotaci stránky (akce rotate)
-# generuje se THUMBNAIL soubor, i když je hotový - divné, měl by jen když exportuje xml
 # opravit volby --algoritmus a --view
 NAME="convertor"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
@@ -34,7 +36,7 @@ INDIRECT="${INDIRECT=no}"
 FORCE="no"
 RENAME="no"
 SUFFIX=".djvu"
-THUMBNAIL="${INDIRECT=yes}"
+THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INDIRECT=no}"
 ALG="${INDIRECT=djvu}"
 
@@ -68,6 +70,10 @@ TEMPDIR=$(mktemp -d -p /tmp ${NAME}-XXX) || exit 1
 #   * feh      ( http://feh.finalrewind.org/ )
 #   * exiftool ( http://www.sno.phy.queensu.ca/~phil/exiftool ) in Debian package: libimage-exiftool-perl 
 #   * yad      ( http://sourceforge.net/projects/yad-dialog )
+REALPATH=$(which realpath)
+[ ! ${REALPATH} ] && exit 1
+REALPATH="$REALPATH -e "
+
 DIDJVU=$(which didjvu)
 [ ! ${DIDJVU} ] && echo 'Není nainstalován balík didjvu, nebude možné aplikovat pokročilé algoritmy pro separaci popředí při konverzi do DjVu' >> /dev/stderr && DIDJVU=false
 OCRODJVU=$(which ocrodjvu)
@@ -139,42 +145,224 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+function exportpage {
+	# $1 - svazek
+	# $2 - identifikátor
+	# $3 - cíl (adresář)
+	if [ ${#3} -eq "0" ] ; then
+		echo "Není target - nastavím cíl podle lokálního adresáře" >> /dev/stderr
+		TARGETDIR=$(${REALPATH} ./)
+	elif [ -f "${3}" ] ; then
+#		echo "Soubor. Vytáhnout cestu k němu.." >> /dev/stderr
+		TARGET=$(${REALPATH} ${3})
+		TARGETDIR=${TARGET%/*}
+	elif [ -d "${3}" ] ; then
+#		echo "Adresář - použiju ho" >> /dev/stderr
+		TARGETDIR=$(${REALPATH} ${3})
+	else
+#		echo "Cíl - $3 mkdir -p $3" >> /dev/stderr
+		mkdir -p $3
+		if [ $? == "0" ] ; then
+			TARGETDIR=$(${REALPATH} ${3})
+		else
+			echo "Cílový adresář $3 nelze vytvořit"
+			exit 1
+		fi
+	fi
+	echo "Cíl - $TARGETDIR" >> /dev/stderr
+	case "$2" in
+		all) # echo "export všeho"
+			if [ ${XML} == "yes" ] ; then
+				exportxml ${1} ${TARGETDIR}
+			fi
+			if [ ${DSED} == "yes" ] ; then
+				exportdsed ${1} ${TARGETDIR}
+			fi
+		;;
+		*) identifypage ${1} ${2}
+			NAMEPAGE=$(namepage ${1} $?)
+			if [ "${NAMEPAGE}" == "" ] ; then
+				echo "Neplatný identifikátor stránky $2"
+				exit 1
+			else
+				[ ${XML} == "yes" ] && THUMBNAIL=yes
+				# echo "export stránky $NAMEPAGE - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE"
+				if [ ${XML} == "yes" ] ; then
+					exportxml ${1} ${2} ${TARGETDIR}
+				fi
+				if [ ${DSED} == "yes" ] ; then
+					exportdsed ${1} ${2} ${TARGETDIR}
+				fi
+			fi
+		;;
+	esac
+	exit 0
+}
+
 
 function exportdsed {
-	TEXT=$(${DJVUTXT} ${1})
-	if [ "${TEXT}" ] ; then
-		${DJVUSED} ${1} -e output-all > ${1/.djvu/.dsed}
-		return 0
-	else
-		echo "Stránka $1 žádný text neobsahuje; buďto na ni nebylo aplikováno OCR, nebo se ho nepodařilo rozpoznat" >> /dev/stderr
-		return 1
-	fi
+	# $1 - svazek
+	# $2 - strana
+	# $3 - adresář
+	case "${#@}" in
+		3) # echo "Adresář je předaný"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+			if [ -f "${3}/${NAMEPAGE/.djvu/.dsed}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ${3}/${NAMEPAGE/.djvu/.dsed}
+			else
+				${DJVUSED} ${1} -e "select $PAGE; output-all" > ${3}/${NAMEPAGE/.djvu/.dsed}
+			fi
+		;;
+		2) if [ -d ${2} ] ; then
+			# echo "Předaný je adresář, bude do něj exportován celý obsah"
+			if [ -f "${2}/${1/.djvu/.dsed}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e output-all > ${2}/${1/.djvu/.dsed}
+			else
+				${DJVUSED} ${1} -e output-all > ${2}/${1/.djvu/.dsed}
+			fi
+		else
+			#echo  "Předaný je název stránky, nebo její pořadí, exportuje se do ./"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+			if [ -f "./${NAMEPAGE/.djvu/.dsed}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ./${NAMEPAGE/.djvu/.dsed}
+			else
+				${DJVUSED} ${1} -e "select $PAGE; output-all" > ./${NAMEPAGE/.djvu/.dsed}
+			fi
+		fi
+		;;
+		1) # echo "Předaný je celý subor, exportuje se celý obsah do ./"
+			if [ -f "./${1/.djvu/.dsed}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
+			else
+				${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
+			fi
+		;;
+		*) echo "Z nějakého důvodu nelze provést export dsed souboru" >> /dev/stderr && exit 1
+		;;
+	esac
 }
 
 function exportxml {
-	TEXT=$(${DJVUTXT} ${1})
-	if [ "${TEXT}" ] ; then
-		${DJVUTOXML} ${1} ${1/.djvu/.xml}
-		return 0
-	else
-		echo "Stránka $1 žádný text neobsahuje; buďto na ni nebylo aplikováno OCR, nebo se ho nepodařilo rozpoznat" >> /dev/stderr
-		return 1
-	fi
+	# $1 - svazek
+	# $2 - strana
+	# $3 - adresář
+	case "${#@}" in
+		3) # echo "Adresář je předaný"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+			# echo "$NAMEPAGE" >> /dev/stderr
+			if [ -f "${3}/${NAMEPAGE/.djvu/.xml}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
+			else
+				${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
+				thumbnail ${1} ${PAGE} ${3}
+			fi
+		;;
+		2) if [ -d ${2} ] ; then
+			# echo "Předaný je adresář, bude do něj exportován celý obsah"
+				if [ -f "${2}/${1/.djvu/.xml}" ] ; then
+					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
+				else
+					${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
+					thumbnail ${1} ${2}
+				fi
+			else
+			# echo  "Předaný je název stránky, nebo její pořadí, exportuje se do ./"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+				if [ -f "./${NAMEPAGE/.djvu/.xml}" ] ; then
+					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
+				else
+					${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
+					thumbnail ${1} ${PAGE} ./
+				fi
+			fi
+		;;
+		1) #echo "Předaný je celý subor, exportuje se celý obsah do ./"
+			if [ -f "./${1/.djvu/.xml}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ./${1/.djvu/.xml}
+			else
+				${DJVUTOXML} ${1} ./${1/.djvu/.xml}
+				thumbnail ${1} ./
+			fi
+		;;
+		*) echo "Z nějakého důvodu nelze provést export xml souboru" >> /dev/stderr && exit 1
+		;;
+	esac
 }
 
 function thumbnail {
 	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
-	# Náhled se generuje buď samostatně, nebo současně xml výstupem
-	# Znovu se generuje pouze za předpokladu, že je nastaven parametr FORCE
-	if [ -f "${1/.djvu/.png}" ] ; then
-		if [ ${FORCE} != "no" ] ; then
-			${DDJVU} --format=pnm ${1} | ${PNMTOPNG} > ${1/.djvu/.png}
-#			${DDJVU} --format=tiff "$1" "${1/.djvu/.tiff}" && ${CONVERT} "${1/.djvu/.tiff}" "${1/.djvu/.png}" && rm "${1/.djvu/.tiff}"
+	# Náhled se znovu exportuje pouze za předpokladu, že je současně uvedena volba --force
+	# $1 - svazek
+	# $2 - adresář nebo identifikátor stránky
+	# $3 - adresář
+	case "${#@}" in
+		3) # echo "Předán je identifikátor i adresář, náhled stránky $2 se bude exportovat do $3"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+			if [ -f "${3}/${NAMEPAGE/.djvu/.png}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
+			else
+				${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
+			fi
+		;;
+		2) if [ -d ${2} ] ; then
+			# echo "Předaný je adresář, náhledy se budou exportovat do $2"
+			lastpage ${1}
+			PAGES=$?
+			NUMPAGE=1
+			while [ ${PAGES} -gt "0" ] ; do
+				identifypage ${1} ${NUMPAGE}
+				PAGE=$?
+				NAMEPAGE=$(namepage ${1} $PAGE)
+				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
+					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
+				else
+					${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
+				fi
+				NUMPAGE=$((NUMPAGE + 1))
+				PAGES=$((PAGES - 1))
+			done
+		else
+			# echo  "Předaný je identifikátor stránky, náhled se exportuje do ./"
+			identifypage ${1} ${2}
+			PAGE=$?
+			NAMEPAGE=$(namepage ${1} $PAGE)
+			if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
+				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+			else
+				${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+			fi
 		fi
-	else
-		${DDJVU} --format=pnm ${1} | ${PNMTOPNG} > ${1/.djvu/.png}
-#		${DDJVU} --format=tiff "$1" "${1/.djvu/.tiff}" && ${CONVERT} "${1/.djvu/.tiff}" "${1/.djvu/.png}" && rm "${1/.djvu/.tiff}"
-	fi
+		;;
+		1) # echo "Předaný je celý subor $1, náhledy stránek se ukládají do ./"
+			lastpage ${1}
+			PAGES=$?
+			NUMPAGE=1
+			while [ ${PAGES} -gt "0" ] ; do
+				identifypage ${1} ${NUMPAGE}
+				PAGE=$?
+				NAMEPAGE=$(namepage ${1} $PAGE)
+				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
+					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+				else
+					${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+				fi
+				NUMPAGE=$((NUMPAGE + 1))
+				PAGES=$((PAGES - 1))
+			done
+		;;
+		*) echo "Z nějakého důvodu nelze provést export náhledových souborů" >> /dev/stderr && exit 1
+		;;
+	esac
 }
 
 function inserttext {
@@ -333,9 +521,9 @@ function rotatepage {
 			;;
 			left) ${DJVUSED} -e "select $PAGE; set-rotation +1; save" $1
 			;;
-			right) ${DJVUSED} -e "\'select $PAGE; set-rotation -1" $1
+			right) ${DJVUSED} -e "select $PAGE; set-rotation -1" $1
 			;;
-			180) ${DJVUSED} -e "\'select $PAGE; set-rotation +2" $1
+			180) ${DJVUSED} -e "select $PAGE; set-rotation +2" $1
 			;;
 			*) echo "Rotace akceptuje absolutní hodnoty 0, 1 (vpravo), 2 (vzhůru nohama), 3 (vlevo) a left (pro otáčení stránky o 90° směrem doleva) a right (pro otáčení stránky o 90° směrem doprava). Každá jiná hodnota parametru vede k tomu, že je rotace ignorována."
 			;;
@@ -726,6 +914,13 @@ function help {
 
 Příklad:
    svazek.djvu set author 'John Doe'
+[1mPoužití[0m
+
+  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
+
+         num  - pořadové číslo stránky
+         name - jméno stránky
+         file - jméno DjVu stránky, nebo skenu
 """
 		;;
 		keywords-print) echo """
@@ -733,6 +928,13 @@ Příklad:
 
 Příklad:
    svazek.djvu print author
+[1mPoužití[0m
+
+  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
+
+         num  - pořadové číslo stránky
+         name - jméno stránky
+         file - jméno DjVu stránky, nebo skenu
 """
 		;;
 		keywords-rotate) echo """
@@ -740,17 +942,66 @@ Příklad:
 
 Příklad:
    svazek.djvu rotate 1 left
+[1mPoužití[0m
+
+  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
+
+         num  - pořadové číslo stránky
+         name - jméno stránky
+         file - jméno DjVu stránky, nebo skenu
 """
 		;;
 		keywords-export) echo """vytvoření xml, dsed a náhledu
-  <svazek>  export {<num>|<name>} [<vzor>] - z Djvu svazku vyexportuje soubory, potřebné pro zpracování textové vrstvy (default je xml)
-  <svazek> export [<xmlfile>|<dsedfile>] - Vyexportuje kompletní textovou vrstvu pro celý DjVu dokument, tedy včetně XMP tagů
+  Export náhledu a textového obsahu DjVu souboru do externích souborů.
+
+[1mSyntaxe[0m
+
+  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all} [<dir>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         dir  - adresář do kterého má být výstup uložen
+
+[3mPoznámka:[23m
+  Je-li místo pořadového čísla stránky, nebo jejího názvu, uvedeno all tak
+  se bude exportovat obsah textových vrstev celého DjVu svazku.
+  Formát exportovaného souboru je ve výchozím stavu .xml, ale s využitím 
+  volby -d (--dsed) lze textovou vrstvu exportovat i ve formátu pro djvused.
+  Je-li uveden také parametr --thumb, bude vyexportován i náhled v .png
+  Není-li uveden adresář, je použit aktuální adresář. Pro pojmenování souborů
+  je využit název stránky v takové podobě, jak je uložen v DjVu svazku.
+  Pokud již soubory se stejným názvem v adresáři existují, lze si vynutit
+  jejich přepsání volbou -f (--force)
 """
 		;;
-		keywords-import) echo """Import xml souboru
-  <svazek> import {<num>|<name>} [<xmlfile>|<dsedfile>] - z Djvu svazku naimportuje upravenou textovou vrstvu (default je xml) 
-  <svazek> import [<xmlfile>|<dsedfile>] - Naimportuje soubory skryté textové vrstvy pro celý DjVu dokument, tedy včetně XMP
-  
+		keywords-import) echo """
+  Import textového obsahu DjVu souboru z externích souborů
+
+[1mSyntaxe[0m
+
+  [1m${0##*/}[0m [volby] <svazek> import <file> [<num>|<name>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         file - soubor s obsahem skryté textové vrstvy
+
+[3mPoznámka:[23m
+  Není-li uvedeno pořadové číslo stránky, nebo její název, tak se předpokládá
+  že jde o obsah textové vrstvy celého DjVu svazku.
+  Soubor je rozlišený podle přípony a může to být buď v .dsed nebo .xml
+  formátu.
+  Touto cestou lze importovat také XMP informace z .xmp souboru
+"""
+		;;
+		keywords-delete) echo """
+  Odstranění stránky z DjVu svazku
+
+[1mSyntaxe[0m
+
+  [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
 """
 		;;
 		keywords-insert) echo """
@@ -758,12 +1009,12 @@ Příklad:
   obrázek, dojde ke konverzi. Není-li uvedeno pořadové číslo, nebo název
   stránky před kterou se má stránka vložit, je připojena na konec DjVu svazku
 
-[1mPoužití[0m
+[1mSyntaxe[0m
 
   [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
 
-         num  - pořadové číslo stránky
-         name - jméno stránky
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
          file - jméno DjVu stránky, nebo skenu
 
   POZOR: Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje,
@@ -777,17 +1028,6 @@ Příklad:
               insert test01.jpg => test01_1.djvu
               insert test01.jpg => test01_2.djvu
               ...
-"""
-		;;
-		keywords-delete) echo """
-  Odstranění stránky z DjVu svazku
-
-[1mPoužití[0m
-
-  [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
-
-         num  - pořadové číslo stránky
-         name - jméno stránky
 """
 		;;
 		keywords-forward) echo """
@@ -810,7 +1050,7 @@ Příklad:
 """
 		;;
 		keywords) echo """
-  [1m${0##*/}[0m [volby] {DjVu svazek} <keyword> [?|...]
+  [1m${0##*/}[0m [volby] {DjVu svazek} <keyword> [-h|...]
 
   [1m      keyword - popis akce[0m
 
@@ -825,7 +1065,7 @@ Příklad:
          import - importuje do DjVu stránky či svazku obsah skryté textové
                   vrstvy z xml stránky
 
-[2mPoznámka:[0m Pro podrobnější nápovědu uveďte za klíčovým slovem znak ? 
+[2mPoznámka:[0m Pro podrobnější nápovědu uveďte za klíčovým slovem -h 
 """
 		;;
 		rename) echo """
@@ -887,7 +1127,7 @@ Parametry:
                  jeho pořadovému číslu
 
 Volby: 
-  -h|--help     Nápověda
+  -h            Nápověda
   -f|--force
   -i|--indirect Výsledekm zpracování bude volný svazek
   -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
@@ -994,7 +1234,7 @@ function todjvuclassic {
 function main {
 while [ $# -gt 0 ]
 do case "$1" in
-	---indirect) if [ "$2" == "?" ] ; then
+	---indirect) if [ "$2" == "-h" ] ; then
 				help indirect && exit 0
 			else
 				INDIRECT=yes
@@ -1015,7 +1255,7 @@ do case "$1" in
 		;;
 	-f|--force) FORCE=yes
 		;;
-    -h|--help) help && exit 0
+    -h) help && exit 0
 		;;
 	--clean) LEVEL="--loss-level=1"
 		;;
@@ -1069,11 +1309,11 @@ do case "$1" in
 				exit 0
 			fi
 		;;
-	-a|--algorithm) [ "$2" == "?" ] && for i in ${ALG[@]} ; do 
+	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
 					echo "$i"
 				done && exit 0 || ALG="$2" ; shift
 		;;
-	-o|--ocr) if [ "$2" == "?" ] ; then
+	-o|--ocr) if [ "$2" == "-h" ] ; then
 				help ocr && exit 0
 			elif [ "${#2}" == "3" ] ; then
 				OCR="$2"
@@ -1088,8 +1328,8 @@ do case "$1" in
 					if [ "${2//[0-9,-]/}" == "" ] ; then
 						echo "Extrakce stránek vybraných číselným rozsahem z DjVu svazku"
 						exit 0
-					elif [ -f ${2} ] ; then
-						case ${2##*.} in
+					elif [ -f "${2}" ] ; then
+						case "${2##*.}" in
 							dsed|xml) echo "následuje textový soubor $2, nejspíš ho chci vložit do $1"
 							;;
 							djvu) echo "následuje djvu soubor $2"
@@ -1100,45 +1340,45 @@ do case "$1" in
 					else
 						# Keywords
 						case "${2}" in
-							export) [ ${3} == "?" ] && help keywords-export && exit 0
-								echo "vytvoření xml, dsed a náhledu"
-								echo "To Do"
+							export) [ "${3}" == "-h" ] && help keywords-export && exit 0
+								exportpage ${1} ${3} ${4}
 								exit 0
 							;;
-							import) [ ${3} == "?" ] && help keywords-import && exit 0
+							import) [ "${3}" == "-h" ] && help keywords-import && exit 0
 								echo "vložení xml"
+								help keywords-import
 								echo "ToDo"
 								exit 0
 							;;
-							set) [ ${3} == "?" ] && help keywords-set && exit 0
+							set) [ "${3}" == "-h" ] && help keywords-set && exit 0
 								echo "vložení metainformace"
 								echo "ToDo"
 								exit 0
 							;;
-							print) [ ${3} == "?" ] && help keywords-print && exit 0
+							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
 								echo "Výpis metainformace"
 								echo "ToDo"
 								exit 0
 							;;
-							forward) [ ${3} == "?" ] && help keywords-forward && exit 0
+							forward) [ "${3}" == "-h" ] && help keywords-forward && exit 0
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								forwardpage ${1} ${3} ${4}
 								exit 0
 							;;
-							back) [ ${3} == "?" ] && help keywords-back && exit 0
+							back) [ "${3}" == "-h" ] && help keywords-back && exit 0
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								backpage ${1} ${3} ${4}
 								exit 0
 							;;
-							rotate)  [ ${3} == "?" ] && help keywords-rotate && exit 0
+							rotate)  [ "${3}" == "-h" ] && help keywords-rotate && exit 0
 								rotatepage ${1} ${3} ${4}
 								exit 0
 							;;
-							delete)  [ ${3} == "?" ] && help keywords-delete && exit 0
+							delete)  [ "${3}" == "-h" ] && help keywords-delete && exit 0
 								deletepage ${1} ${3}
 								exit 0
 							;;
-							insert) [ ${3} == "?" ] && help keywords-insert && exit 0
+							insert) [ "${3}" == "-h" ] && help keywords-insert && exit 0
 								if [ -f ${3} ] ; then
 									[ "${#ALG[@]}" == "1" ] || exit 32
 									TEMPFILE="$TEMPDIR/${3%.*}.djvu"
