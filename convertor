@@ -21,6 +21,7 @@ shopt -s extglob
 # - implementovány přesuny stránek (akce forward a back)
 # - implementováno generování náhledů do exportu
 # - upraveny funkce pro export náhledů a souborů textové vrstvy
+# - implementována akce print pro výpis metadat
 
 # ToDo
 # - implementovat import
@@ -145,22 +146,135 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+function setmeta {
+	# $1 - svazek
+	# $2 - identifikátor, klíčové slovo nebo soubor
+	# $3 - key
+	# $4 - obsah klíče
+#	echo "Nastavuj klíč $3 do stránky $2 s obsahem ${@:4}"
+#	exit 0
+	if [ -f ${2} ] ; then
+		echo "importuji klíče ze souboru ${2}"
+		${DJVUSED} ${1} -e "set-meta ${2}; save"
+	else
+		identifypage ${1} ${2}
+		NAMEPAGE=$(namepage ${1} $?)
+		if [ "${NAMEPAGE}" == "" ] ; then
+			echo "Neplatný identifikátor stránky $2"
+			exit 1
+		fi
+		if [ "${3}" == "" ] ; then
+			if [ -f ${NAMEPAGE/.djvu/.meta} ] ; then
+				echo "nastavuji klíč $3 do stránky $PAGE v souboru $1 s obsahem ${@:4}"
+				${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta ${NAMEPAGE/.djvu/.meta}; save"
+			fi
+		else
+			${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta" > $TEMPDIR/${NAMEPAGE/.djvu/.meta}
+			echo "${@:3}" >> $TEMPDIR/${NAMEPAGE/.djvu/.meta}
+			${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta $TEMPDIR/${NAMEPAGE/.djvu/.meta}; save"
+		fi
+	fi
+}
+
+function printmeta {
+	# $1 - svazek
+	# $2 - identifikátor, klíčové slovo 'all' nebo atribut
+	# $3 - atribut, nebo klíčové slovo 'all' (default)
+	# není-li určena stránka ani key vypíše pro celý dokument
+	if [ "${2}" = "" ] ; then
+		echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
+		META=$(${DJVUSED} ${1} -e print-meta)
+		IFS_BAK=$IFS
+		IFS=$'\n'
+		for i in $META ; do
+			echo -e $(echo $i | sed 's/\\/\\0/g')
+		done
+		IFS=$IFS_BAK
+	else
+		identifypage ${1} ${2}
+		NAMEPAGE=$(namepage ${1} $?)
+		if [ "${NAMEPAGE}" == "" ] ; then
+			if [ "${2}" == "all" ] ; then
+				echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
+			else
+				echo "Globální metadata souboru ${1##*/} - atribut ${2}:" >> /dev/stderr
+			fi
+			META=$(${DJVUSED} ${1} -e "print-meta")
+			IFS_BAK=$IFS
+			IFS=$'\n'
+			for i in $META ; do
+				if [ "${2}" == "all" ] ; then
+					echo -e $(echo $i | sed 's/\\/\\0/g')
+				else
+					KEY=$(echo $i | grep "^${2}[[:blank:]]" | sed 's/\\/\\0/g')
+					if [ "$KEY" == "" ] ; then
+						continue
+					else
+						echo -e $KEY
+					fi
+				fi
+			done
+			IFS=$IFS_BAK
+		else
+			if [ "${3}" == "" ] || [ "${3}" == "all" ] ; then
+				echo "Metadata stránky ${NAMEPAGE} ( $? ) ze souboru ${1##*/} :" >> /dev/stderr
+			else
+				echo "Metadata stránky ${NAMEPAGE} ( $? ) ze souboru ${1##*/} - atribut ${3}:" >> /dev/stderr
+			fi
+			META=$(${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta")
+			IFS_BAK=$IFS
+			IFS=$'\n'
+			for i in $META ; do
+				if [ "${3}" == "" ] || [ "${3}" == "all" ] ; then
+					echo -e $(echo $i | sed 's/\\/\\0/g')
+				else
+					KEY=$(echo $i | grep "^${3}[[:blank:]]" | sed 's/\\/\\0/g')
+					if [ "$KEY" == "" ] ; then
+						continue
+					else
+						echo -e $KEY
+					fi
+				fi
+			done
+			IFS=$IFS_BAK
+		fi
+	fi
+}
+
+function unsetmeta {
+	# $1 - svazek
+	# $2 - identifikátor, klíčové slovo nebo soubor
+	# $3 - key
+#	echo "Nastavuj klíč $3 do stránky $2 s obsahem ${@:4}"
+#	exit 0
+	identifypage ${1} ${2}
+	NAMEPAGE=$(namepage ${1} $?)
+	if [ "${NAMEPAGE}" == "" ] ; then
+		echo "Neplatný identifikátor stránky $2"
+		exit 1
+	fi
+	if [ "${3}" == "" ] ; then
+		echo "Odstraňuji všechny meta informace"
+		#${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta ${NAMEPAGE/.djvu/.meta}; save"
+	else
+		${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta" > $TEMPDIR/${NAMEPAGE/.djvu/.temp}
+		grep -v "^$3" $TEMPDIR/${NAMEPAGE/.djvu/.temp} >> $TEMPDIR/${NAMEPAGE/.djvu/.meta}
+		${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta $TEMPDIR/${NAMEPAGE/.djvu/.meta}; save"
+	fi
+}
+
 function exportpage {
 	# $1 - svazek
 	# $2 - identifikátor
 	# $3 - cíl (adresář)
 	if [ ${#3} -eq "0" ] ; then
-		echo "Není target - nastavím cíl podle lokálního adresáře" >> /dev/stderr
 		TARGETDIR=$(${REALPATH} ./)
 	elif [ -f "${3}" ] ; then
-#		echo "Soubor. Vytáhnout cestu k němu.." >> /dev/stderr
 		TARGET=$(${REALPATH} ${3})
 		TARGETDIR=${TARGET%/*}
 	elif [ -d "${3}" ] ; then
-#		echo "Adresář - použiju ho" >> /dev/stderr
 		TARGETDIR=$(${REALPATH} ${3})
 	else
-#		echo "Cíl - $3 mkdir -p $3" >> /dev/stderr
 		mkdir -p $3
 		if [ $? == "0" ] ; then
 			TARGETDIR=$(${REALPATH} ${3})
@@ -169,10 +283,8 @@ function exportpage {
 			exit 1
 		fi
 	fi
-	echo "Cíl - $TARGETDIR" >> /dev/stderr
 	case "$2" in
-		all) # echo "export všeho"
-			if [ ${XML} == "yes" ] ; then
+		all) if [ ${XML} == "yes" ] ; then
 				exportxml ${1} ${TARGETDIR}
 			fi
 			if [ ${DSED} == "yes" ] ; then
@@ -202,11 +314,10 @@ function exportpage {
 
 function exportdsed {
 	# $1 - svazek
-	# $2 - strana
+	# $2 - identifikátor nebo adresář
 	# $3 - adresář
 	case "${#@}" in
-		3) # echo "Adresář je předaný"
-			identifypage ${1} ${2}
+		3) identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(namepage ${1} $PAGE)
 			if [ -f "${3}/${NAMEPAGE/.djvu/.dsed}" ] ; then
@@ -223,7 +334,6 @@ function exportdsed {
 				${DJVUSED} ${1} -e output-all > ${2}/${1/.djvu/.dsed}
 			fi
 		else
-			#echo  "Předaný je název stránky, nebo její pořadí, exportuje se do ./"
 			identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(namepage ${1} $PAGE)
@@ -234,8 +344,7 @@ function exportdsed {
 			fi
 		fi
 		;;
-		1) # echo "Předaný je celý subor, exportuje se celý obsah do ./"
-			if [ -f "./${1/.djvu/.dsed}" ] ; then
+		1) if [ -f "./${1/.djvu/.dsed}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
 			else
 				${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
@@ -248,14 +357,12 @@ function exportdsed {
 
 function exportxml {
 	# $1 - svazek
-	# $2 - strana
+	# $2 - identifikátor nebo adresář
 	# $3 - adresář
 	case "${#@}" in
-		3) # echo "Adresář je předaný"
-			identifypage ${1} ${2}
+		3) identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(namepage ${1} $PAGE)
-			# echo "$NAMEPAGE" >> /dev/stderr
 			if [ -f "${3}/${NAMEPAGE/.djvu/.xml}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
 			else
@@ -264,15 +371,13 @@ function exportxml {
 			fi
 		;;
 		2) if [ -d ${2} ] ; then
-			# echo "Předaný je adresář, bude do něj exportován celý obsah"
 				if [ -f "${2}/${1/.djvu/.xml}" ] ; then
 					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
 				else
 					${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
-					thumbnail ${1} ${2}
 				fi
+				thumbnail ${1} ${2}
 			else
-			# echo  "Předaný je název stránky, nebo její pořadí, exportuje se do ./"
 			identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(namepage ${1} $PAGE)
@@ -280,17 +385,16 @@ function exportxml {
 					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
 				else
 					${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
-					thumbnail ${1} ${PAGE} ./
 				fi
+				thumbnail ${1} ${PAGE} ./
 			fi
 		;;
-		1) #echo "Předaný je celý subor, exportuje se celý obsah do ./"
-			if [ -f "./${1/.djvu/.xml}" ] ; then
+		1) if [ -f "./${1/.djvu/.xml}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ./${1/.djvu/.xml}
 			else
 				${DJVUTOXML} ${1} ./${1/.djvu/.xml}
-				thumbnail ${1} ./
 			fi
+			thumbnail ${1} ./
 		;;
 		*) echo "Z nějakého důvodu nelze provést export xml souboru" >> /dev/stderr && exit 1
 		;;
@@ -301,7 +405,7 @@ function thumbnail {
 	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
 	# Náhled se znovu exportuje pouze za předpokladu, že je současně uvedena volba --force
 	# $1 - svazek
-	# $2 - adresář nebo identifikátor stránky
+	# $2 - identifikátor stránky nebo adresář
 	# $3 - adresář
 	case "${#@}" in
 		3) # echo "Předán je identifikátor i adresář, náhled stránky $2 se bude exportovat do $3"
@@ -315,7 +419,6 @@ function thumbnail {
 			fi
 		;;
 		2) if [ -d ${2} ] ; then
-			# echo "Předaný je adresář, náhledy se budou exportovat do $2"
 			lastpage ${1}
 			PAGES=$?
 			NUMPAGE=1
@@ -332,7 +435,6 @@ function thumbnail {
 				PAGES=$((PAGES - 1))
 			done
 		else
-			# echo  "Předaný je identifikátor stránky, náhled se exportuje do ./"
 			identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(namepage ${1} $PAGE)
@@ -343,8 +445,7 @@ function thumbnail {
 			fi
 		fi
 		;;
-		1) # echo "Předaný je celý subor $1, náhledy stránek se ukládají do ./"
-			lastpage ${1}
+		1) lastpage ${1}
 			PAGES=$?
 			NUMPAGE=1
 			while [ ${PAGES} -gt "0" ] ; do
@@ -924,17 +1025,24 @@ Příklad:
 """
 		;;
 		keywords-print) echo """
-  <svazek> print [[<num>|<name>] <key>] Vypíše obsah klíče z metainformací Djvu svazku. Bez klíčového slova vypíše všechny
+  Výpis atributů a jejich obsahu z metainformací uložených v Djvu svazku.
 
-Příklad:
-   svazek.djvu print author
-[1mPoužití[0m
+[1mSyntaxe[0m
 
-  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
+  [1m${0##*/}[0m <svazek> print [all]
+  [1m${0##*/}[0m <svazek> print <attr>
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
 
-         num  - pořadové číslo stránky
-         name - jméno stránky
-         file - jméno DjVu stránky, nebo skenu
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         attr - jméno atributu
+         all  - klíčové slovo (vypsat vše)
+
+[3mPoznámka:[23m
+  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
+  lze do DjVu stránky či svazku importovat z externího souboru při
+  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
 """
 		;;
 		keywords-rotate) echo """
@@ -1234,13 +1342,13 @@ function todjvuclassic {
 function main {
 while [ $# -gt 0 ]
 do case "$1" in
-	---indirect) if [ "$2" == "-h" ] ; then
-				help indirect && exit 0
-			else
-				INDIRECT=yes
-			fi
+	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
+					echo "$i"
+				done && exit 0 || ALG="$2" ; shift
 		;;
 	-d|--dsed) DSED=yes
+		;;
+	-f|--force) FORCE=yes
 		;;
 	--no-thumbnail) THUMBNAIL=no
 		;;
@@ -1251,11 +1359,13 @@ do case "$1" in
 				help dpi && exit 0
 			fi
 		;;
-	-x|--xml) XML=yes
-		;;
-	-f|--force) FORCE=yes
-		;;
     -h) help && exit 0
+		;;
+	--indirect) if [ "$2" == "-h" ] ; then
+				help indirect && exit 0
+			else
+				INDIRECT=yes
+			fi
 		;;
 	--clean) LEVEL="--loss-level=1"
 		;;
@@ -1276,6 +1386,15 @@ do case "$1" in
 	--pdf) PDF2DJVU=$(which pdf2djvu)
 [ ! ${PDF2DJVU} ] && echo 'Není nainstalován balík pdf2djvu, který je nezbytný pokud chcete provést přímou konverzi PDF souboru do DjVu formátu' && PDF2DJVU=false
 	;;
+	-o|--ocr) if [ "$2" == "-h" ] ; then
+				help ocr && exit 0
+			elif [ "${#2}" == "3" ] ; then
+				OCR="$2"
+				shift
+			else
+				OCR="ces"
+			fi
+		;;
 	-r|--rename) case "$2" in
 		*0) RENAME="$2" && shift
 				;;
@@ -1309,18 +1428,7 @@ do case "$1" in
 				exit 0
 			fi
 		;;
-	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
-					echo "$i"
-				done && exit 0 || ALG="$2" ; shift
-		;;
-	-o|--ocr) if [ "$2" == "-h" ] ; then
-				help ocr && exit 0
-			elif [ "${#2}" == "3" ] ; then
-				OCR="$2"
-				shift
-			else
-				OCR="ces"
-			fi
+	-x|--xml) XML=yes
 		;;
 	*) if [ -f "${1}" ] ; then
 			case "${1##*.}" in
@@ -1352,12 +1460,11 @@ do case "$1" in
 							;;
 							set) [ "${3}" == "-h" ] && help keywords-set && exit 0
 								echo "vložení metainformace"
-								echo "ToDo"
+								setmeta ${1} ${3} ${@:4}
 								exit 0
 							;;
 							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
-								echo "Výpis metainformace"
-								echo "ToDo"
+								printmeta ${1} ${3} ${4}
 								exit 0
 							;;
 							forward) [ "${3}" == "-h" ] && help keywords-forward && exit 0
