@@ -992,7 +992,7 @@ function fromxcf {
 }
 
 function help {
-	echo """[1mNápověda pro [1m[2m${0##*/}[0m :"""
+	echo -n """[1mNápověda pro [1m[2m${0##*/}[0m : """
 	case "$1" in
 		indirect) echo"""
 [1mVolba[0m
@@ -1135,23 +1135,26 @@ Příklad:
   Touto cestou lze importovat také XMP informace z .xmp souboru
 """
 		;;
-		keywords-delete) echo """
-  Odstranění stránky z DjVu svazku
+		keywords-delete) echo """akce [1mdelete[0m
 
-[1mSyntaxe[0m
+  Odstranění stránky identifikované jménem, nebo pozicí v DjVu svazku
 
   [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
+
+[3mPoznámka:[23m
+  Je doporučeno při odstraňování stránek použít jako identifikátor jméno
+  stránky. A to z toho důvodu, že se pozice stránky může v průběhu
+  zpracování DjVu svazku změnit, kdežto její jméno je vždy v rámci svazku
+  jedinečné.
 """
 		;;
-		keywords-insert) echo """
+		keywords-insert) echo """akce [1minsert[0m
   Vložení nové stránky do Djvu svazku. Je-li na vstupu nekonvertovovaný
-  obrázek, dojde ke konverzi. Není-li uvedeno pořadové číslo, nebo název
-  stránky před kterou se má stránka vložit, je připojena na konec DjVu svazku
-
-[1mSyntaxe[0m
+  obrázek, dojde ke konverzi. Není-li uvedena pozice, či jméno stránky před 
+  kterou se má nová stránka vložit, připojí se na konec DjVu svazku.
 
   [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
 
@@ -1159,12 +1162,12 @@ Příklad:
          name - jméno stránky v DjVu svazku
          file - jméno DjVu stránky, nebo skenu
 
-  POZOR: Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje,
-         Dojde při vložení k přejmenování souboru - za název se přidá
-         podtržítko a pořadové číslo výskytu.
-         K takové situaci může dojít také v případě, že je operace insert
-         zopakována se stejnými parametry. Pak se přidané číslo postupně
-         zvyšuje. Takto:
+[3mPoznámka:[23m
+  Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje, dojde
+  při vložení k přejmenování souboru - za název se přidá podtržítko
+  a pořadové číslo výskytu. K takové situaci může dojít také v případě,
+  že je operace [2minsert[22m zopakována se stejnými parametry. Pak se
+  automaticky přidávané číslo postupně navyšuje.
 
               insert test01.jpg => test01.djvu
               insert test01.jpg => test01_1.djvu
@@ -1172,13 +1175,21 @@ Příklad:
               ...
 """
 		;;
-		keywords-forward) echo """
-  <svazek> forward {<num>|<name>} [<num>|<name>] - při této akci se stránka v DjVu
-          svazku, identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
-          před stránku, která jí předchází.
-          V případě, že jde o první stránku DjVu svazku se nestane nic.
-          Má-li se přesunout před jinou, než předchozí stránku, pak musí být
-          uvedeno jako další parametr pořadové číslo, nebo název této stránky
+		keywords-forward) echo """akce [1mforward[0m
+
+  Přesun stránky v rámci DjVu svazku o pozici vpřed. [2mPřed[22m stránku, která ji
+  má následovat. V případě, už je na první pozici, se nestane nic.
+
+  [1m${0##*/}[0m [volby] <svazek> forward {<num>|<name>} [<num>|<name>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+
+[3mPoznámka:[23m
+  Je doporučeno použít jako identifikátor jména stránek, místo jejich 
+  aktuální pozice. A to z toho důvodu, že se pozice stránek mohou v průběhu
+  zpracování DjVu svazku měnit, kdežto její jméno stránky je vždy v rámci
+  svazku jedinečné.
 """
 		;;
 		keywords-back) echo """
@@ -1207,7 +1218,8 @@ Příklad:
          import - importuje do DjVu stránky či svazku obsah skryté textové
                   vrstvy z xml stránky
 
-[2mPoznámka:[0m Pro podrobnější nápovědu uveďte za klíčovým slovem -h 
+[3mPoznámka:[23m
+          Pro podrobnější nápovědu použijte volbu -h za klíčovým slovem
 """
 		;;
 		rename) echo """
@@ -1256,20 +1268,9 @@ Příklad:
      xcf, tiff, pdf 
 """
 			;;
-		*) echo """
-[1mPoužití[0m ${0##/}:
-
- [1m${0##/}[0m [volby] {vzorek|dir/|name} docin.djvu
-
-Parametry:
-    docin.djvu - vstupní djvu dokument se kterým se má pracovat
-    dir/       - jméno adresáře se liší od jména či vzorku lomítkem 
-    vzorek     - řetězec, kterým se mají vyselektovat soubory s nimiž se
-                 má pracovat - je to část jména souboru, která předchází
-                 jeho pořadovému číslu
-
-Volby: 
-  -h            Nápověda
+		options) echo """
+[1mPřehled akceptovaných voleb[0m: 
+  -h|--help     Nápověda
   -f|--force
   -i|--indirect Výsledekm zpracování bude volný svazek
   -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
@@ -1277,8 +1278,6 @@ Volby:
               dsed (lisp)
   -x|--xml  Při práci s textovou vrstvou se bude pracovat s formátem
               xml
-  --pdf   Pro konverzi PDF souboru se použije nástroj pdf2djvu, který je
-  schopen převést i textovou vrstvu - pokud v PDF souboru existuje.
 
 Parametrické volby:
    -n|--name    parametr zajistí, že se soubory přejmenují
@@ -1286,40 +1285,21 @@ Parametrické volby:
                 stávajících názvů souborů při sestavení svazku 
                 soubor_0000 - soubor_0001.djvu .. soubor_0123.djvu
                 soubor_0 -    soubor_1.djvu ,, soubor_123.djvu
+"""
+		;;
+		*) echo """
+   Toto je nástroj pro práci s DjVu soubory a svazky.
 
-Rozbalení do volného svazku:
+      [1m${0##*/}[0m [volby] ... <akce>
 
-$0 [volby] dirname/ [index.djvu] [name] docin.djvu
+ Nápovědu k volbám a jejich parametrům vypíše volba -h
+ Přehled všech dostupných voleb vypíšete takto...
 
-    dirname/ - jméno adresáře, který nemusí existovat
-    docin.djvu - vstupní DjVu soubor (musí existovat)
+      [1m${0##*/}[0m -h -h
 
-Sbalení do svazku:
+ Přehled akcí vypíšete takto...
 
-$0 [volby] index.djvu bundle.djvu
-
-    bundle.djvu - jméno cílového svazku (nemusí existovat)
-
-Vytvoření nového svazku:
-
-$0 [volby] vzor docout.djvu
-
-    vzor - nesmí odpovídat jménu existujícího adresáře nebo souboru
-    docout.djvu - jméno cílového djvu svazku (typ určuje volba)
-    -b - 
-    -i - volný svazek
-    -n - parametr zajistí, že se soubory přejmenují
-
-Svazek sestavuje z djvu souborů s názvem vyhovujícím vzorku. Příklad:
-
-    $0 -i test novysoubor.djvu
-
-Vyhledá soubory test-1.djvu, test-2.djvu, ... a sestaví do volného svazku
-s indexovým souborem novysoubor.djvu.
-
-Pokud je uveden parametr -n, budou dílčí dokumenty přejmenovány tak, aby
-odpovídaly názvu svazku: novysoubor-001.djvu, novysoubor-002.djvu, ...
-
+      [1m${0##*/}[0m [volby] <soubor> -h
 """
 		;;
 	esac
@@ -1393,7 +1373,12 @@ do case "$1" in
 				help dpi && exit 0
 			fi
 		;;
-    -h) help && exit 0
+    -h)  if [ "$2" == "-h" ] ; then
+				help options
+			else
+				help
+			fi
+			exit 0
 		;;
 	--indirect) if [ "$2" == "-h" ] ; then
 				help indirect && exit 0
