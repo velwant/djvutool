@@ -24,6 +24,8 @@ shopt -s extglob
 # - implementována akce print pro výpis metadat
 
 # ToDo
+# - dopsat nápovědu pro akci keywords-unset 
+# - dopsat manuál pro akci set, argumenty, xmp, atp.
 # - implementovat import
 # doplnit nápovědu k rotaci stránky (akce rotate)
 # opravit volby --algoritmus a --view
@@ -146,6 +148,21 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+potvrdit () {
+    read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
+    case $response in
+        [yY][eE][sS]|[yY]) 
+            true
+            ;;
+        [aA][nN][oO]|[aA]) 
+            true
+            ;;
+        *)
+            false
+            ;;
+    esac
+}
+
 function setmeta {
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo nebo soubor
@@ -192,12 +209,24 @@ function printmeta {
 		IFS=$IFS_BAK
 	else
 		identifypage ${1} ${2}
-		NAMEPAGE=$(namepage ${1} $?)
+		PAGE=$?
+		NAMEPAGE=$(namepage ${1} ${PAGE})
 		if [ "${NAMEPAGE}" == "" ] ; then
 			if [ "${2}" == "all" ] ; then
 				echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
 			else
-				echo "Globální metadata souboru ${1##*/} - atribut ${2}:" >> /dev/stderr
+				if [ "${2/[0-9]/}" == "" ] ; then
+					lastpage ${1}
+					LASTPAGE=$?
+					if [ ${2} -gt ${LASTPAGE} ] ; then
+						echo "Požadovaná stránka je mimo rozsah souboru ${1##*/}, který má ${LASTPAGE} a požadovaná stránka se v něm nevyskytuje" >> /dev/stderr
+					else
+						echo "Globální metadata souboru ${1##*/} - atribut ${2}:" >> /dev/stderr
+					fi
+				else
+					echo "Stránka ${2} se v souboru ${1##*/} nevyskytuje" >> /dev/stderr
+					exit 1
+				fi
 			fi
 			META=$(${DJVUSED} ${1} -e "print-meta")
 			IFS_BAK=$IFS
@@ -217,9 +246,9 @@ function printmeta {
 			IFS=$IFS_BAK
 		else
 			if [ "${3}" == "" ] || [ "${3}" == "all" ] ; then
-				echo "Metadata stránky ${NAMEPAGE} ( $? ) ze souboru ${1##*/} :" >> /dev/stderr
+				echo "Metadata stránky ${NAMEPAGE} ( $PAGE ) ze souboru ${1##*/} :" >> /dev/stderr
 			else
-				echo "Metadata stránky ${NAMEPAGE} ( $? ) ze souboru ${1##*/} - atribut ${3}:" >> /dev/stderr
+				echo "Metadata stránky ${NAMEPAGE} ( $PAGE ) ze souboru ${1##*/} - atribut ${3}:" >> /dev/stderr
 			fi
 			META=$(${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta")
 			IFS_BAK=$IFS
@@ -245,22 +274,27 @@ function unsetmeta {
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo nebo soubor
 	# $3 - key
-#	echo "Nastavuj klíč $3 do stránky $2 s obsahem ${@:4}"
-#	exit 0
 	identifypage ${1} ${2}
 	NAMEPAGE=$(namepage ${1} $?)
 	if [ "${NAMEPAGE}" == "" ] ; then
-		echo "Neplatný identifikátor stránky $2"
-		exit 1
-	fi
-	if [ "${3}" == "" ] ; then
-		echo "Odstraňuji všechny meta informace"
-		#${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta ${NAMEPAGE/.djvu/.meta}; save"
+		echo "Odstraňuji globální atribut.."
+		${DJVUSED} ${1} -e "print-meta" > ${TEMPDIR}/${1/.djvu/.temp}
+		grep -v "^$2[[:blank:]]" ${TEMPDIR}/${1/.djvu/.temp} >> $TEMPDIR/${1/.djvu/.meta}
+		potvrdit && ${DJVUSED} ${1} -e "set-meta $TEMPDIR/${1/.djvu/.meta}; save"
+	elif [ "${3}" == "" ] ; then
+		echo "Odstraňuji všechny meta informace ze stránky.."
+		potvrdit && ${DJVUSED} ${1} -e "select ${NAMEPAGE}; remove-meta; save"
+	elif [ "${2}" == "global" ] ; then
+		echo "Odstraňuji všechny globální meta informace.."
+		potvrdit && ${DJVUSED} ${1} -e "remove-meta; save"
 	else
-		${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta" > $TEMPDIR/${NAMEPAGE/.djvu/.temp}
-		grep -v "^$3" $TEMPDIR/${NAMEPAGE/.djvu/.temp} >> $TEMPDIR/${NAMEPAGE/.djvu/.meta}
-		${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta $TEMPDIR/${NAMEPAGE/.djvu/.meta}; save"
+		echo "Odstraňuji atribut ${3} z meta informací stránky ${NAMEPAGE}"
+		echo "$1 - $2 - $3 - $NAMEPAGE"
+		${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta" > ${TEMPDIR}/${NAMEPAGE/.djvu/.temp}
+		grep -v "^$3[[:blank:]]" ${TEMPDIR}/${NAMEPAGE/.djvu/.temp} >> ${TEMPDIR}/${NAMEPAGE/.djvu/.meta}
+		potvrdit && ${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta $TEMPDIR/${NAMEPAGE/.djvu/.meta}; save"
 	fi
+	exit 33
 }
 
 function exportpage {
@@ -1463,6 +1497,11 @@ do case "$1" in
 								setmeta ${1} ${3} ${@:4}
 								exit 0
 							;;
+							unset) [ "${3}" == "-h" ] && help keywords-unset && exit 0
+								echo "Odstranění atributu z metainformace"
+								unsetmeta ${1} ${3} ${4}
+								exit 0
+							;;
 							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
 								printmeta ${1} ${3} ${4}
 								exit 0
@@ -1484,6 +1523,12 @@ do case "$1" in
 							delete)  [ "${3}" == "-h" ] && help keywords-delete && exit 0
 								deletepage ${1} ${3}
 								exit 0
+							;;
+							info)   [ "${3}" == "-h" ] && help keywords-info && exit 0
+								echo "Zpracovaný výstup z DjVu dump"
+								echo "výstup z exitool"
+								#deletepage ${1} ${3}
+							exit 0
 							;;
 							insert) [ "${3}" == "-h" ] && help keywords-insert && exit 0
 								if [ -f ${3} ] ; then
