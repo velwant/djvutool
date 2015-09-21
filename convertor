@@ -42,6 +42,7 @@ SUFFIX=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INDIRECT=no}"
 ALG="${INDIRECT=djvu}"
+EXTRACTPAGE="no"
 
 trap '''CHYBA=$? ;
 case $CHYBA in
@@ -148,6 +149,11 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+function escape_path {
+echo $@ | sed \
+  -e 's/\ /\\\ /g'
+}
+
 potvrdit () {
     read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
     case $response in
@@ -168,21 +174,19 @@ function setmeta {
 	# $2 - identifikátor, klíčové slovo nebo soubor
 	# $3 - key
 	# $4 - obsah klíče
-#	echo "Nastavuj klíč $3 do stránky $2 s obsahem ${@:4}"
-#	exit 0
 	if [ -f ${2} ] ; then
-		echo "importuji klíče ze souboru ${2}"
+		echo "Importuji atributy ze souboru ${2}" >> /dev/stderr
 		${DJVUSED} ${1} -e "set-meta ${2}; save"
 	else
 		identifypage ${1} ${2}
 		NAMEPAGE=$(namepage ${1} $?)
 		if [ "${NAMEPAGE}" == "" ] ; then
-			echo "Neplatný identifikátor stránky $2"
+			echo "Neplatný identifikátor stránky ${2}" >> /dev/stderr
 			exit 1
 		fi
 		if [ "${3}" == "" ] ; then
 			if [ -f ${NAMEPAGE/.djvu/.meta} ] ; then
-				echo "nastavuji klíč $3 do stránky $PAGE v souboru $1 s obsahem ${@:4}"
+				echo "Nastavuji klíč $3 do stránky $PAGE v souboru $1 s obsahem ${@:4}" >> /dev/stderr
 				${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta ${NAMEPAGE/.djvu/.meta}; save"
 			fi
 		else
@@ -331,8 +335,15 @@ function exportpage {
 				echo "Neplatný identifikátor stránky $2"
 				exit 1
 			else
+				echo "export stránky $EXTRACTPAGE - $NAMEPAGE ${#NAMEPAGE} - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE" >> /dev/stderr
+				if [ ${EXTRACTPAGE} == "yes" ] ; then
+					${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
+					echo ${TEMPDIR}/${NAMEPAGE//\ /\\ } >> /dev/stderr
+					mv ${TEMPDIR}/${NAMEPAGE//\ /\\ } ${TARGETDIR}
+					#${DJVUSED} ${1} -e "select ${NAMEPAGE}; save-page ${NAMEPAGE}"
+					exit 33
+				fi
 				[ ${XML} == "yes" ] && THUMBNAIL=yes
-				# echo "export stránky $NAMEPAGE - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE"
 				if [ ${XML} == "yes" ] ; then
 					exportxml ${1} ${2} ${TARGETDIR}
 				fi
@@ -582,12 +593,14 @@ function identifypage {
 	if [ "${2%%+([0-9])}" == "" ] ; then
 		PAGE="\[P$2\]"
 	else
-		PAGE="\{$2\}"
+		PAGE="\{${2}\}"
 	fi
 #	echo "$PAGE" >> /dev/stderr
-	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep $PAGE))
-	echo ${OUTPUT[@]} >> /dev/null
-	return ${OUTPUT[3]//+([\]P\[])/}
+	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep ${PAGE}))
+	ORDER=${OUTPUT[$((${#OUTPUT[@]}-1))]}
+#	echo ${OUTPUT[@]} >> /dev/stderr
+#	echo ${ORDER} >> /dev/stderr
+	return ${ORDER//+([\]P\[])/}
 }
 
 function namepage {
@@ -596,9 +609,13 @@ function namepage {
 	# $2 číslo stránky
 	if [ "${2%%+([0-9])}" == "" ] ; then
 		PAGE="\[P$2\]"
-		OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep $PAGE))
-#		echo ${OUTPUT[@]} >> /dev/stderr
-		echo ${OUTPUT[2]//+([\{\}])/}
+		#OUTPUT=($(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE))
+#		NAME=(${OUTPUT[@]:2})
+#		PAGEORDER=$((${#NAME[@]}-1))
+#		VYSTUP=${NAME[@]:0:$PAGEORDER} >> /dev/stderr
+#		echo "${VYSTUP//+([\{\}])/}"
+		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | tr ' ' '#' | awk -F\{ '{print $2}' | awk -F\} '{print $1}' | tr '#' ' ')
+		echo "${OUTPUT}"
 	else
 		return 1
 	fi
@@ -617,8 +634,14 @@ function insertpage {
 	# $3 - identifikátor stránky před kterou se má vložit
 	identifypage ${1} ${3}
 	PAGE=$?
-#	echo $PAGE
-	if [ ${PAGE} -gt "0" ] ; then
+	NAMEPAGE=$(namepage ${1} ${PAGE})
+	identifypage ${1} ${2}
+	TESTPAGE=$?
+	if [ "${TESTPAGE}" ] ; then
+		echo "V souboru ${1} se již stránka s názvem ${2} vyskytuje. Budete-li teď v akci pokračovat, bude k názvu stránky po jejím začlenení do DjVu svazku přiřazen suffix s pořadovým číslem. Teď máte ještě šanci operaci přerušit a soubor přejmenovat. Případně před vložením nové verze stránky tu původní zrušit." >> /dev/stderr
+		potvrdit || exit 1
+	fi
+	if [ "${PAGE/[0-9]/}" == "" ] && [ "${PAGE}" != "0" ] ; then
 		${DJVM} -i $1 $2 $PAGE
 	else
 		${DJVM} -i $1 $2
@@ -644,28 +667,66 @@ function rotatepage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany která se má rotovat
 	# $3 - hodnota rotace
+	INFO="""
+Uvedenou hodnotu rotace nelze akceptovat. Rotaci lze nastavit buď 
+absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
+
+      0 - výchozí pozice
+      1 - natočení vpravo
+      2 - otočení  vzhůru nohama
+      3 - natočení vlevo
+   left - rotace směrem doleva
+  right - rotace směrem doprava).
+    180 - přetočení o 180°
+
+Každá jiná hodnota parametru je ignorována."""
 	identifypage ${1} ${2}
 	PAGE=$?
-#	echo $PAGE
-	if [ ${PAGE} -gt "0" ] ; then
-#		echo "Otáčím stránku $2 o $3" >> /dev/stderr
-		[ "$3" == "" ] && echo "Je třeba parametrem určit natočení stránky, nebo alespoň směr rotace. Při uvedení směru rotace se stránka pootočí o 90°" && exit 0
-		echo "${DJVUSED} -e \'select $PAGE; set-rotation $3; save\' $1" >> /dev/stderr
-		case "$3" in
-			0|1|2|3)  ${DJVUSED} -e "select $PAGE; set-rotation $3; save" $1
+	NAMEPAGE=$(namepage ${1} ${PAGE})
+	if [ "${NAMEPAGE}" == "" ] ; then
+		if [ "${3}" ] ; then
+			echo "Nastavuji natočení strany $PAGE celý dokument $1 - $2" >> /dev/stderr
+			case "$3" in
+				0|1|2|3)  ${DJVUSED} -e "select $PAGE; set-rotation $3; save" $1
+				;;
+				left) ${DJVUSED} -e "select $PAGE; set-rotation +1; save" $1
+				;;
+				right) ${DJVUSED} -e "select $PAGE; set-rotation -1; save" $1
+				;;
+				180) ${DJVUSED} -e "select $PAGE; set-rotation +2; save" $1
+				;;
+				*) echo "${INFO}" >> /dev/stderr
+				;;
+			esac
+		else
+			echo "Nastavuji globální natočení pro celý dokument $1 - $2" >> /dev/stderr
+			case "$2" in
+				0|1|2|3)  ${DJVUSED} -e "set-rotation $2; save" $1
+				;;
+				left) ${DJVUSED} -e "set-rotation +1; save" $1
+				;;
+				right) ${DJVUSED} -e "set-rotation -1; save" $1
+				;;
+				180) ${DJVUSED} -e "set-rotation +2; save" $1
+				;;
+				*) echo "${INFO}" >> /dev/stderr
+				;;
+			esac
+		fi
+	else
+		echo "Nastavuji globální natočení pro celý dokument $1 - $2" >> /dev/stderr
+		case "$2" in
+			0|1|2|3)  ${DJVUSED} -e "set-rotation $2; save" $1
 			;;
-			left) ${DJVUSED} -e "select $PAGE; set-rotation +1; save" $1
+			left) ${DJVUSED} -e "set-rotation +1; save" $1
 			;;
-			right) ${DJVUSED} -e "select $PAGE; set-rotation -1" $1
+			right) ${DJVUSED} -e "set-rotation -1; save" $1
 			;;
-			180) ${DJVUSED} -e "select $PAGE; set-rotation +2" $1
+			180) ${DJVUSED} -e "set-rotation +2; save" $1
 			;;
-			*) echo "Rotace akceptuje absolutní hodnoty 0, 1 (vpravo), 2 (vzhůru nohama), 3 (vlevo) a left (pro otáčení stránky o 90° směrem doleva) a right (pro otáčení stránky o 90° směrem doprava). Každá jiná hodnota parametru vede k tomu, že je rotace ignorována."
+			*) echo "${INFO}" >> /dev/stderr
 			;;
 		esac
-	else
-		echo "Stránka $2 v souboru není. Nezapomeňte, že u konvertovaného souboru se mění přípona!!"
-		exit 1
 	fi
 }
 
@@ -733,35 +794,6 @@ function backpage {
 			insertpage ${1} "${TEMPDIR}/${A}" $((BORDER+1))
 		fi
 	fi
-}
-
-function movepage {
-	# Když smažu 25, odstraní ve skutečnosti předchozí pozici.. (24)
-	# a když vložím na pozici 25, tak ho stutečně vloží, ale stávající soubor odsune až za...
-	# takže...
-	# má-li stranu 3 dát před stranu 7...
-	# 1, rozbalí...
-	# 2, odstraní stranu (3 - 1) tedy pozici 2...
-	# 3, vyhledá pozici strany 7 (ta se mezi tím přesunula na pozici 6)
-	# 4, vloží soubor, který byl původně na pozici 3 na pozici 6
-	# to je přesun before...
-	# ...
-	# Přesun after..
-	# 1, - 3, je stejné
-	# 4, jelikož je strana 7 nyní na pozici 6 a má předcházet vložené stránce, je třeba...
-	# 5, vložit soubor, který byl původně na pozici 3 na pozici 7 ...
-	# $1 vstupní soubor
-	# $2 stránka přesouvaná
-	# $3 stránka cílová
-	echo "Funkce movepage.."
-	# Ze $1 udělat indirect do adresáře temporar
-	# vytáhnout jména souborů 
-	namepage $1 $2
-	namepage $1 $3
-	# ${DJVM} -d $1 $2
-	# identifypage $1 $NAMETARGET
-	# NUMTARGET=$?
-	# ${DJVM} -i $1 temporar/$INSERT $NUMTARGET
 }
 
 function djvubundle {
@@ -1044,55 +1076,6 @@ function help {
         --lossy        100 - ignorují se plochy
 """
 		;;
-		keywords-set) echo """
-  <svazek> set <key> ... - Do metainformací Djvu svazku vloží klíč s příslušným obsahem
-
-Příklad:
-   svazek.djvu set author 'John Doe'
-[1mPoužití[0m
-
-  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
-
-         num  - pořadové číslo stránky
-         name - jméno stránky
-         file - jméno DjVu stránky, nebo skenu
-"""
-		;;
-		keywords-print) echo """
-  Výpis atributů a jejich obsahu z metainformací uložených v Djvu svazku.
-
-[1mSyntaxe[0m
-
-  [1m${0##*/}[0m <svazek> print [all]
-  [1m${0##*/}[0m <svazek> print <attr>
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         attr - jméno atributu
-         all  - klíčové slovo (vypsat vše)
-
-[3mPoznámka:[23m
-  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
-  lze do DjVu stránky či svazku importovat z externího souboru při
-  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
-"""
-		;;
-		keywords-rotate) echo """
-  <svazek> rotate {<num>|<name>} [<key>] Otočení stránky Djvu svazku.
-
-Příklad:
-   svazek.djvu rotate 1 left
-[1mPoužití[0m
-
-  [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
-
-         num  - pořadové číslo stránky
-         name - jméno stránky
-         file - jméno DjVu stránky, nebo skenu
-"""
-		;;
 		keywords-export) echo """vytvoření xml, dsed a náhledu
   Export náhledu a textového obsahu DjVu souboru do externích souborů.
 
@@ -1137,22 +1120,22 @@ Příklad:
 		;;
 		keywords-delete) echo """akce [1mdelete[0m
 
-  Odstranění stránky identifikované jménem, nebo pozicí v DjVu svazku
+  [4mOdstranění stránky[24m identifikované jménem, nebo pozicí v DjVu svazku
 
   [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
 
-[3mPoznámka:[23m
+[1mDávejte pozor[0m - akce je nevratná !
   Je doporučeno při odstraňování stránek použít jako identifikátor jméno
   stránky. A to z toho důvodu, že se pozice stránky může v průběhu
-  zpracování DjVu svazku změnit, kdežto její jméno je vždy v rámci svazku
-  jedinečné.
+  zpracování DjVu svazku změnit, kdežto její jméno zůstává vždy v rámci
+  svazku jedinečné.
 """
 		;;
 		keywords-insert) echo """akce [1minsert[0m
-  Vložení nové stránky do Djvu svazku. Je-li na vstupu nekonvertovovaný
+  [4mVložení nové stránky do Djvu svazku[24m. Je-li na vstupu nekonvertovovaný
   obrázek, dojde ke konverzi. Není-li uvedena pozice, či jméno stránky před 
   kterou se má nová stránka vložit, připojí se na konec DjVu svazku.
 
@@ -1177,29 +1160,125 @@ Příklad:
 		;;
 		keywords-forward) echo """akce [1mforward[0m
 
-  Přesun stránky v rámci DjVu svazku o pozici vpřed. [2mPřed[22m stránku, která ji
-  má následovat. V případě, už je na první pozici, se nestane nic.
+  Přesun stránky v rámci DjVu svazku o pozici vpřed. [4mPřed stránku, která[24m
+  [4mji má následovat[24m. V případě, už přesouvaná stránka je na první pozici,
+  se nestane nic.
 
   [1m${0##*/}[0m [volby] <svazek> forward {<num>|<name>} [<num>|<name>]
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
 
-[3mPoznámka:[23m
   Je doporučeno použít jako identifikátor jména stránek, místo jejich 
   aktuální pozice. A to z toho důvodu, že se pozice stránek mohou v průběhu
   zpracování DjVu svazku měnit, kdežto její jméno stránky je vždy v rámci
   svazku jedinečné.
 """
 		;;
-		keywords-back) echo """
-  <svazek>  back {<num>|<name>} [<num>|<name>] - při této akci se stránka v v rámci DjVu
-          svazku identifikovaná pozicí (<num>) nebo názvem (<name>) přesune
-          za stránku, která jí předchází.
-          V případě, že jde o poslední stránku DjVu svazku se nestane nic.
-          Má-li se přesunout před jinou stránku, než tu která ji následuje
-          pak musí být uvedeno jako další parametr pořadové číslo, nebo
-          název stránky, za kterou se má přesunout.
+		keywords-back) echo """akce [1mback[0m
+
+  Přesun stránky v rámci DjVu svazku o pozici zpět. [4mZa stránku, která[24m
+  [4mji má následovat[24m. V případě, už je přesouvaná stránka na poslední pozici,
+  se nestane nic.
+
+  [1m${0##*/}[0m [volby] <svazek> back {<num>|<name>} [<num>|<name>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+
+  Je doporučeno použít jako identifikátor jména stránek, místo jejich 
+  aktuální pozice. A to z toho důvodu, že se pozice stránek mohou v průběhu
+  zpracování DjVu svazku měnit, kdežto její jméno stránky je vždy v rámci
+  svazku jedinečné.
+"""
+		;;
+		keywords-rotate) echo """akce [1mrotate[0m
+
+  [4mOtočení DjVu stránky[24m.
+
+  [1m${0##*/}[0m [volby] <svazek> rotate {<num>|<name>} <value>
+
+         num   - pořadové číslo stránky
+         name  - jméno stránky
+         value - parametr jak má být stránka natočena
+
+[1mParametry[0m
+  O - nastaví stránku do výchozí pozice
+  1 - natočí stránku o 90° vpravo
+  2 - natočí stránku vzůru nohama 
+  3 - natočí stránku o 90° vlevo
+  left - pootočí stránku o 90° směrem doleva
+  right - pootočí stránku o 90° směrem doprava
+  180 - pootočí stránku o 180°
+
+[3mPoznámka:[23m
+          Není-li uveden identifikátor stránky, je parametrem
+          nastaveno globální natočení celého dokumentu.
+"""
+		;;
+		keywords-set) echo """akce [1mset[0m
+
+  [4mNastavení meta atributů[24m DjVu stránky, resp. celého svazku
+
+  [1m${0##*/}[0m [volby] <svazek> set {<num>|<name>} {<file>|<key> <value>}
+
+  [1m${0##*/}[0m [volby] <svazek> set {<file>|<key> <value>}
+
+         num   - pořadové číslo stránky
+         name  - jméno stránky
+         file  - soubor s meta atributy
+         key   - jméno meta atributu
+         value - hodnota meta atributu
+
+Nejběžnější atributy (key):
+       Title - Název DjVu dikumentu
+     Creator - Jméno tvůrce DjVu dokumentu
+CreationDate - Čas vytvoření dokumentu
+    Keywords - Klíčová slova pro indexaci DjVu dokumentu
+      annote - Poznámka k dokumentu
+
+[3mPoznámka:[23m
+  Další viz akce [2mprint[22m, [2mexport[22m, [2mimport[22m, [2munset[22m a manuál k tomuto skriptu.
+"""
+		;;
+		keywords-unset) echo """akce [1munset[0m
+
+  [4mOdstranění meta atributů[24m DjVu stránky, resp. celého svazku
+
+  [1m${0##*/}[0m [volby] <svazek> unset {<num>|<name>} <key>
+
+  [1m${0##*/}[0m [volby] <svazek> unset <key>
+
+         num   - pořadové číslo stránky
+         name  - jméno stránky
+         key   - jméno meta atributu
+
+[1mDávejte pozor[0m - akce je nevratná !
+  Akce dovoluje odstranit nejenom vybraný atribut, ale také všechny další,
+  proto ji využívejte nanejvýš opatrně. S meta atributy pracujte raději
+  prostřednictvím souborů zpracovávaných při akcích [2mexport[22m a [2mimport[22m.
+  Pro ověření klíče, před jeho zrušením využijte akci [2mprint[22m. Nový obsah
+  klíče lze nastavit přes akci [2mset[22m.
+"""
+		;;
+		keywords-print) echo """akce [1mprint[0m
+
+  [4mVýpis klíčů a jejich obsahu[24m z metainformací uložených v Djvu svazku.
+
+  [1m${0##*/}[0m <svazek> print [all]
+  [1m${0##*/}[0m <svazek> print <attr>
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         attr - jméno atributu
+         all  - klíčové slovo (vypsat vše)
+
+[3mPoznámka:[23m
+  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
+  lze do DjVu stránky či svazku importovat z externího souboru při
+  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
 """
 		;;
 		keywords) echo """
@@ -1213,10 +1292,12 @@ Příklad:
          rotate - mění orientaci vybrané stránky
             set - nastavuje metainformace DjVu stránek a svazku
           print - vypisuje metainformace z DjVu stránek a svazku
+          unset - odstraňuje metainformace DjVu stránek i svazku
          export - exportuje djvu stránku, dsed nebo xml soubor s obsahem
                   textové vrstvy, náhled stránky v png, atp.
          import - importuje do DjVu stránky či svazku obsah skryté textové
                   vrstvy z xml stránky
+         rename - přejmenování stránek v DjVu souboru dle nastaveného vzoru
 
 [3mPoznámka:[23m
           Pro podrobnější nápovědu použijte volbu -h za klíčovým slovem
@@ -1414,6 +1495,12 @@ do case "$1" in
 				OCR="ces"
 			fi
 		;;
+	-p|--page) if [ "$2" == "-h" ] ; then
+				help extractpage && exit 0
+			else
+				EXTRACTPAGE=yes
+			fi
+		;;
 	-r|--rename) case "$2" in
 		*0) RENAME="$2" && shift
 				;;
@@ -1467,53 +1554,9 @@ do case "$1" in
 					else
 						# Keywords
 						case "${2}" in
-							export) [ "${3}" == "-h" ] && help keywords-export && exit 0
-								exportpage ${1} ${3} ${4}
-								exit 0
-							;;
-							import) [ "${3}" == "-h" ] && help keywords-import && exit 0
-								echo "vložení xml"
-								help keywords-import
-								echo "ToDo"
-								exit 0
-							;;
-							set) [ "${3}" == "-h" ] && help keywords-set && exit 0
-								echo "vložení metainformace"
-								setmeta ${1} ${3} ${@:4}
-								exit 0
-							;;
-							unset) [ "${3}" == "-h" ] && help keywords-unset && exit 0
-								echo "Odstranění atributu z metainformace"
-								unsetmeta ${1} ${3} ${4}
-								exit 0
-							;;
-							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
-								printmeta ${1} ${3} ${4}
-								exit 0
-							;;
-							forward) [ "${3}" == "-h" ] && help keywords-forward && exit 0
-								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
-								forwardpage ${1} ${3} ${4}
-								exit 0
-							;;
-							back) [ "${3}" == "-h" ] && help keywords-back && exit 0
-								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
-								backpage ${1} ${3} ${4}
-								exit 0
-							;;
-							rotate)  [ "${3}" == "-h" ] && help keywords-rotate && exit 0
-								rotatepage ${1} ${3} ${4}
-								exit 0
-							;;
 							delete)  [ "${3}" == "-h" ] && help keywords-delete && exit 0
 								deletepage ${1} ${3}
 								exit 0
-							;;
-							info)   [ "${3}" == "-h" ] && help keywords-info && exit 0
-								echo "Zpracovaný výstup z DjVu dump"
-								echo "výstup z exitool"
-								#deletepage ${1} ${3}
-							exit 0
 							;;
 							insert) [ "${3}" == "-h" ] && help keywords-insert && exit 0
 								if [ -f ${3} ] ; then
@@ -1532,7 +1575,62 @@ do case "$1" in
 								fi
 								exit 0
 							;;
+							set) [ "${3}" == "-h" ] && help keywords-set && exit 0
+								echo "vložení metainformace"
+								setmeta ${1} ${3} ${@:4}
+								exit 0
+							;;
+							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
+								printmeta ${1} ${3} ${4}
+								exit 0
+							;;
+							unset) [ "${3}" == "-h" ] && help keywords-unset && exit 0
+								echo "Odstranění atributu z metainformace"
+								unsetmeta ${1} ${3} ${4}
+								exit 0
+							;;
+							forward) [ "${3}" == "-h" ] && help keywords-forward && exit 0
+								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+								forwardpage ${1} ${3} ${4}
+								exit 0
+							;;
+							back) [ "${3}" == "-h" ] && help keywords-back && exit 0
+								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+								backpage ${1} ${3} ${4}
+								exit 0
+							;;
+							rotate)  [ "${3}" == "-h" ] && help keywords-rotate && exit 0
+								rotatepage ${1} ${3} ${4}
+								exit 0
+							;;
+							export) [ "${3}" == "-h" ] && help keywords-export && exit 0
+								exportpage ${1} ${3} ${4}
+								exit 0
+							;;
+							import) [ "${3}" == "-h" ] && help keywords-import && exit 0
+								echo "vložení xml"
+								help keywords-import
+								echo "ToDo"
+								exit 0
+							;;
+							info) [ "${3}" == "-h" ] && help keywords-info && exit 0
+								echo "Zpracovaný výstup z DjVu dump"
+								echo "výstup z exitool"
+								echo "ToDo"
+							exit 0
+							;;
+							extract) [ "${3}" == "-h" ] && help keywords-extract && exit 0
+								echo "Vytažení DjVu stránky z DjVu souboru"
+								echo "ToDo"
+							exit 0
+							;;
+							rename) [ "${3}" == "-h" ] && help keywords-rename && exit 0
+								echo "Přejmenování stránek v DjVu souboru"
+								echo "ToDo"
+							exit 0
+							;;
 							*) help keywords && exit 0
+							;;
 						esac
 					fi
 				echo '''Pokud následuje djvu soubor'''
