@@ -36,13 +36,14 @@ LOG="${LOG=/dev/null}"
 XML="${XML=no}"
 DSED="${DSED=no}"
 INDIRECT="${INDIRECT=no}"
-FORCE="no"
+FORCE="${FORCE=no}"
 RENAME="no"
 SUFFIX=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INDIRECT=no}"
 ALG="${INDIRECT=djvu}"
-EXTRACTPAGE="no"
+EXTRACTPAGE="${EXTRACTPAGE=no}"
+VIEW="${VIEW=no}"
 
 trap '''CHYBA=$? ;
 case $CHYBA in
@@ -179,7 +180,7 @@ function setmeta {
 		${DJVUSED} ${1} -e "set-meta ${2}; save"
 	else
 		identifypage ${1} ${2}
-		NAMEPAGE=$(namepage ${1} $?)
+		NAMEPAGE=$(identifyname ${1} $?)
 		if [ "${NAMEPAGE}" == "" ] ; then
 			echo "Neplatný identifikátor stránky ${2}" >> /dev/stderr
 			exit 1
@@ -204,17 +205,17 @@ function printmeta {
 	# není-li určena stránka ani key vypíše pro celý dokument
 	if [ "${2}" = "" ] ; then
 		echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
-		META=$(${DJVUSED} ${1} -e print-meta)
+		METAKEYS=$(${DJVUSED} ${1} -e print-meta)
 		IFS_BAK=$IFS
 		IFS=$'\n'
-		for i in $META ; do
+		for i in $METAKEYS ; do
 			echo -e $(echo $i | sed 's/\\/\\0/g')
 		done
 		IFS=$IFS_BAK
 	else
 		identifypage ${1} ${2}
 		PAGE=$?
-		NAMEPAGE=$(namepage ${1} ${PAGE})
+		NAMEPAGE=$(identifyname ${1} ${PAGE})
 		if [ "${NAMEPAGE}" == "" ] ; then
 			if [ "${2}" == "all" ] ; then
 				echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
@@ -232,10 +233,10 @@ function printmeta {
 					exit 1
 				fi
 			fi
-			META=$(${DJVUSED} ${1} -e "print-meta")
+			METAKEYS=$(${DJVUSED} ${1} -e "print-meta")
 			IFS_BAK=$IFS
 			IFS=$'\n'
-			for i in $META ; do
+			for i in $METAKEYS ; do
 				if [ "${2}" == "all" ] ; then
 					echo -e $(echo $i | sed 's/\\/\\0/g')
 				else
@@ -254,10 +255,10 @@ function printmeta {
 			else
 				echo "Metadata stránky ${NAMEPAGE} ( $PAGE ) ze souboru ${1##*/} - atribut ${3}:" >> /dev/stderr
 			fi
-			META=$(${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta")
+			METAKEYS=$(${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta")
 			IFS_BAK=$IFS
 			IFS=$'\n'
-			for i in $META ; do
+			for i in $METAKEYS ; do
 				if [ "${3}" == "" ] || [ "${3}" == "all" ] ; then
 					echo -e $(echo $i | sed 's/\\/\\0/g')
 				else
@@ -279,7 +280,7 @@ function unsetmeta {
 	# $2 - identifikátor, klíčové slovo nebo soubor
 	# $3 - key
 	identifypage ${1} ${2}
-	NAMEPAGE=$(namepage ${1} $?)
+	NAMEPAGE=$(identifyname ${1} $?)
 	if [ "${NAMEPAGE}" == "" ] ; then
 		echo "Odstraňuji globální atribut.."
 		${DJVUSED} ${1} -e "print-meta" > ${TEMPDIR}/${1/.djvu/.temp}
@@ -330,20 +331,23 @@ function exportpage {
 			fi
 		;;
 		*) identifypage ${1} ${2}
-			NAMEPAGE=$(namepage ${1} $?)
+			NAMEPAGE=$(identifyname ${1} $?)
 			if [ "${NAMEPAGE}" == "" ] ; then
 				echo "Neplatný identifikátor stránky $2"
 				exit 1
 			else
-				echo "export stránky $EXTRACTPAGE - $NAMEPAGE ${#NAMEPAGE} - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE" >> /dev/stderr
+#				echo "export stránky $EXTRACTPAGE - $NAMEPAGE ${#NAMEPAGE} - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE" >> /dev/stderr
 				if [ ${EXTRACTPAGE} == "yes" ] ; then
 					${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-					echo ${TEMPDIR}/${NAMEPAGE//\ /\\ } >> /dev/stderr
-					mv ${TEMPDIR}/${NAMEPAGE//\ /\\ } ${TARGETDIR}
-					#${DJVUSED} ${1} -e "select ${NAMEPAGE}; save-page ${NAMEPAGE}"
-					exit 33
+					if [ -f "${TARGETDIR}/${NAMEPAGE}" ] ; then
+						echo "Stránka, kterou se chystáte exportovat již v cílové pozici existuje. Chcete ji přepsat?"
+						potvrdit && mv "${TEMPDIR}/${NAMEPAGE}" "${TARGETDIR}/"
+						exit 33
+					else
+						mv "${TEMPDIR}/${NAMEPAGE}" "${TARGETDIR}/"
+					fi
 				fi
-				[ ${XML} == "yes" ] && THUMBNAIL=yes
+				[ ${XML} == "yes" ] && VIEW=yes
 				if [ ${XML} == "yes" ] ; then
 					exportxml ${1} ${2} ${TARGETDIR}
 				fi
@@ -364,7 +368,7 @@ function exportdsed {
 	case "${#@}" in
 		3) identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 			if [ -f "${3}/${NAMEPAGE/.djvu/.dsed}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ${3}/${NAMEPAGE/.djvu/.dsed}
 			else
@@ -381,7 +385,7 @@ function exportdsed {
 		else
 			identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 			if [ -f "./${NAMEPAGE/.djvu/.dsed}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ./${NAMEPAGE/.djvu/.dsed}
 			else
@@ -407,12 +411,12 @@ function exportxml {
 	case "${#@}" in
 		3) identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 			if [ -f "${3}/${NAMEPAGE/.djvu/.xml}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
 			else
 				${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
-				thumbnail ${1} ${PAGE} ${3}
+				exportview ${1} ${PAGE} ${3}
 			fi
 		;;
 		2) if [ -d ${2} ] ; then
@@ -421,17 +425,17 @@ function exportxml {
 				else
 					${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
 				fi
-				thumbnail ${1} ${2}
+				exportview ${1} ${2}
 			else
 			identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 				if [ -f "./${NAMEPAGE/.djvu/.xml}" ] ; then
 					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
 				else
 					${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
 				fi
-				thumbnail ${1} ${PAGE} ./
+				exportview ${1} ${PAGE} ./
 			fi
 		;;
 		1) if [ -f "./${1/.djvu/.xml}" ] ; then
@@ -439,14 +443,14 @@ function exportxml {
 			else
 				${DJVUTOXML} ${1} ./${1/.djvu/.xml}
 			fi
-			thumbnail ${1} ./
+			exportview ${1} ./
 		;;
 		*) echo "Z nějakého důvodu nelze provést export xml souboru" >> /dev/stderr && exit 1
 		;;
 	esac
 }
 
-function thumbnail {
+function exportview {
 	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
 	# Náhled se znovu exportuje pouze za předpokladu, že je současně uvedena volba --force
 	# $1 - svazek
@@ -456,7 +460,7 @@ function thumbnail {
 		3) # echo "Předán je identifikátor i adresář, náhled stránky $2 se bude exportovat do $3"
 			identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 			if [ -f "${3}/${NAMEPAGE/.djvu/.png}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
 			else
@@ -470,7 +474,7 @@ function thumbnail {
 			while [ ${PAGES} -gt "0" ] ; do
 				identifypage ${1} ${NUMPAGE}
 				PAGE=$?
-				NAMEPAGE=$(namepage ${1} $PAGE)
+				NAMEPAGE=$(identifyname ${1} $PAGE)
 				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
 					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
 				else
@@ -482,7 +486,7 @@ function thumbnail {
 		else
 			identifypage ${1} ${2}
 			PAGE=$?
-			NAMEPAGE=$(namepage ${1} $PAGE)
+			NAMEPAGE=$(identifyname ${1} $PAGE)
 			if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
 				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
 			else
@@ -496,7 +500,7 @@ function thumbnail {
 			while [ ${PAGES} -gt "0" ] ; do
 				identifypage ${1} ${NUMPAGE}
 				PAGE=$?
-				NAMEPAGE=$(namepage ${1} $PAGE)
+				NAMEPAGE=$(identifyname ${1} $PAGE)
 				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
 					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
 				else
@@ -555,7 +559,6 @@ function konvertor {
 				fi
 			fi
 			if [ ${XML} == "yes" ] ; then
-				THUMBNAIL=yes
 				if [ -f "${2/.djvu/.xml}" ] ; then
 					if [ ${FORCE} != "no" ] ; then
 						# exportuji textovou vrstvu v xml, pouze pokud neexistuje, nebo je-li uveden parametr -f (--force)
@@ -567,8 +570,8 @@ function konvertor {
 					exportxml ${2}
 				fi
 			fi
-			if [ ${THUMBNAIL} == "yes" ] ; then
-				thumbnail ${2}
+			if [ ${VIEW} == "yes" ] ; then
+				exportview ${2}
 			fi
 			if [ ${INSERTTEXT} == "yes" ] && [ ${#OCR} != "3" ] ; then
 				inserttext ${2}
@@ -603,7 +606,7 @@ function identifypage {
 	return ${ORDER//+([\]P\[])/}
 }
 
-function namepage {
+function identifyname {
 	# Funkce vrací jméno stránky na základě pořadového čísla stránky
 	# $1 soubor
 	# $2 číslo stránky
@@ -615,7 +618,7 @@ function namepage {
 #		VYSTUP=${NAME[@]:0:$PAGEORDER} >> /dev/stderr
 #		echo "${VYSTUP//+([\{\}])/}"
 		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | tr ' ' '#' | awk -F\{ '{print $2}' | awk -F\} '{print $1}' | tr '#' ' ')
-		echo "${OUTPUT}"
+		echo -n "${OUTPUT}"
 	else
 		return 1
 	fi
@@ -634,7 +637,7 @@ function insertpage {
 	# $3 - identifikátor stránky před kterou se má vložit
 	identifypage ${1} ${3}
 	PAGE=$?
-	NAMEPAGE=$(namepage ${1} ${PAGE})
+	NAMEPAGE=$(identifyname ${1} ${PAGE})
 	identifypage ${1} ${2}
 	TESTPAGE=$?
 	if [ "${TESTPAGE}" ] ; then
@@ -682,7 +685,7 @@ absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
 Každá jiná hodnota parametru je ignorována."""
 	identifypage ${1} ${2}
 	PAGE=$?
-	NAMEPAGE=$(namepage ${1} ${PAGE})
+	NAMEPAGE=$(identifyname ${1} ${PAGE})
 	if [ "${NAMEPAGE}" == "" ] ; then
 		if [ "${3}" ] ; then
 			echo "Nastavuji natočení strany $PAGE celý dokument $1 - $2" >> /dev/stderr
@@ -737,8 +740,8 @@ function forwardpage {
 	echo "před" >> /dev/stderr
 	identifypage $1 $2
 	AORDER=$?
-	A=$(namepage $1 $AORDER)
-	B=$(namepage $1 $3)
+	A=$(identifyname $1 $AORDER)
+	B=$(identifyname $1 $3)
 	echo "Přesouvám $A před $B"
 	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
 	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
@@ -778,8 +781,8 @@ function backpage {
 	# $3 - pozice k přesunu
 	identifypage $1 $2
 	AORDER=$?
-	A=$(namepage $1 $AORDER)
-	B=$(namepage $1 $3)
+	A=$(identifyname $1 $AORDER)
+	B=$(identifyname $1 $3)
 #	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
 	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
 	deletepage ${1} ${AORDER}
@@ -1026,6 +1029,109 @@ function fromxcf {
 function help {
 	echo -n """[1mNápověda pro [1m[2m${0##*/}[0m : """
 	case "$1" in
+		exporttodjvu) echo """volba [1m-p[0m ([1m--page[0m)
+
+  Extrakce DjVu stránky ze svazku
+
+  [1m${0##*/}[0m ... {-p|--page} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		exporttopng) echo """volba [1m-v[0m ([1m--view[0m)
+
+  Extrakce DjVu stránky do PNG soubru pro revizi textové vrstvy
+
+  [1m${0##*/}[0m ... {-v|--view} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		exporttoxml) echo """volba [1m-x[0m ([1m--xml[0m)
+
+  Extrakce DjVu stránky ze svazku
+
+  [1m${0##*/}[0m ... {-x|--xml} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		exporttodsed) echo """volba [1m-d[0m ([1m--dsed[0m)
+
+  Extrakce DjVu stránky ze svazku
+
+  [1m${0##*/}[0m ... {-x|--xml} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		exporttometa) echo """volba [1m-m[0m ([1m--meta[0m)
+
+  Extrakce DjVu stránky ze svazku
+
+  [1m${0##*/}[0m ... {-x|--xml} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		exporttothumb) echo """volba [1m-t[0m ([1m--thumb[0m)
+
+  Extrakce DjVu stránky ze svazku
+
+  [1m${0##*/}[0m ... {-t|--thumb} [yes|no] ...
+  
+  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
+  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
+  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
+  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
+		force) echo """volba [1m-f[0m ([1m--force[0m)
+
+  Vynucení akce
+
+  [1m${0##*/}[0m ... {-f|--force} ...
+  
+  Prostřednictvím této volby si lze vynutit realizaci akce.
+  Výchozí nastavení (no), lze implicitně změnit na (yes) prostřednictvím
+  uživatelského konfiguračního souboru umístěného v v adresáři:
+
+    ${HOME}/.config/${NAME}/
+"""
+		;;
 		indirect) echo"""
 [1mVolba[0m
          --indirect Volba, kterou lze změnit výchozí typ vícestránkového 
@@ -1352,13 +1458,14 @@ CreationDate - Čas vytvoření dokumentu
 		options) echo """
 [1mPřehled akceptovaných voleb[0m: 
   -h|--help     Nápověda
-  -f|--force
-  -i|--indirect Výsledekm zpracování bude volný svazek
   -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
-  -d|--dsed Při práci s textovou vrstvou se bude pracovat s formátem
-              dsed (lisp)
-  -x|--xml  Při práci s textovou vrstvou se bude pracovat s formátem
-              xml
+  -d|--dsed     Při akci export ukládat obsah textové vrstvy do souboru .dsed
+  -f|--force    Vynucení akce
+  -i|--indirect Výsledekm zpracování bude volný svazek
+  -m|--meta     Při akci export ukládat meta informace z DjVu stránky či svazku do soubor s příponou .meta
+  -p|--page     Vytažení celé stránky z DjVu svazku
+  -x|--xml      Při akci export ukládat obsah textové vrstvy do souboru .xml
+  -t|--thumb    Vygenerování náhledů v DjVu svazku, resp. při akci export vytažení náhledu do souboru s příponou .thumb (obrazová vrstva, kódvaná v  IW44)
 
 Parametrické volby:
    -n|--name    parametr zajistí, že se soubory přejmenují
@@ -1441,11 +1548,29 @@ do case "$1" in
 					echo "$i"
 				done && exit 0 || ALG="$2" ; shift
 		;;
-	-d|--dsed) DSED=yes
-		;;
-	-f|--force) FORCE=yes
-		;;
-	--no-thumbnail) THUMBNAIL=no
+	-d|--dsed) if [ "$2" == "-h" ] ; then
+				help exporttodsed && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				DSED="${2}"
+				shift
+			else
+				DSED="yes"
+			fi
+	;;
+	-f|--force) if [ "$2" == "-h" ] ; then
+				help force && exit 0
+			else
+				FORCE=yes
+			fi
+	;;
+	-v|--view) if [ "$2" == "-h" ] ; then
+				help exporttopng && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				VIEW="${2}"
+				shift
+			else
+				VIEW="yes"
+			fi
 		;;
 	--dpi) if [ "$2" -ge "72" ] || [ "$2" -le "6000" ] ; then
 				DPI="$2"
@@ -1453,8 +1578,8 @@ do case "$1" in
 			else
 				help dpi && exit 0
 			fi
-		;;
-    -h)  if [ "$2" == "-h" ] ; then
+	;;
+    -h) if [ "$2" == "-h" ] ; then
 				help options
 			else
 				help
@@ -1466,13 +1591,13 @@ do case "$1" in
 			else
 				INDIRECT=yes
 			fi
-		;;
+	;;
 	--clean) LEVEL="--loss-level=1"
-		;;
+	;;
 	--lossy) LEVEL="--loss-level=100"
-		;;
+	;;
 	--lossless) LEVEL="--loss-level=0"
-		;;
+	;;
 	--loss-level) if [ "$2" -ge "0" ] || [ "$2" -lt "200" ] ; then
 				LEVEL="--loss-level=1"
 				shift
@@ -1480,8 +1605,17 @@ do case "$1" in
 				help level && exit 0
 			fi
 		;;
-	-m|--manual) [ -f $0.manual ] && less -R $0.manual
+	--manual) [ -f $0.manual ] && less -R $0.manual
 		exit 0
+		;;
+	-m|--meta) if [ "$2" == "-h" ] ; then
+				help exporttometa && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				EXTRACTMETA="${2}"
+				shift
+			else
+				EXTRACTMETA="yes"
+			fi
 		;;
 	--pdf) PDF2DJVU=$(which pdf2djvu)
 [ ! ${PDF2DJVU} ] && echo 'Není nainstalován balík pdf2djvu, který je nezbytný pokud chcete provést přímou konverzi PDF souboru do DjVu formátu' && PDF2DJVU=false
@@ -1496,9 +1630,12 @@ do case "$1" in
 			fi
 		;;
 	-p|--page) if [ "$2" == "-h" ] ; then
-				help extractpage && exit 0
+				help exporttodjvu && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				EXTRACTPAGE="${2}"
+				shift
 			else
-				EXTRACTPAGE=yes
+				EXTRACTPAGE="yes"
 			fi
 		;;
 	-r|--rename) case "$2" in
@@ -1534,7 +1671,23 @@ do case "$1" in
 				exit 0
 			fi
 		;;
-	-x|--xml) XML=yes
+	-x|--xml) if [ "$2" == "-h" ] ; then
+				help exporttoxml && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				XML="${2}"
+				shift
+			else
+				XML="yes"
+			fi
+		;;
+	-t|--thumb) if [ "$2" == "-h" ] ; then
+				help exporttothumb && exit 0
+			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
+				THUMBNAIL="${2}"
+				shift
+			else
+				THUMBNAIL="yes"
+			fi
 		;;
 	*) if [ -f "${1}" ] ; then
 			case "${1##*.}" in
@@ -1616,11 +1769,6 @@ do case "$1" in
 							info) [ "${3}" == "-h" ] && help keywords-info && exit 0
 								echo "Zpracovaný výstup z DjVu dump"
 								echo "výstup z exitool"
-								echo "ToDo"
-							exit 0
-							;;
-							extract) [ "${3}" == "-h" ] && help keywords-extract && exit 0
-								echo "Vytažení DjVu stránky z DjVu souboru"
 								echo "ToDo"
 							exit 0
 							;;
