@@ -18,7 +18,7 @@ shopt -s extglob
 # - výchozí algoritmus djvu; testovací konverze pro všechny algoritmy se
 #   provede pouze je-li uveden parametr --test-conversion
 # - implementována rotace stránky
-# - implementovány přesuny stránek (akce forward a back)
+# - implementovány přesuny stránek (akce fore a back)
 # - implementováno generování náhledů do exportu
 # - upraveny funkce pro export náhledů a souborů textové vrstvy
 # - implementována akce print pro výpis metadat
@@ -38,12 +38,12 @@ DSED="${DSED=no}"
 INDIRECT="${INDIRECT=no}"
 FORCE="${FORCE=no}"
 RENAME="no"
-SUFFIX=".djvu"
+EXTENSION=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INDIRECT=no}"
 ALG="${INDIRECT=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
-VIEW="${VIEW=no}"
+IMGPAGE="${IMGPAGE=no}"
 
 trap '''CHYBA=$? ;
 case $CHYBA in
@@ -150,6 +150,20 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+function rozvazat {
+	# $1 - soubor
+	# $2 - adresář
+	# $3 - indexový soubor
+	echo "rozvazat - $1 - $2 - $3" >> /dev/stderr
+	if [ -d "${2}" ] ; then
+		if [ -z "${3}" ] ; then
+			${DJVMCVT} -i ${1} ${2} index.djvu
+		else
+			${DJVMCVT} -i ${1} ${2} ${3}
+		fi
+	fi
+}
+
 function escape_path {
 echo $@ | sed \
   -e 's/\ /\\\ /g'
@@ -183,7 +197,7 @@ function setmeta {
 		NAMEPAGE=$(identifyname ${1} $?)
 		if [ "${NAMEPAGE}" == "" ] ; then
 			echo "Neplatný identifikátor stránky ${2}" >> /dev/stderr
-			exit 1
+			exit 12
 		fi
 		if [ "${3}" == "" ] ; then
 			if [ -f ${NAMEPAGE/.djvu/.meta} ] ; then
@@ -322,8 +336,21 @@ function exportpage {
 			exit 1
 		fi
 	fi
+	echo "-$2-" >> /dev/stderr
 	case "$2" in
-		all) if [ ${XML} == "yes" ] ; then
+		all) lastpage ${1}
+			PAGES=$?
+			NUMPAGE=1
+			echo $PAGES >> /dev/stderr
+			while [ ${PAGES} -gt "0" ] ; do
+				identifypage ${1} ${NUMPAGE}
+				PAGE=$?
+				NAMEPAGE=$(identifyname ${1} $PAGE)
+				echo "Zpracovávám stránku ${NAMEPAGE}" >> /dev/stderr
+				NUMPAGE=$((NUMPAGE + 1))
+				PAGES=$((PAGES - 1))
+			done
+			if [ ${XML} == "yes" ] ; then
 				exportxml ${1} ${TARGETDIR}
 			fi
 			if [ ${DSED} == "yes" ] ; then
@@ -332,11 +359,15 @@ function exportpage {
 		;;
 		*) identifypage ${1} ${2}
 			NAMEPAGE=$(identifyname ${1} $?)
+			echo "$NAMEPAGE" >> /dev/stderr
 			if [ "${NAMEPAGE}" == "" ] ; then
-				echo "Neplatný identifikátor stránky $2"
-				exit 1
+				echo "Neplatný identifikátor stránky $2. Pokud mají být ze souboru vyexportovány všechny stránky, je třeba uvést klíčové slovo - all" >> /dev/stderr
+				exit 13
 			else
 #				echo "export stránky $EXTRACTPAGE - $NAMEPAGE ${#NAMEPAGE} - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE" >> /dev/stderr
+				if [ ${IMGPAGE} != "no" ] ; then
+					exportimg ${1} ${NAMEPAGE} ${TARGETDIR}
+				fi
 				if [ ${EXTRACTPAGE} == "yes" ] ; then
 					${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
 					if [ -f "${TARGETDIR}/${NAMEPAGE}" ] ; then
@@ -347,7 +378,6 @@ function exportpage {
 						mv "${TEMPDIR}/${NAMEPAGE}" "${TARGETDIR}/"
 					fi
 				fi
-				[ ${XML} == "yes" ] && VIEW=yes
 				if [ ${XML} == "yes" ] ; then
 					exportxml ${1} ${2} ${TARGETDIR}
 				fi
@@ -416,7 +446,7 @@ function exportxml {
 				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
 			else
 				${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
-				exportview ${1} ${PAGE} ${3}
+				exportimg ${1} ${PAGE} ${3}
 			fi
 		;;
 		2) if [ -d ${2} ] ; then
@@ -425,7 +455,7 @@ function exportxml {
 				else
 					${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
 				fi
-				exportview ${1} ${2}
+				exportimg ${1} ${2}
 			else
 			identifypage ${1} ${2}
 			PAGE=$?
@@ -435,7 +465,7 @@ function exportxml {
 				else
 					${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
 				fi
-				exportview ${1} ${PAGE} ./
+				exportimg ${1} ${PAGE} ./
 			fi
 		;;
 		1) if [ -f "./${1/.djvu/.xml}" ] ; then
@@ -443,29 +473,51 @@ function exportxml {
 			else
 				${DJVUTOXML} ${1} ./${1/.djvu/.xml}
 			fi
-			exportview ${1} ./
+			exportimg ${1} ./
 		;;
 		*) echo "Z nějakého důvodu nelze provést export xml souboru" >> /dev/stderr && exit 1
 		;;
 	esac
 }
 
-function exportview {
+function exportimg {
 	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
 	# Náhled se znovu exportuje pouze za předpokladu, že je současně uvedena volba --force
 	# $1 - svazek
 	# $2 - identifikátor stránky nebo adresář
 	# $3 - adresář
 	case "${#@}" in
-		3) # echo "Předán je identifikátor i adresář, náhled stránky $2 se bude exportovat do $3"
-			identifypage ${1} ${2}
+		3) identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(identifyname ${1} $PAGE)
-			if [ -f "${3}/${NAMEPAGE/.djvu/.png}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
-			else
-				${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
-			fi
+			case "${IMGPAGE}" in
+				yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ${3}" >> /dev/stderr
+				if [ -f "${3}/${NAMEPAGE/.djvu/.png}" ] ; then
+						if [ "${FORCE}" == "yes" ] ; then
+							${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
+						else
+							echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+							potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
+						fi
+					else
+						${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${3}/${NAMEPAGE/.djvu/.png}
+					fi
+				;;
+				no) echo "Export obrazové vrstvy není povolen" >> /dev/stderr
+				;;
+				*) echo "Exportuji ${NAMEPAGE/.djvu/.${IMGPAGE}.pnm} do ${3}" >> /dev/stderr
+					if [ -f "${3}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}" ] ; then
+						if [ "${FORCE}" == "yes" ] ; then
+							${DDJVU} --format=pnm --page=${PAGE} ${1} > ${3}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						else
+							echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+							potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} > ${3}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						fi
+					else
+						${DDJVU} --format=pnm --page=${PAGE} ${1} > ${3}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+					fi
+				;;
+			esac
 		;;
 		2) if [ -d ${2} ] ; then
 			lastpage ${1}
@@ -475,11 +527,34 @@ function exportview {
 				identifypage ${1} ${NUMPAGE}
 				PAGE=$?
 				NAMEPAGE=$(identifyname ${1} $PAGE)
-				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
-					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
-				else
-					${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
-				fi
+				case "${IMGPAGE}" in
+					yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ${2}" >> /dev/stderr
+					if [ -f "${2}/${NAMEPAGE/.djvu/.png}" ] ; then
+							if [ "${FORCE}" == "yes" ] ; then
+								${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
+							else
+								echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+								potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
+							fi
+						else
+							${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ${2}/${NAMEPAGE/.djvu/.png}
+						fi
+					;;
+					no) echo "Export obrazové vrstvy není povolen" >> /dev/stderr
+					;;
+					*) echo "Exportuji ${NAMEPAGE/.djvu/.${IMGPAGE}.pnm} do ${2}" >> /dev/stderr
+						if [ -f "${2}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}" ] ; then
+							if [ "${FORCE}" == "yes" ] ; then
+								${DDJVU} --format=pnm --page=${PAGE} ${1} > ${2}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+							else
+								echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+								potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} > ${2}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+							fi
+						else
+							${DDJVU} --format=pnm --page=${PAGE} ${1} > ${2}/${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						fi
+					;;
+				esac
 				NUMPAGE=$((NUMPAGE + 1))
 				PAGES=$((PAGES - 1))
 			done
@@ -487,11 +562,34 @@ function exportview {
 			identifypage ${1} ${2}
 			PAGE=$?
 			NAMEPAGE=$(identifyname ${1} $PAGE)
-			if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
-			else
-				${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
-			fi
+			case "${IMGPAGE}" in
+				yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ./" >> /dev/stderr
+				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
+						if [ "${FORCE}" == "yes" ] ; then
+							${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+						else
+							echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+							potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+						fi
+					else
+						${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+					fi
+				;;
+				no) echo "Export obrazové vrstvy není povolen" >> /dev/stderr
+				;;
+				*) echo "Exportuji ${NAMEPAGE/.djvu/.${IMGPAGE}.pnm} do ./" >> /dev/stderr
+					if [ -f "./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}" ] ; then
+						if [ "${FORCE}" == "yes" ] ; then
+							${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						else
+							echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+							potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						fi
+					else
+						${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+					fi
+				;;
+			esac
 		fi
 		;;
 		1) lastpage ${1}
@@ -501,11 +599,34 @@ function exportview {
 				identifypage ${1} ${NUMPAGE}
 				PAGE=$?
 				NAMEPAGE=$(identifyname ${1} $PAGE)
-				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
-					[ "${FORCE}" == "yes" ] && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
-				else
-					${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
-				fi
+				case "${IMGPAGE}" in
+					yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ./" >> /dev/stderr
+					if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
+							if [ "${FORCE}" == "yes" ] ; then
+								${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+							else
+								echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+								potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+							fi
+						else
+							${DDJVU} --format=pnm --page=${PAGE} ${1} | ${PNMTOPNG} > ./${NAMEPAGE/.djvu/.png}
+						fi
+					;;
+					no) echo "Export obrazové vrstvy není povolen" >> /dev/stderr
+					;;
+					*) echo "Exportuji ${NAMEPAGE/.djvu/.${IMGPAGE}.pnm} do ./" >> /dev/stderr
+						if [ -f "./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}" ] ; then
+							if [ "${FORCE}" == "yes" ] ; then
+								${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+							else
+								echo "Soubor s takovým názvem v cílovém adresáři již existuje."
+								potvrdit && ${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+							fi
+						else
+							${DDJVU} --format=pnm --page=${PAGE} ${1} > ./${NAMEPAGE/.djvu/.${IMGPAGE}.pnm}
+						fi
+					;;
+				esac
 				NUMPAGE=$((NUMPAGE + 1))
 				PAGES=$((PAGES - 1))
 			done
@@ -570,8 +691,8 @@ function konvertor {
 					exportxml ${2}
 				fi
 			fi
-			if [ ${VIEW} == "yes" ] ; then
-				exportview ${2}
+			if [ ${IMGPAGE} == "yes" ] ; then
+				exportimg ${2}
 			fi
 			if [ ${INSERTTEXT} == "yes" ] && [ ${#OCR} != "3" ] ; then
 				inserttext ${2}
@@ -593,32 +714,33 @@ function identifypage {
 	# Funkce vrací pořadové číslo stránky
 	# $1 soubor
 	# $2 testovaná hodnota
-	if [ "${2%%+([0-9])}" == "" ] ; then
-		PAGE="\[P$2\]"
+	if [ "${2}" == "" ] ; then
+		return 0
+	elif [ "${2%%+([0-9])}" == "" ] ; then
+		local PAGE="\[P$2\]"
 	else
-		PAGE="\{${2}\}"
+		local PAGE="\{${2}\}"
 	fi
-#	echo "$PAGE" >> /dev/stderr
-	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | grep ${PAGE}))
-	ORDER=${OUTPUT[$((${#OUTPUT[@]}-1))]}
-#	echo ${OUTPUT[@]} >> /dev/stderr
-#	echo ${ORDER} >> /dev/stderr
-	return ${ORDER//+([\]P\[])/}
+	local OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep ${PAGE} | awk -F'[{}]' '{print $3}')
+	local ORDER=${OUTPUT//+([\]P\[])/}
+	echo ${ORDER}
 }
 
 function identifyname {
 	# Funkce vrací jméno stránky na základě pořadového čísla stránky
 	# $1 soubor
 	# $2 číslo stránky
+#	echo "identifyname: Určuji jméno ${@} ${#@}" >> /dev/stderr
 	if [ "${2%%+([0-9])}" == "" ] ; then
-		PAGE="\[P$2\]"
+		local PAGE="\[P$2\]"
 		#OUTPUT=($(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE))
 #		NAME=(${OUTPUT[@]:2})
 #		PAGEORDER=$((${#NAME[@]}-1))
 #		VYSTUP=${NAME[@]:0:$PAGEORDER} >> /dev/stderr
 #		echo "${VYSTUP//+([\{\}])/}"
-		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | tr ' ' '#' | awk -F\{ '{print $2}' | awk -F\} '{print $1}' | tr '#' ' ')
-		echo -n "${OUTPUT}"
+#		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | tr ' ' '#' | awk -F\{ '{print $2}' | awk -F\} '{print $1}' | tr '#' ' ')
+		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | awk -F'[{}]' '{print $2}')
+		echo ${OUTPUT}
 	else
 		return 1
 	fi
@@ -627,39 +749,53 @@ function identifyname {
 function lastpage {
 	# Funkce vrací číslo poslední stránky
 	# $1 jméno vícestránkového djvu souboru
-	OUTPUT=($(${DJVUDUMP} ${1} | grep FORM | tail -1))
-	return ${OUTPUT[3]//+([\]P\[])/}
+	OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | tail -1 | awk -F'[{}]' '{print $3}')
+	echo "$OUTPUT" >> /dev/stderr
+	echo "${OUTPUT//+([\]P\[])/}" >> /dev/stderr
+	return ${OUTPUT//+([\]P\[])/}
 }
 
 function insertpage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - djvu soubor co se má vložit
 	# $3 - identifikátor stránky před kterou se má vložit
-	identifypage ${1} ${3}
-	PAGE=$?
-	NAMEPAGE=$(identifyname ${1} ${PAGE})
-	identifypage ${1} ${2}
-	TESTPAGE=$?
-	if [ "${TESTPAGE}" ] ; then
-		echo "V souboru ${1} se již stránka s názvem ${2} vyskytuje. Budete-li teď v akci pokračovat, bude k názvu stránky po jejím začlenení do DjVu svazku přiřazen suffix s pořadovým číslem. Teď máte ještě šanci operaci přerušit a soubor přejmenovat. Případně před vložením nové verze stránky tu původní zrušit." >> /dev/stderr
-		potvrdit || exit 1
-	fi
-	if [ "${PAGE/[0-9]/}" == "" ] && [ "${PAGE}" != "0" ] ; then
-		${DJVM} -i $1 $2 $PAGE
-	else
-		${DJVM} -i $1 $2
-	fi
+	echo "insertpage: $1 - $2 - $3" >> /dev/stderr
+	case "${#@}" in
+		3) # soubor stránka a pozice
+			echo "Mám soubor $1 stránku $2 i cílovou pozici.. $3" >> /dev/stderr
+			if [ -f "${2}" ] ; then
+				local P=$(identifypage ${1} ${3})
+				echo "insertpage: P $P" >> /dev/stderr
+				if [ -z  "${P}" ] ; then
+					echo "Identifikátor $3 je neplatný" >> /dev/stderr
+					exit 1
+				else
+					echo "Vkládám ${1} ${2} ${P}" >> /dev/stderr
+					${DJVM} -i ${1} ${2} ${P}
+				fi
+			else
+				echo "Není platný soubor?"
+			fi
+		;;
+		2) # soubor a stránka
+			if [ -f "${2}" ] ; then
+				echo "Vkládám ${1} ${2}" >> stderr
+				${DJVM} -i ${1} ${2}
+			fi
+		;;
+	esac
 }
 
 function deletepage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany co se má odstranit
-	identifypage ${1} ${2}
-	PAGE=$?
-#	echo $PAGE
-	if [ ${PAGE} -gt "0" ] ; then
-		echo "Odstraňuji stránku $2"
-		${DJVM} -d $1 $PAGE
+	local P=$(identifypage ${1} ${2})
+	PAGE=$P
+#	echo "deletepage: Stránka má aktuálně pořadové číslo $PAGE" >> /dev/stderr
+	if [ ! -z "${PAGE}" ] ; then
+#		echo "deletepage: Odstraňuji stránku $2 - $PAGE ze souboru ${1}"  >> /dev/stderr
+		${DJVM} -d ${1} ${PAGE}
+#		echo "deletepage: Odstraněna stránka $2 - $PAGE - $?"  >> /dev/stderr
 	else
 		echo "Stránka $2 v souboru není. Nezapomeňte, že konvertovanému souboru se mění přípona!!"
 		exit 1
@@ -737,66 +873,84 @@ function forwardpage {
 	# $1 - soubor
 	# $2 - stránka k přesunu
 	# $3 - pozice k přesunu
-	echo "před" >> /dev/stderr
-	identifypage $1 $2
-	AORDER=$?
-	A=$(identifyname $1 $AORDER)
-	B=$(identifyname $1 $3)
-	echo "Přesouvám $A před $B"
-	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
-	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-	# Rozbaleno.. mohu začít mazat..
-	deletepage ${1} ${AORDER}
-	if [ "${3}" == "" ] ; then
-		echo "Přesouvám $2 o stránku vpřed.."
-		if [ ${AORDER} == "1" ] ; then
-			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
-		else
-			insertpage ${1} "${TEMPDIR}/${A}" $((AORDER-1))
-		fi
+	local BORDER=$(identifypage $1 $3)
+	if [ -z "${BORDER}" ] ; then
+#		echo "Pouze se posouvá, pokud nejde o klíčové slovo.."
+		case "${3}" in
+			end) # Přesun na předposlední pozici
+				echo "ToDo" >> /dev/stderr && exit 0
+			begin) # Přesun na začátek souboru
+				echo "ToDo" >> /dev/stderr && exit 0
+			;;
+			;;
+			*) local AORDER=$(identifypage $1 $2)
+				if [ -z "${AORDER}" ] ; then
+					echo "Stránka $2 v souboru $1 není" >> /dev/stderr
+					exit 1
+				else
+					echo "Není jiná pozice, bude se posouvat vpřed" >> /dev/stderr
+					if [ "${AORDER}" -gt "1" ] ; then
+						local B=$(identifyname ${1} $((${AORDER} - 1)))
+						local A=$(identifyname ${1} ${AORDER})
+						echo "Strana $A se bude se přesouvat před $B, mohu přikročit k rozebrání a vyjmutí stránky" >> /dev/stderr
+						rozvazat ${1} ${TEMPDIR}
+						deletepage ${1} ${A}
+					else
+						echo "Stránka $AORDER se již nachází na první pozici" >> /dev/stderr
+						exit 1
+					fi
+				fi
+			;;
+		esac
 	else
-		# Nejprve musím zjistit aktuální pozici B
-		identifypage $1 $B
-		BORDER=$?
-		if [ ${#B} -eq "0" ] ; then
-			echo "Vkládám stránku $A na původní pozici, protože předaný indentifikační parametr nové pozice je neplatný" >> /dev/stderr
-			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+		echo "plná - cílová pozice, či stránka existuje. Je třeba zjistit, zda identifikátor není v kolizi"
+		local AORDER=$(identifypage $1 $2)
+		if [ -z "${AORDER}" ] ; then
+			echo "Stránka s identifikátorem $2 v souboru $1 není" >> /dev/stderr
+			exit 1
 		else
-			# A pak mohu začít vkládat..
-#			if [ ${BORDER} == "1" ] ; then
-#				insertpage ${1} "${TEMPDIR}/${A}" $AORDER
-#			else
-				insertpage ${1} "${TEMPDIR}/${A}" $BORDER
-#			fi
-#			echo "Mohu začít vkládat" >> /dev/stderr
-#			insertpage ${1} "${TEMPDIR}/${A}" $BORDER
+			echo "Stránka vy se mohla přesouvat také na sebe samu" >> /dev/stderr
+			local B=$(identifyname $1 ${BORDER})
+			local A=$(identifyname $1 ${AORDER})
+			if [ "${B}" == "${A}" ] ; then
+				echo "Identifikátor cílové pozice odpovídá aktuální pozici" >> /dev/stderr
+				exit 1
+			else
+				echo "Mohu přikročit k rozebrání a vyjmutí stránky"
+				rozvazat ${1} ${TEMPDIR}
+				deletepage ${1} ${A}
+			fi
 		fi
 	fi
-	exit 33
+	local BORDER=$(identifypage $1 $B)
+	echo "Vkládám stránku ${A} na pozici $BORDER"
+	insertpage ${1} "${TEMPDIR}/${A}" ${BORDER}
 }
 
 function backpage {
 	# $1 - soubor
 	# $2 - stránka k přesunu
 	# $3 - pozice k přesunu
-	identifypage $1 $2
-	AORDER=$?
+	local P=$(identifypage $1 $2)
+	AORDER=$P
 	A=$(identifyname $1 $AORDER)
-	B=$(identifyname $1 $3)
-#	[ "$A" == "$3" ] && echo "Soubor k přesunu se již nachází na předané pozici" > /dev/stderr && exit 37
-	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-	deletepage ${1} ${AORDER}
-	if [ "${3}" == "" ] ; then
-		insertpage ${1} "${TEMPDIR}/${A}" $((AORDER+1))
-	else
-		identifypage $1 $B
-		BORDER=$?
-		if [ ${#B} -eq "0" ] ; then
-			insertpage ${1} "${TEMPDIR}/${A}" $AORDER
+	local P=$(identifypage $1 $3)
+	BORDER=$P
+	if [ -z "${BORDER}" ] ; then
+		if [ -z "${AORDER}" ] ; then
+			echo "Stránka $2 v souboru není.."
+			exit 1
 		else
-			insertpage ${1} "${TEMPDIR}/${A}" $((BORDER+1))
+			B=$(identifyname $1 $((${AORDER} + 1)))
 		fi
+	else
+		B=$(identifyname $1 ${BORDER})
 	fi
+	echo "forwardpage: Přesouvám A -> $A před B -> $B" >>/dev/stderr
+	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
+	deletepage ${1} ${A}
+	local P=$(identifypage $1 $B)
+	insertpage ${1} "${TEMPDIR}/${A}" $(($P + 1))
 }
 
 function djvubundle {
@@ -805,7 +959,7 @@ function djvubundle {
 	# $2 - cílový DjVu soubor
 	# $FORCE - ovlivňuje jestli se má přepsat cílový soubor, nebo ne
 	# $INDIRECT - ovlivňuje typ svazku
-	# $SUFFIX - je přípona výchozích souborů
+	# $EXTENSION - je přípona výchozích souborů
 	echo $@
 	if [ -f "$1" ] ; then
 		if [ -f "$2" ] ; then 
@@ -828,10 +982,10 @@ function djvubundle {
 		fi
 		if [ ${RENAME} == "no" ] ; then
 			echo "Výchozí soubory jsou identifikovány vzorkem a nepřejmenují se"
-			for i in $(ls -1 | grep -E "([0-9])\1?$SUFFIX\$" | sed "s/$1//" | sort -n) ; do
+			for i in $(ls -1 | grep -E "([0-9])\1?$EXTENSION\$" | sed "s/$1//" | sort -n) ; do
 				#echo "$2 $1$i"
 				ORIGSOUBOR="$1$i"
-				DJVUSOUBOR=${ORIGSOUBOR/$SUFFIX/.djvu}
+				DJVUSOUBOR=${ORIGSOUBOR/$EXTENSION/.djvu}
 				if [ -f "$ORIGSOUBOR" ] ; then
 					if [ ! -f "$DJVUSOUBOR" ] ; then
 						todjvu "$ORIGSOUBOR"
@@ -848,43 +1002,43 @@ function djvubundle {
 			if [ "${RENAME}" == "0" ] ; then
 				#echo "numerické číslování, název souborů se - až na číslo zachová "
 				INPUT=""
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						NUMBER="${RAWNUMBER##+(0)}"
 						if [ "${NUMBER}" == "" ] ; then
-							TARGET="${INPUT}0${SUFFIX}"
+							TARGET="${INPUT}0${EXTENSION}"
 						else
-							TARGET="${INPUT}${NUMBER}${SUFFIX}"
+							TARGET="${INPUT}${NUMBER}${EXTENSION}"
 						fi
 						if [ "$3" ] ; then
-							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
-								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							if [ "$TARGET" == "${VZOR}$3${EXTENSION}" ] ; then
+								konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 							fi
 						else
-							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 						fi
 					done
 #					echo "NUMERIC - soubor stejný"
 			elif [ ! "${RENAME//0/}" ] ; then
 				MAX="0"
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						if [ "${#RAWNUMBER}" -gt  "${#MAX}" ] ; then
 							MAX="${RAWNUMBER}"
 						fi
@@ -895,28 +1049,28 @@ function djvubundle {
 					BASE="${RENAME}"
 				fi
 				INPUT=""
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						NUMBER="${RAWNUMBER##+(0)}"
 						if [ "${NUMBER}" == "" ] ; then
-							TARGET="${INPUT}${BASE}${SUFFIX}"
+							TARGET="${INPUT}${BASE}${EXTENSION}"
 						else
-							TARGET="${INPUT}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${SUFFIX}"
+							TARGET="${INPUT}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${EXTENSION}"
 						fi
 						if [ "$3" ] ; then
-							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
-								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							if [ "$TARGET" == "${VZOR}$3${EXTENSION}" ] ; then
+								konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 							fi
 						else
-							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 						fi
 					done
 #				echo "BASE - soubor stejný"
@@ -926,45 +1080,45 @@ function djvubundle {
 				BASE="${RENAME#$VZOR}"
 				if [ "${#BASE}" == "1" ] ; then
 					INPUT=""
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						NUMBER="${RAWNUMBER##+(0)}"
 						if [ "${NUMBER}" == "" ] ; then
-							TARGET="${VZOR}0${SUFFIX}"
+							TARGET="${VZOR}0${EXTENSION}"
 						else
-							TARGET="${VZOR}${NUMBER}${SUFFIX}"
+							TARGET="${VZOR}${NUMBER}${EXTENSION}"
 						fi
 						if [ "$3" ] ; then
-							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
-								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							if [ "$TARGET" == "${VZOR}$3${EXTENSION}" ] ; then
+								konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 							fi
 						else
-							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 						fi
 					done
 #					echo "NUMERIC - vzor"
 				else
 					INPUT=""
 					MAX="0"
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							echo "Soubor $i nevyhovuje zvolenému vzoru $1 přeskakuji jej" >> /dev/stderr
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						if [ "${#RAWNUMBER}" -gt  "${#MAX}" ] ; then
 							MAX="${RAWNUMBER}"
 						fi
@@ -974,31 +1128,31 @@ function djvubundle {
 						BASE="$ORIGBASE"
 						echo "ORIGBASE - vzor"
 					fi
-					#	Seznam setříděný podle délky řetězců $(ls -1 $1* | grep -E "([0-9])\1?$SUFFIX\$" | sed "s/$1//" | sort -n)
-					# for i in $(ls -1 | grep -E "([0-9])\1?$SUFFIX\$" | awk '{ print length, $0 }' | sort -n ) ; do
+					#	Seznam setříděný podle délky řetězců $(ls -1 $1* | grep -E "([0-9])\1?$EXTENSION\$" | sed "s/$1//" | sort -n)
+					# for i in $(ls -1 | grep -E "([0-9])\1?$EXTENSION\$" | awk '{ print length, $0 }' | sort -n ) ; do
 					INPUT=""
-					for i in $(ls -1 $1*${SUFFIX} ) ; do
+					for i in $(ls -1 $1*${EXTENSION} ) ; do
 						if [ "$INPUT" == "" ] ; then
-							INPUT="${i%%+([0-9${SUFFIX}.])}"
-						elif [ "$INPUT" != "${i%%+([0-9${SUFFIX}.])}" ] ; then
+							INPUT="${i%%+([0-9${EXTENSION}.])}"
+						elif [ "$INPUT" != "${i%%+([0-9${EXTENSION}.])}" ] ; then
 							continue
 						else
 							echo "zpracuji $i" > /dev/null
 						fi
 						STRING="${i#${INPUT}}"
-						RAWNUMBER="${STRING%${SUFFIX}}"
+						RAWNUMBER="${STRING%${EXTENSION}}"
 						NUMBER="${RAWNUMBER##+(0)}"
 						if [ "${NUMBER}" == "" ] ; then
-							TARGET="${VZOR}${BASE}${SUFFIX}"
+							TARGET="${VZOR}${BASE}${EXTENSION}"
 						else
-							TARGET="${VZOR}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${SUFFIX}"
+							TARGET="${VZOR}${BASE:0:$((${#BASE} - ${#NUMBER}))}${NUMBER}${EXTENSION}"
 						fi
 						if [ "$3" ] ; then
-							if [ "$TARGET" == "${VZOR}$3${SUFFIX}" ] ; then
-								konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							if [ "$TARGET" == "${VZOR}$3${EXTENSION}" ] ; then
+								konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 							fi
 						else
-							konvertor "$i" "${TARGET/${SUFFIX}/.djvu}"
+							konvertor "$i" "${TARGET/${EXTENSION}/.djvu}"
 						fi
 					done
 #					echo "VZOR BASE"
@@ -1044,19 +1198,27 @@ function help {
     ${HOME}/.config/${NAME}/
 """
 		;;
-		exporttopng) echo """volba [1m-v[0m ([1m--view[0m)
+		exporttopng) echo """volba [1m[1m--img[0m
 
-  Extrakce DjVu stránky do PNG soubru pro revizi textové vrstvy
+  [4mExtrakce obrazové vrstvy[24m DjVu stránky do bitmapového souboru
 
-  [1m${0##*/}[0m ... {-v|--view} [yes|no] ...
-  
-  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
-  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
-  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
-  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
-  uživatelského konfiguračního souboru umístěného v v adresáři:
+  [1m${0##*/}[0m ... --img [yes|no|<layer>] ...
 
-    ${HOME}/.config/${NAME}/
+  Je-li parametrem volby [3myes[23m, tak se bude při akci [2mexport[22m generovat z DjVu
+  stránky plnobarevný bitmapový obrázek ve formátu PNG.
+  V ostatních případech bude ve formátu PNM.
+
+      [1m${0##*/}[0m --img background svazek.djvu export stranka.djvu
+ 
+Použitelné parametry:
+                 color - plnobarevná stránka
+                 black - černobílá kresba
+            foreground - vrstva popředí
+            background - vrstva pozadí
+                  mask - maska
+  Je-li místo [3m'yes'[23m uvedeno [3m'background'[23m, bude při exportu stránky
+  strana.djvu uložen obrázek pozadí pod jménem strana.background.pnm
+  Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
 """
 		;;
 		exporttoxml) echo """volba [1m-x[0m ([1m--xml[0m)
@@ -1270,7 +1432,7 @@ function help {
   [4mji má následovat[24m. V případě, už přesouvaná stránka je na první pozici,
   se nestane nic.
 
-  [1m${0##*/}[0m [volby] <svazek> forward {<num>|<name>} [<num>|<name>]
+  [1m${0##*/}[0m [volby] <svazek> fore {<num>|<name>} [<num>|<name>]
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
@@ -1394,7 +1556,7 @@ CreationDate - Čas vytvoření dokumentu
 
          delete - odstraní stránku ze svazku
          insert - vloží novou stránku do svazku
-  forward, back - přesune stránku v rámci svazku
+     fore, back - přesune stránku v rámci svazku
          rotate - mění orientaci vybrané stránky
             set - nastavuje metainformace DjVu stránek a svazku
           print - vypisuje metainformace z DjVu stránek a svazku
@@ -1434,7 +1596,7 @@ CreationDate - Čas vytvoření dokumentu
 			;;
 		suffix) echo """
 [1mParametr[0m
-         -s|--suffix  <[2msuffix[22m>  Přípona souborů, ze kterých se má sestavit 
+         -e|--ext  <[2msuffix[22m>  Přípona souborů, ze kterých se má sestavit 
                                 DjVu soubor.
 [4mPopis:[24m
   [2mSuffix[22m je nutné uvést pouze v případě, že soubory s názvem odpovídajícím
@@ -1557,19 +1719,28 @@ do case "$1" in
 				DSED="yes"
 			fi
 	;;
+	-e|--ext) case "$2" in
+			jpg|jpeg|png|tiff|pnm|pbm|gif|djvu) EXTENSION=".$2" && shift
+				;;
+				*) help suffix && exit 0
+				;;
+			esac
+		;;
 	-f|--force) if [ "$2" == "-h" ] ; then
 				help force && exit 0
 			else
 				FORCE=yes
 			fi
 	;;
-	-v|--view) if [ "$2" == "-h" ] ; then
+	--img) if [ "$2" == "-h" ] ; then
 				help exporttopng && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				VIEW="${2}"
-				shift
 			else
-				VIEW="yes"
+				case "${2}" in
+					yes|no|color|black|foreground|background|mask) IMGPAGE="${2}" && shift
+					;;
+					*) IMGPAGE="yes"
+					;;
+				esac
 			fi
 		;;
 	--dpi) if [ "$2" -ge "72" ] || [ "$2" -le "6000" ] ; then
@@ -1645,19 +1816,13 @@ do case "$1" in
 			;;
 		esac
 		;;
-	-s|--sufix) case "$2" in
-			jpg|jpeg|png|tiff|pnm|pbm|gif|djvu) SUFFIX=".$2" && shift
-				;;
-				*) help suffix && exit 0
-				;;
-			esac
-		;;
 	--test) TEST="yes"
+			# Implementovat volby --test-conversion a --test-view
 		;;
 	--test-conversion) ALG="abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction"
 		TEST="yes"
 		;;
-	--view) # Zobrazení souboru
+	--test-view) # Zobrazení testovacího souboru pomocí djview
 			echo "Ještě neimplementováno"
 			exit 100
 			if [ -f "$2" ] ; then
@@ -1742,8 +1907,9 @@ do case "$1" in
 								unsetmeta ${1} ${3} ${4}
 								exit 0
 							;;
-							forward) [ "${3}" == "-h" ] && help keywords-forward && exit 0
+							fore) [ "${3}" == "-h" ] && help keywords-forward && exit 0
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+#								echo "akce forvard ${1} - ${3} - ${4}" >> /dev/stderr
 								forwardpage ${1} ${3} ${4}
 								exit 0
 							;;
@@ -1757,6 +1923,7 @@ do case "$1" in
 								exit 0
 							;;
 							export) [ "${3}" == "-h" ] && help keywords-export && exit 0
+								echo "Exportuji.."
 								exportpage ${1} ${3} ${4}
 								exit 0
 							;;
