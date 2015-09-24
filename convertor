@@ -24,6 +24,11 @@ shopt -s extglob
 # - implementována akce print pro výpis metadat
 
 # ToDo
+# přepracovat použití djvudump na djvm -l (je rychlejší..)
+# implementovat kontrolu do funkce todjvu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
+# - přidat kontrolu do akce insert na duplicitní soubory při vkládání
+#   vícestránkových DjVu souborů. to ovšem bude vyžadovat samostatnou
+#   funkci...
 # - dopsat nápovědu pro akci keywords-unset 
 # - dopsat manuál pro akci set, argumenty, xmp, atp.
 # - implementovat import
@@ -32,7 +37,7 @@ shopt -s extglob
 NAME="convertor"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
 
-LOG="${LOG=/dev/null}"
+LOG="${LOG=/dev/stderr}"
 XML="${XML=no}"
 DSED="${DSED=no}"
 INDIRECT="${INDIRECT=no}"
@@ -40,8 +45,8 @@ FORCE="${FORCE=no}"
 RENAME="no"
 EXTENSION=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
-INSERTTEXT="${INDIRECT=no}"
-ALG="${INDIRECT=djvu}"
+INSERTTEXT="${INSERTTEXT=no}"
+ALG="${ALG=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
 
@@ -111,6 +116,9 @@ MIME=$(which mimetype)
 [ ! -x "${MIME}" ] && exit 21
 STAT=$(which readlink)
 [ ! -x "${STAT}" ] && exit 22
+EXIFTOOL=$(which exiftool)
+[ ! -x "${EXIFTOOL}" ] && exit 23
+
 
 NETPBM=0
 PNMSCALE=$(which pnmscale)
@@ -157,7 +165,7 @@ function log {
 	# $LOG - výstup (default - /dev/null
 	case "${1}" in
 		1) # Hlášky upřesňující místo ve skriptu
-		echo "${1}" >> ${LOG}
+		echo "${@:2}" >> ${LOG}
 		;;
 		0) # Běžné hlášky
 		echo "${1}" >> ${LOG}
@@ -182,13 +190,19 @@ function rozvazat {
 
 function testfile {
 	# $1 - soubor
-	local TYPE=$(${MIME} -dbM ${1} | awk '{print $1}')
-	# Sjednocení na malých písmenech - pro velká písmena by bylo ${TYPE^^}
+	local LOCALFILE="$*"
+	if [ -f "$*" ] ; then
+		local TYPE=$(${MIME} -dbM "${LOCALFILE}" | awk '{print $1}')
+	else
+		echo "testfile: Předaný soubor ${LOCALFILE} nemohu najít" >> /dev/stderr
+		exit 1
+	fi
 	echo ${TYPE,,}
 }
 
 function escape_path {
-echo $@ | sed \
+	echo "escape_path $*" >> /dev/stderr
+	echo "$*" | sed \
   -e 's/\ /\\\ /g'
 }
 
@@ -733,10 +747,37 @@ function getocr {
 	fi
 }
 
-function identifypage {
-	# Funkce vrací pořadové číslo stránky
+function identifybundle {
+	# Funkce testuje vstupní soubor, zda-li je typu DjVu a pak zda-li je 
+	# typu svazek (1) nebo samostatná stránka (0)
+	# $1 - soubor
+#	log 1 "identifybundle: Přijímám vstupní parametr ${1}"
+	if [ "${#1}" -gt "0" ] ; then
+		if [ $(testfile "${1}") == "djvu" ] ; then
+			local TEST=$(${DJVUDUMP} "${1}" | grep '^\([[:blank:]]*\)DIRM')
+#			log 1 "identifyfile: Výstupní hodnota z djvm - $TEST"
+			if [ "${TEST}" == "" ] ; then
+#				log 1 "identifybundle: DjVu soubor ${1}"
+				return 0
+			else
+#				log 1 "identifybundle: DjVu svazek ${1}"
+				return 1
+			fi
+		else
+			log 1 "identifybundle: Soubor ${FILE} není DjVu"
+			exit 1
+		fi
+	else
+#		log 1 "identifybundle: Nebyl předán žádný parametr"
+		exit 1
+	fi
+}
+
+function identifypage2 {
+	# Funkce vracející pořadové číslo DjVu stránky , která je založena na djvm
 	# $1 soubor
 	# $2 testovaná hodnota
+	# NEUMÍ PŘEVZÍT KE ZPRACOVÁNÍ JMÉNA SOUBORŮ S MEZERAMI!!
 	if [ "${2}" == "" ] ; then
 		return 0
 	elif [ "${2%%+([0-9])}" == "" ] ; then
@@ -747,6 +788,29 @@ function identifypage {
 	local OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep ${PAGE} | awk -F'[{}]' '{print $3}')
 	local ORDER=${OUTPUT//+([\]P\[])/}
 	echo ${ORDER}
+}
+
+function identifypage {
+	# Funkce vracející pořadové číslo DjVu stránky, která je založena na djvm
+	# $1 soubor
+	# $2 testovaná hodnota
+	# NEUMÍ OŠETŘIT MULTIPAGE DOKUMENT
+	echo "Vstup ${#@} && ${2}" >> /dev/stderr
+	local PAGE="${@:2}"
+	echo "Vstup ${PAGE//[[:digit:]]/} && ${PAGE}" >> /dev/stderr
+	if [ "${PAGE//[[:digit:]]/}" == "" ] ; then
+		echo "Číslo ${PAGE}" >> /dev/stderr
+		local OUTPUT=($(${DJVM} -l ${1} | grep \#${PAGE}\ ))
+		local PAGEORDER=${OUTPUT[@]:2:1}
+		echo "Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+		echo ${PAGEORDER#\#}
+	else
+		echo "Strana ${PAGE}" >> /dev/stderr
+		local OUTPUT=($(${DJVM} -l ${1} | grep \ ${PAGE}$))
+		local PAGEORDER=${OUTPUT[@]:2:1}
+		echo "Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+		echo ${PAGEORDER#\#}
+	fi
 }
 
 function identifyname {
@@ -770,21 +834,19 @@ function identifyname {
 }
 
 function lastpage {
-	# Funkce vrací číslo poslední stránky
+	# Funkce vrací maximální pořadové číslo stránek
 	# $1 jméno vícestránkového djvu souboru
-	log 1 "lastpage: Vstupní data ${@}"
+#	log 1 "lastpage: Vstupní data ${@}"
 	[ "$(testfile ${1})" == "djvu" ] || exit 1
-	local OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | tail -1 | awk -F'[{}]' '{print $3}')
-	log 1 "lastpage: $OUTPUT"
-	echo -n "${OUTPUT//+([\]P\[])/}"
+	local OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | wc -l)
+	echo -n "${OUTPUT}"
 }
 
 function insertpage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - djvu soubor co se má vložit
 	# $3 - identifikátor stránky před kterou se má vložit
-	log 1 "insertpage: $1 - $2 - $3"
-	log 1 "insertpage: $(testfile ${2}) ${#@}"
+	log 1 "insertpage: ${@}"
 	[ "$(testfile ${1})" == "djvu" ] || exit 1
 	case "${#@}" in
 		3) # soubor stránka a pozice
@@ -807,12 +869,51 @@ function insertpage {
 		2) # soubor a stránka
 			if [ "$(testfile ${2})" == "djvu" ] ; then
 				log 1 "insertpage: Vkládám ${1} ${2}"
-				log 1 "${DJVM} -i ${1} ${2}"
-				if [ $(lastpage ${2}) -gt "1" ] ; then
-					echo "Pokoušíte se vložit do souboru $1 vícestránkový DjVu soubor $2" >> /dev/stderr
-					potvrdit && ${DJVM} -i ${1} ${2}
+				local BMAX=$(lastpage ${2})
+				if [ -z "${BMAX}" ] ; then
+					log 1 "insertpage: Soubor ${2} není svazek"
+					local AMAX=$(lastpage ${1})
+					if [ -z "${AMAX}" ] ; then
+						echo "Soubor $1 zatím není DjVU svazek" >> /dev/stderr
+						exit 0
+					else
+						log 1 "insertpage: Soubor $1 je DjVU svazek a má ${AMAX} stran"
+						while [ "${AMAX}" -gt "0" ] ; do
+							log 1 "Zpracovávám stranu ${AMAX} - ${2##*/}"
+							local NAMEPAGE=$(identifypage ${1} ${2##*/})
+							if [ -z "${NAMEPAGE}" ] ; then
+								log 1 "Stránka ${2##*/} v souboru ${1} ještě není"
+							else
+								echo "Jedna stránka s názvem ${NAMEPAGE} se již v souboru ${1} nalézá. Při vložení se ke jménu vkládané stránky přidá pořadové číslo. Chcete pokračovat ve vkládání?" >> /dev/stderr
+								potvrdit && break || exit 0
+							fi
+							AMAX=$((AMAX -1 ))
+						done
+						${DJVM} -i ${1} ${2}
+					fi
 				else
-					${DJVM} -i ${1} ${2}
+					local AMAX=$(lastpage ${1})
+					if [ -z "${AMAX}" ] ; then
+						echo "Soubor ${1} nemá žádné stránky." >> /dev/stderr
+#xxxxxxxx vytvoření svazku ze souboru 
+# 1, Šoupnout stránku do dočasného adresáře
+# 2, A na jejím místě vytvořit stejnojmenný svazek
+# 3, Pak šoupnout ty další stránky
+						potvrdit || exit 0
+					else
+						while [ "${BMAX}" -gt "0" ] ; do
+							local NAMEPAGE=$(identifyname ${1} ${BMAX})
+							if [ ! -z "${NAMEPAGE}" ] ; then
+								if [ ! $(identifyname ${2} ${NAMEPAGE}) ] ; then
+									echo "Stránka s názvem ${NAMEPAGE}, která je součástí souboru ${2} se již v souboru ${1} nalézá. Chcete pokračovat ve vkládání?" >> /dev/stderr
+									potvrdit && break || exit 0
+								fi
+							fi
+							BMAX=$((BMAX -1 ))
+						done
+							echo "Soubor $2, který se chystáte vložit do souboru $1 je vícestránkový DjVu soubor." >> /dev/stderr
+							potvrdit && ${DJVM} -i ${1} ${2}
+					fi
 				fi
 			fi
 		;;
@@ -852,7 +953,14 @@ absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
     180 - přetočení o 180°
 
 Každá jiná hodnota parametru je ignorována."""
-	identifypage ${1} ${2}
+	local PAGES=$(djvuinfo "${1}")
+	if [ "${PAGES}" == "none" ] ; then
+		echo "jednostránkový dokument - bude se otáčet globálně"
+	else
+		echo "vícestránkový dokument - bude se identifikovat stránka"
+	fi
+
+exit 0
 	PAGE=$?
 	NAMEPAGE=$(identifyname ${1} ${PAGE})
 	if [ "${NAMEPAGE}" == "" ] ; then
@@ -984,6 +1092,27 @@ function backpage {
 	deletepage ${1} ${A}
 	local P=$(identifypage $1 $B)
 	insertpage ${1} "${TEMPDIR}/${A}" $(($P + 1))
+}
+
+function djvuinfo {
+	# $1 - soubor
+	# $2 - parametry
+#	echo "djvuinfo: ${#@}" >> /dev/stderr
+#	echo "djvuinfo: Soubor ${1}" >> /dev/stderr
+#	echo "djvuinfo: Parametry ${2}" >> /dev/stderr
+	# Ověřuji, je-li soubor typu svazek..
+	if $(identifybundle "${1}") ; then
+		local PAGES="none"
+	else
+		local PAGES=$(lastpage "${1}")
+	fi
+	if [ -z "${2}" ] ; then
+		echo "${PAGES}"
+	else
+		local INFO="DjVu pages"
+		echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${PAGES}\n" >> /dev/stderr
+		${EXIFTOOL} "${1}"
+	fi
 }
 
 function djvubundle {
@@ -1435,16 +1564,27 @@ Použitelné parametry:
   svazku jedinečné.
 """
 		;;
+		keywords-info) echo """akce [1minfo[0m
+
+  [4mVýpis informací o DjVu souboru[24m.
+
+  [1m${0##*/}[0m [volby] <file> info [<num>|<name>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         file - jméno DjVu souboru
+"""
+		;;
 		keywords-insert) echo """akce [1minsert[0m
-  [4mVložení nové stránky do Djvu svazku[24m. Je-li na vstupu nekonvertovovaný
+  [4mVložení DjVu souboru do Djvu svazku[24m. Je-li na vstupu nekonvertovovaný
   obrázek, dojde ke konverzi. Není-li uvedena pozice, či jméno stránky před 
-  kterou se má nová stránka vložit, připojí se na konec DjVu svazku.
+  kterou se má obsah vložit, připojí se na konec DjVu svazku. Předtím, je ale vyžadováno potvrzení akce, které lze obejít pouze použitím volby -f (--force)
 
   [1m${0##*/}[0m [volby] <svazek> insert <file> [<num>|<name>]
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
-         file - jméno DjVu stránky, nebo skenu
+         file - jméno DjVu souboru, nebo skenu
 
 [3mPoznámka:[23m
   Pokud se již v DjVu souboru stránka se stejným názvem vyskytuje, dojde
@@ -1697,14 +1837,30 @@ function todjvu {
 		echo "DjVu soubory nelze znovu konvertovat" >> /dev/stderr
 		exit 1
 	else
-		if [ "${TEST}" == "yes" ] ; then
+		if [ "${#ALG[@]}" -gt "1" ] ; then
 			for i in ${ALG[@]} ; do 
-				didjvu encode -o "${2/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "$1"
+				${DIDJVU} encode -o "${2/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "$1"
 				getocr ${2/.djvu/.$i.djvu}
 			done
 		else
-			if [ -f "$1" ] ; then
-				didjvu encode -o "$2" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "$1"
+			if [ -f "${2}" ] ; then
+				if [ "${FORCE}" == "yes" ] ; then
+				log 1 "todjvu: Cílový soubor ${2} existuje, bude se přepisovat"
+					${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
+					getocr ${2}
+				else
+					echo "Mám přepsat cílový soubor ${2}?"
+					potvrdit && ${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
+					getocr ${2}
+				fi
+			else
+				if [ ! -d "${2%/*}" ] ; then
+					log 1 "todjvu: neexistuje adresář pro cílový soubor, musím ho vytvořit"
+					mkdir -p "${2%/*}"
+				fi
+				log 1 "todjvu: konvertuji soubor ${1} do cílového souboru $2"
+				echo "${DIDJVU} encode -o ${2} -d ${DPI-300} ${LEVEL} -m ${ALG} ${1}" >> /dev/stderr
+				${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
 				getocr ${2}
 			fi
 		fi
@@ -1713,13 +1869,13 @@ function todjvu {
 
 function todotest {
 	for i in ${ALG[@]} ; do 
-		didjvu encode -o "${1%.*}-$i.djvu" -d 300 -m "$i" "$1"
+		${DIDJVU} encode -o "${1%.*}-$i.djvu" -d 300 -m "$i" "$1"
 	done
 }
 
 function todoview {
 	for i in ${ALG[@]} ; do 
-		(djview ${1%.*}-$i.djvu &)
+		(${DJVIEW} ${1%.*}-$i.djvu &)
 	done
 }
 
@@ -1746,6 +1902,7 @@ function todjvuclassic {
 
 # Zpracování parametrů předaných při startu skriptu
 function main {
+#local VSTUP="$@"
 while [ $# -gt 0 ]
 do case "$1" in
 	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
@@ -1896,165 +2053,230 @@ do case "$1" in
 				THUMBNAIL="yes"
 			fi
 		;;
-	*) if [ -f "${1}" ] ; then
-			case "${1##*.}" in
-				djvu|DJVU) # echo "má-li první soubor příponu djvu.. ${2//[0-9]/}"
-					if [ "${2//[0-9,-]/}" == "" ] ; then
-						echo "Extrakce stránek vybraných číselným rozsahem z DjVu svazku"
-						exit 0
-					elif [ -f "${2}" ] ; then
-						case "${2##*.}" in
-							dsed|xml) echo "následuje textový soubor $2, nejspíš ho chci vložit do $1"
-							;;
-							djvu) echo "následuje djvu soubor $2"
-							;;
-							*) echo "Nedělám nic - nejspíš chyba.." && exit 7
-							;;
-						esac
-					else
-						# Keywords
-						case "${2}" in
-							delete)  [ "${3}" == "-h" ] && help keywords-delete && exit 0
-								deletepage ${1} ${3}
-								exit 0
-							;;
-							insert) [ "${3}" == "-h" ] && help keywords-insert && exit 0
+	*) #Předaný parametr není zachycen předchozích volbách
+	# Může to být řetězec, nebo řetězec s mezerami
+	# v takovém případě může být rozhodující výskyt klíčového slova ve zbytku...
+	# Sjet ve smyčce zbytek příkazové řádky a otestovat ji na výskyt klíčového slova---
+	# Přerušit..
+#	echo "Předáno: ${VSTUP}" >> /dev/stderr
+	local CHARSTRING="${@:1}"
+	local CHARCOUNT=$((${#CHARSTRING} + 1))
+	local CHARPOS=0
+	local STRPOS=0
+	while [ "${CHARCOUNT}" -gt "0" ] ; do
+#		echo "${CHARSTRING}" >> /dev/stderr
+		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
+			*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) local FILE="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+#				echo "Soubor... -${FILE}-" >> /dev/stderr
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${FILE}}"
+#				echo "Zbytek.. ${CHARSTRING}" >> /dev/stderr
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+			;;
+			\ back |\ delete |\ export |\ fore |\ import |\ info |\ print |\ rotate |\ set |\ unset ) local KEY="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+#				echo "Klíč.. ${KEY}" >> /dev/stderr
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${KEY}}"
+#				echo "Zbytek.. ${CHARSTRING}" >> /dev/stderr
+				break
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+			;;
+		esac
+		local CHARPOS=$((CHARPOS + 1))
+		local CHARCOUNT=$((CHARCOUNT - 1))
+	done
+#	echo "Soubor se kterým budu pracovat: ${FILE}" >> /dev/stderr 
+#	echo "Akce kterou chci realizovat: ${KEY}" >> /dev/stderr 
+#	echo "Zbytek co jí předám: ${CHARSTRING}" >> /dev/stderr
+	case "${CHARSTRING// /}" in
+		*-h|*--help|-h*|--help*) if [ -z "${KEY}" ] ; then
+				help
+			else
+				echo "keywords-${KEY// /}" >> /dev/stderr
+				help "keywords-${KEY// /}"
+			fi
+			exit 77
+		;;
+	esac
+
+	if [ -z "{FILE}" ] ; then
+		# Nebyl předán soubor
+#		echo "Ve zbytku může být cesta do adresáře..."
+		if [ -d "${CHARSTRING}" ] ; then
+			echo "Byl předán adresář ${CHARSTRING}" >> /dev/stderr
+			echo "ToDo" >> /dev/stderr
+			exit 0
+		else
+			echo "Byl předán neplatný řetězec ${CHARSTRING}" >> /dev/stderr
+			exit 1
+		fi
+	else
+#		local FILE="$(escape_path ${FILE})"
+		local FILE=$(${REALPATH} "${FILE}")
+		# Tady je k dispozici soubor ke zpracování...
+		if [ -f "${FILE}" ] ; then
+#			log 1 "main: Soubor -${FILE}- existuje.."
+#			FILE=${FILE//\ /\\ }
+			case $(testfile "${FILE}") in
+				djvu)
+					#echo "AKCE ${KEY}" >> /dev/stderr
+					#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
+					case "${KEY// /}" in
+						delete) deletepage "${FILE}" "${CHARSTRING}"
+							exit 0
+						;;
+						insert) # ToDo - zpracovat ${CHARSTRING}
+							exit 1
 								if [ -f "${3}" ] ; then
-									if [ $(testfile ${3}) == "djvu" ] ; then
-										log 1 "main - insert: Soubor je typu djvu"
-										local INSERTFILE=${3}
-									else
-										[ "${#ALG[@]}" == "1" ] || exit 32
-										local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
-										todjvu ${3} ${INSERTFILE}
-										if [ $? -gt "0" ] ; then
-											echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
-											exit 1
-										fi
+								if [ $(testfile ${3}) == "djvu" ] ; then
+									log 1 "main - insert: Soubor je typu djvu"
+									local INSERTFILE=${3}
+								else
+									[ "${#ALG[@]}" == "1" ] || exit 32
+									local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
+									todjvu ${3} ${INSERTFILE}
+									if [ $? -gt "0" ] ; then
+										echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
+										exit 1
 									fi
-									# Určit pozici...
-									local P=$(identifypage ${1} ${4})
-									log 1 "main - insert: Cílová pozice je $P"
-									if [ -z "${P}" ] ; then
-										if [ -z "${4}" ] ; then
-											echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
-											insertpage ${1} ${INSERTFILE}
-										else
-											echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
-											exit 1
-										fi
+								fi
+								# Určit pozici...
+								local P=$(identifypage ${1} ${4})
+								log 1 "main - insert: Cílová pozice je $P"
+								if [ -z "${P}" ] ; then
+									if [ -z "${4}" ] ; then
+										echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
+										insertpage ${1} ${INSERTFILE}
 									else
-										log 1 "main - insert: Vkládám ${INSERTFILE} na pozici $P"
-										insertpage ${1} ${INSERTFILE} ${P}
+										echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
+										exit 1
 									fi
 								else
-									echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
-									exit 1
+									log 1 "main - insert: Vkládám ${INSERTFILE} na pozici $P"
+									insertpage ${1} ${INSERTFILE} ${P}
 								fi
-								exit 0
-							;;
-							set) [ "${3}" == "-h" ] && help keywords-set && exit 0
-								echo "vložení metainformace"
-								setmeta ${1} ${3} ${@:4}
-								exit 0
-							;;
-							print) [ "${3}" == "-h" ] && help keywords-print && exit 0
-								printmeta ${1} ${3} ${4}
-								exit 0
-							;;
-							unset) [ "${3}" == "-h" ] && help keywords-unset && exit 0
-								echo "Odstranění atributu z metainformace"
-								unsetmeta ${1} ${3} ${4}
-								exit 0
-							;;
-							fore) [ "${3}" == "-h" ] && help keywords-forward && exit 0
+							else
+								echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
+								exit 1
+							fi
+							exit 0
+						;;
+						set) setmeta "${FILE}" "${CHARSTRING}"
+							exit 0
+						;;
+						print) printmeta ${FILE} "${CHARSTRING}"
+							exit 0
+						;;
+						unset) unsetmeta ${FILE} "${CHARSTRING}"
+							exit 0
+						;;
+						fore)  # ToDo - zpracovat ${CHARSTRING}
+							exit 1
 								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 #								echo "akce forvard ${1} - ${3} - ${4}" >> /dev/stderr
 								forwardpage ${1} ${3} ${4}
 								exit 0
 							;;
-							back) [ "${3}" == "-h" ] && help keywords-back && exit 0
-								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+						back)  # ToDo - zpracovat ${CHARSTRING}
+							exit 1
+							[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 								backpage ${1} ${3} ${4}
 								exit 0
-							;;
-							rotate)  [ "${3}" == "-h" ] && help keywords-rotate && exit 0
-								rotatepage ${1} ${3} ${4}
+						;;
+						rotate) rotatepage "${FILE}" "${CHARSTRING}"
+								exit 0
+						;;
+						export)   # ToDo - zpracovat ${CHARSTRING}
+							exit 1
+								exportpage ${FILE} ${CHARSTRING}
 								exit 0
 							;;
-							export) [ "${3}" == "-h" ] && help keywords-export && exit 0
-								echo "Exportuji.."
-								exportpage ${1} ${3} ${4}
+						import)   # ToDo - zpracovat ${CHARSTRING}
+							exit 1
+							;;
+						info) djvuinfo "${FILE}" "${CHARSTRING}"
 								exit 0
 							;;
-							import) [ "${3}" == "-h" ] && help keywords-import && exit 0
-								echo "vložení xml"
-								help keywords-import
-								echo "ToDo"
-								exit 0
-							;;
-							info) [ "${3}" == "-h" ] && help keywords-info && exit 0
-								echo "Zpracovaný výstup z DjVu dump"
-								echo "výstup z exitool"
-								echo "ToDo"
-							exit 0
-							;;
-							rename) [ "${3}" == "-h" ] && help keywords-rename && exit 0
-								echo "Přejmenování stránek v DjVu souboru"
-								echo "ToDo"
-							exit 0
+						rename)   # ToDo - zpracovat ${CHARSTRING}
+							exit 1
 							;;
 							*) help keywords && exit 0
 							;;
 						esac
-					fi
-				echo '''Pokud následuje djvu soubor'''
-				echo '''Pokud následuje adresář'''
-				echo '''to je existující soubor typu bundle a:
-				- nenásleduje žádný další existující soubor typu djvu, nebo adresář
-				  a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
-				- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
+				;;
+				jpeg|png) echo "Bude se zpracovávat soubor v bitmapovém formátu"
+					echo "ToDo"
+					exit 1
+				;;
+				xcf|tiff|mng) echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
+					exit 1
+				;;
+				xml|XML) echo "má-li první soubor příponu xml"
+					echo "ToDo"
+					exit 1
+				;;
+				unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
+				exit 1
+				;;
+				*) echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
+					echo '''Pokud následuje djvu soubor'''
+					echo '''Pokud následuje adresář'''
+					echo '''to je existující soubor typu bundle a:
+					- nenásleduje žádný další existující soubor typu djvu, nebo adresář
+					a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
+					- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
 					- djvu soubor, má se připojit
 					- xml soubor, má se vložit
 					- soubor typu dsed má se zpracovat
 					- jiný soubor - obrázek, který se má převést a vložit
-				'''
+					'''
 				
-				;;
-				xcf|XCF) echo "má-li první soubor příponu xcf"
-				;;
-				xml|XML) echo "má-li první soubor příponu xml"
-				;;
-				*) echo "má-li příponu ${1##*.} soubor $1 něco něco jiného"
+
+					echo "Zpracování souborů jako je $2 zatím není implementováno"
+					exit 1
 				;;
 			esac
-		elif [ -d "${1}" ] ; then
-			# Předává se adresář
-				echo "Je-li toto existující adresář, tak to může znamenat, že se bude dále pracovat v něm, nebo s ním - záleží na dalším parametru"
-				DIRECTORY="${1:0:$((${#1}-1))}"
-		elif [ "${2}" ] ; then
-			# Sem se spadne, pokud předcházející položka vede na neexistující soubor
+		log 1 "main: Tudy může projet pouze v případě, že položka ${1} je existující soubor a není odchycena některou z akcí"
+		else
+			echo "Chystáte se zpracovávat neexistující soubor ${FILE}" >> /dev/stderr
+			echo "ToDo"
+			exit 1
+		fi
+	fi
+# xxxxxxx
+echo '''
+	elif [ -d "${1}" ] ; then
+		log 1 "main: Sem spadne pouze existující adresář - to může znamenat, že se bude dále pracovat v něm, nebo s ním - záleží na dalších parametrech"
+			DIRECTORY="${1:0:$((${#1}-1))}"
+	elif [ -z "${2}" ] ; then
+		log 1 "main: Sem se spadne, je-li následující položka prázdná"
+	elif [ "${2}" == "-h" ] || [ "${2}" == "--help" ] ; then
+		help
+		exit 0
+	else
+		log 1 "main: Sem se spadne, pokud předcházející položka ${1} není adresář a nevede také existující soubor"
+		echo "main: ${1} $(testfile ${1})" >> /dev/stderr
 			if [ "${1:$((${#1}-1)):1}" == "/" ] ; then
 				if [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
-					echo "Rozbalení DjVu svazku : První položka je jméno adresáře a druhá DjVu soubor, který se má rozbalit"
+					log 1 "main: Rozbalení DjVu svazku : První položka je jméno adresáře a druhá DjVu soubor, který se má rozbalit"
 					djvuunbundle "$1" "$2" 
 					exit 0
 				else
 					if [ -f "{2}" ] ; then
-						echo "? : První položka je jméno adresáře a druhá jméno existujícího souboru, který není typu DjVu"
+						log 1 "main: První položka je jméno adresáře a druhá jméno existujícího souboru, který není typu DjVu"
 					else
-						echo "? : První položka je jméno adresáře a druhá řetězec - pravděpodobně bude následovat položka třetí... to mohl být vzorek"
+						log 1 "main: První položka je jméno adresáře a druhá řetězec - pravděpodobně bude následovat položka třetí... to mohl být vzorek"
 					fi
 				fi
 			elif [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
-				#echo "Vytvoření DjVu svazku - konverze, OCR, textové soubory, náhled, integrace a nakonec sestavení"
+				log 1 "main: Sestavení DjVu svazku - konverze, OCR, textové soubory, náhled, integrace a nakonec sestavení"
 				# $1 vzorek
 				# $2 jméno budoucího DjVu svazku
 				# $2 číslo souboru, který se má zpracovat (není-li uvedeno, zpracují se všechny)
 				djvubundle "$1" "$2" "$3"
 				exit 0
 			else
-				# Sem to propadne, když soubor neexistuje.. jméno vzorku...
+				log 1 "Sem to propadne, když soubor ${1} nebyl rozpoznán jako djvu soubor..."
 				case "${2:$((${#2}-3))}" in
 					tiff) echo "Soubor $1 se bude exportovat do souboru $2"
 						;;
@@ -2066,21 +2288,20 @@ do case "$1" in
 						;;
 					mng) echo "Soubor $1 se bude exportovat do souboru $2"
 						;;
-					*) echo "sem nic ${1} - ${2} - ${2:$((${#2}-3))}"
-						exit  200
+					*) echo "Pokud zpracování příkazové řádky došlo až sem, tak to znamená, že je pravděpodobně chybně uvedené jméno DjVu souboru se kterým se má pracovat. Zkontrolujte, zda následující jméno skutečně odpovídá jménu souboru se kterým chcete pracovat - ${1}"
+						exit 1
 						;;
 				esac
 			fi
-		else
-			$0 -h
-			exit 0
-		fi
+	fi
+''' > /dev/null
+# xxxxxxx
 	;;
 	esac
 	shift
 done
 }
 
-main $@
+main "$*"
 
 exit 0
