@@ -794,42 +794,59 @@ function identifypage {
 	# Funkce vracející pořadové číslo DjVu stránky, která je založena na djvm
 	# $1 soubor
 	# $2 testovaná hodnota
-	# NEUMÍ OŠETŘIT MULTIPAGE DOKUMENT
-	echo "Vstup ${#@} && ${2}" >> /dev/stderr
-	local PAGE="${@:2}"
-	echo "Vstup ${PAGE//[[:digit:]]/} && ${PAGE}" >> /dev/stderr
-	if [ "${PAGE//[[:digit:]]/}" == "" ] ; then
-		echo "Číslo ${PAGE}" >> /dev/stderr
-		local OUTPUT=($(${DJVM} -l ${1} | grep \#${PAGE}\ ))
-		local PAGEORDER=${OUTPUT[@]:2:1}
-		echo "Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
-		echo ${PAGEORDER#\#}
+	local BUNDLE=$(djvuinfo "${1}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		return 0
 	else
-		echo "Strana ${PAGE}" >> /dev/stderr
-		local OUTPUT=($(${DJVM} -l ${1} | grep \ ${PAGE}$))
-		local PAGEORDER=${OUTPUT[@]:2:1}
-		echo "Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
-		echo ${PAGEORDER#\#}
+#		echo "identifypage: Zjišťuji výskyt ${2} -${2//+([0-9\ ])}-" >> /dev/stderr
+	if [ "${2//+([0-9\ ])}" == "" ] ; then
+			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka na pozici - ${2}"
+			local OUTPUT=($(${DJVM} -l ${1} | grep \#${2//\ }\ ))
+			local PAGEORDER=${OUTPUT[@]:2:1}
+#			echo "identifypage: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+			echo -n ${PAGEORDER#\#}
+		else
+			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka s názvem - ${2}"
+			local OUTPUT=($(${DJVM} -l ${1} | grep \"${2}$\"))
+			local PAGEORDER=${OUTPUT[@]:2:1}
+#			echo "identifypage: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+			if [ -z "${OUTPUT}" ] ; then
+#				log 1 "identifypage: stránka ${2} se v souboru ${1} nevyskytuje"
+				return 0
+			else
+				echo -n ${PAGEORDER#\#}
+			fi
+		fi
 	fi
 }
 
 function identifyname {
-	# Funkce vrací jméno stránky na základě pořadového čísla stránky
+	# Funkce vrací jméno stránky na základě identifikátoru stránky
 	# $1 soubor
-	# $2 číslo stránky
-#	echo "identifyname: Určuji jméno ${@} ${#@}" >> /dev/stderr
-	if [ "${2%%+([0-9])}" == "" ] ; then
-		local PAGE="\[P$2\]"
-		#OUTPUT=($(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE))
-#		NAME=(${OUTPUT[@]:2})
-#		PAGEORDER=$((${#NAME[@]}-1))
-#		VYSTUP=${NAME[@]:0:$PAGEORDER} >> /dev/stderr
-#		echo "${VYSTUP//+([\{\}])/}"
-#		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | tr ' ' '#' | awk -F\{ '{print $2}' | awk -F\} '{print $1}' | tr '#' ' ')
-		OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep $PAGE | awk -F'[{}]' '{print $2}')
-		echo ${OUTPUT}
+	# $2 testovaná hodnota
+	local BUNDLE=$(djvuinfo "${1}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		return 0
 	else
-		return 1
+		if [ "${2//+([0-9\ ])}" == "" ] ; then
+			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka na pozici - ${2}"
+			local SEARCHPOS="#${2}"
+			local OUTPUT=$(${DJVM} -l ${1} | grep ${SEARCHPOS})
+		else
+			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka s názvem - ${2} \"${2# }\""
+			local SEARCHNAME="${2# }"
+			local OUTPUT=$(${DJVM} -l ${1} | grep ${SEARCHNAME}$)
+		fi
+		echo "identifyname: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+		if [ -z "${OUTPUT}" ] ; then
+			log 1 "identifyname: stránka ${2} se v souboru ${1} nevyskytuje"
+			return 0
+		else
+			local TEMP=( $OUTPUT )
+			local POS=${TEMP[@]:2:1}
+			local PAGENAME=${OUTPUT##*${POS}}
+			echo -n "${PAGENAME##+([[:blank:]])}"
+		fi
 	fi
 }
 
@@ -940,7 +957,8 @@ function rotatepage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany která se má rotovat
 	# $3 - hodnota rotace
-	INFO="""
+	echo "$*" >> /dev/stderr
+	local INFO="""
 Uvedenou hodnotu rotace nelze akceptovat. Rotaci lze nastavit buď 
 absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
 
@@ -953,60 +971,96 @@ absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
     180 - přetočení o 180°
 
 Každá jiná hodnota parametru je ignorována."""
-	local PAGES=$(djvuinfo "${1}")
-	if [ "${PAGES}" == "none" ] ; then
-		echo "jednostránkový dokument - bude se otáčet globálně"
-	else
-		echo "vícestránkový dokument - bude se identifikovat stránka"
-	fi
+	local PARAMS=($2)
+	case "${PARAMS[$((${#PARAMS[@]} -1))]}" in
+		0|1|2|3|180|left|right)  echo "Jak mám otáčet $1" >> /dev/stderr
+			local ROTATE="${PARAMS[$((${#PARAMS[@]} -1))]}"
+			echo "rotatepage: před ořezáním -$2-"
+			local TEMP="${2% ${ROTATE}}"
+			local IDPAGE=${TEMP##+([[:blank:]])}
+			echo "rotatepage: po ořezání -${IDPAGE}-"
+		;;
+		*) echo "Neplatný parametr rotace - ${2}" >> /dev/stderr
+			exit 1
+		;;
+	esac
+	echo "rotatepage: ${IDPAGE} - ${ROTATE}" >> /dev/stderr
 
-exit 0
-	PAGE=$?
-	NAMEPAGE=$(identifyname ${1} ${PAGE})
-	if [ "${NAMEPAGE}" == "" ] ; then
-		if [ "${3}" ] ; then
-			echo "Nastavuji natočení strany $PAGE celý dokument $1 - $2" >> /dev/stderr
-			case "$3" in
-				0|1|2|3)  ${DJVUSED} -e "select $PAGE; set-rotation $3; save" $1
+	local BUNDLE=$(djvuinfo "${1}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		if [ -z "${IDPAGE}" ] ; then
+			case "${ROTATE}" in
+				0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${1}"
 				;;
-				left) ${DJVUSED} -e "select $PAGE; set-rotation +1; save" $1
+				left) ${DJVUSED} -e "set-rotation +1; save" "${1}"
 				;;
-				right) ${DJVUSED} -e "select $PAGE; set-rotation -1; save" $1
+				right) ${DJVUSED} -e "set-rotation -1; save" "${1}"
 				;;
-				180) ${DJVUSED} -e "select $PAGE; set-rotation +2; save" $1
+				180) ${DJVUSED} -e "set-rotation +2; save" "${1}"
 				;;
 				*) echo "${INFO}" >> /dev/stderr
 				;;
 			esac
 		else
-			echo "Nastavuji globální natočení pro celý dokument $1 - $2" >> /dev/stderr
-			case "$2" in
-				0|1|2|3)  ${DJVUSED} -e "set-rotation $2; save" $1
-				;;
-				left) ${DJVUSED} -e "set-rotation +1; save" $1
-				;;
-				right) ${DJVUSED} -e "set-rotation -1; save" $1
-				;;
-				180) ${DJVUSED} -e "set-rotation +2; save" $1
-				;;
-				*) echo "${INFO}" >> /dev/stderr
-				;;
-			esac
+			echo "Dokument je typu DjVu single page. Parametr ${IDPAGE} nemá význam, chcete pokračovat v rotaci?" >> /dev/stderr
+			if $(potvrdit) ; then
+				case "${ROTATE}" in
+					0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${1}"
+					;;
+					left) ${DJVUSED} -e "set-rotation +1; save" "${1}"
+					;;
+					right) ${DJVUSED} -e "set-rotation -1; save" "${1}"
+					;;
+					180) ${DJVUSED} -e "set-rotation +2; save" "${1}"
+					;;
+					*) echo "${INFO}" >> /dev/stderr
+					;;
+				esac
+			else
+				exit 0
+			fi
 		fi
 	else
-		echo "Nastavuji globální natočení pro celý dokument $1 - $2" >> /dev/stderr
-		case "$2" in
-			0|1|2|3)  ${DJVUSED} -e "set-rotation $2; save" $1
-			;;
-			left) ${DJVUSED} -e "set-rotation +1; save" $1
-			;;
-			right) ${DJVUSED} -e "set-rotation -1; save" $1
-			;;
-			180) ${DJVUSED} -e "set-rotation +2; save" $1
-			;;
-			*) echo "${INFO}" >> /dev/stderr
-			;;
-		esac
+		if [ -z "${IDPAGE}" ] ; then
+			echo "Bude se otáčet celý dokument"
+			if $(potvrdit) ; then
+				case "${ROTATE}" in
+					0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${1}"
+					;;
+					left) ${DJVUSED} -e "set-rotation +1; save" "${1}"
+					;;
+					right) ${DJVUSED} -e "set-rotation -1; save" "${1}"
+					;;
+					180) ${DJVUSED} -e "set-rotation +2; save" "${1}"
+					;;
+					*) echo "${INFO}" >> /dev/stderr
+					;;
+				esac
+			else
+				exit 0
+			fi
+		else
+#			echo "Je třeba provést identifikaci stránky ${IDPAGE}"
+			local NAMEPAGE=$(identifyname "${1}" "${IDPAGE}")
+			if [ -z "${NAMEPAGE}" ] ; then
+				echo "Stránka ${IDPAGE} ve svazku ${1} není" >> /dev/stderr
+				exit 1
+			else
+				log 1 "Otáčím stránku ${NAMEPAGE}"
+				case "${ROTATE}" in
+					0|1|2|3)  ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation ${ROTATE}; save" "${1}"
+					;;
+					left) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation +1; save" "${1}"
+					;;
+					right) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation -1; save" "${1}"
+					;;
+					180) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation +2; save" "${1}"
+					;;
+					*) echo "${INFO}" >> /dev/stderr
+					;;
+			esac
+			fi
+		fi
 	fi
 }
 
@@ -1653,8 +1707,8 @@ Použitelné parametry:
   180 - pootočí stránku o 180°
 
 [3mPoznámka:[23m
-          Není-li uveden identifikátor stránky, je parametrem
-          nastaveno globální natočení celého dokumentu.
+          Není-li uveden identifikátor stránky, bude parametrem
+          nastaveno globální natočení pro všechny stránky dokumentu.
 """
 		;;
 		keywords-set) echo """akce [1mset[0m
@@ -1902,7 +1956,10 @@ function todjvuclassic {
 
 # Zpracování parametrů předaných při startu skriptu
 function main {
-#local VSTUP="$@"
+#	echo "$@" >> /dev/stderr
+#	echo "$*" >> /dev/stderr
+
+#local VSTUP="$*"
 while [ $# -gt 0 ]
 do case "$1" in
 	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
@@ -2058,7 +2115,7 @@ do case "$1" in
 	# v takovém případě může být rozhodující výskyt klíčového slova ve zbytku...
 	# Sjet ve smyčce zbytek příkazové řádky a otestovat ji na výskyt klíčového slova---
 	# Přerušit..
-#	echo "Předáno: ${VSTUP}" >> /dev/stderr
+#	echo "Předáno: $VSTUP" >> /dev/stderr
 	local CHARSTRING="${@:1}"
 	local CHARCOUNT=$((${#CHARSTRING} + 1))
 	local CHARPOS=0
