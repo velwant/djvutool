@@ -37,11 +37,13 @@ shopt -s extglob
 NAME="convertor"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
 
-LOG="${LOG=/dev/stderr}"
+LOG="${LOG=/dev/null}"
 XML="${XML=no}"
+DPI="${DPI=300}"
 DSED="${DSED=no}"
+DSED="${PAGE=no}"
 INDIRECT="${INDIRECT=no}"
-FORCE="${FORCE=no}"
+FORCE="${FORCE=skip}"
 RENAME="no"
 EXTENSION=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
@@ -49,6 +51,7 @@ INSERTTEXT="${INSERTTEXT=no}"
 ALG="${ALG=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
+ALGORITHM="abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction"
 
 trap '''CHYBA=$? ;
 case $CHYBA in
@@ -118,6 +121,8 @@ STAT=$(which readlink)
 [ ! -x "${STAT}" ] && exit 22
 EXIFTOOL=$(which exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
+TESSERACT=$(which tesseract)
+[ ! -x "${TESSERACT}" ] && exit 31
 
 
 NETPBM=0
@@ -158,6 +163,14 @@ if (( $NETPBM == 1 )) ; then
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
 #=== konec testu závislostí ===
+
+## Pomocné funkce...
+function escape_path {
+	echo "escape_path $*" >> /dev/stderr
+	echo "$*" | sed \
+  -e 's/\ /\\\ /g'
+}
+
 function log {
 	# $1 - závažnost hlášky
 	# $2 - textový řetězec..
@@ -174,6 +187,30 @@ function log {
 		;;
 	esac
 }
+
+function pushd {
+    command pushd "$@" > /dev/null
+}
+
+function popd {
+    command popd "$@" > /dev/null
+}
+
+function potvrdit {
+    read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
+    case $response in
+        [yY][eE][sS]|[yY]) 
+            true
+            ;;
+        [aA][nN][oO]|[aA]) 
+            true
+            ;;
+        *)
+            false
+            ;;
+    esac
+}
+
 function rozvazat {
 	# $1 - soubor
 	# $2 - adresář
@@ -200,28 +237,8 @@ function testfile {
 	echo ${TYPE,,}
 }
 
-function escape_path {
-	echo "escape_path $*" >> /dev/stderr
-	echo "$*" | sed \
-  -e 's/\ /\\\ /g'
-}
-
-potvrdit () {
-    read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
-    case $response in
-        [yY][eE][sS]|[yY]) 
-            true
-            ;;
-        [aA][nN][oO]|[aA]) 
-            true
-            ;;
-        *)
-            false
-            ;;
-    esac
-}
-
 function setmeta {
+	# Funkce pro nastavení meta atrinutů
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo nebo soubor
 	# $3 - key
@@ -231,7 +248,7 @@ function setmeta {
 		${DJVUSED} ${1} -e "set-meta ${2}; save"
 	else
 		identifypage ${1} ${2}
-		NAMEPAGE=$(identifyname ${1} $?)
+		local NAMEPAGE=$(identifyname ${1} $?)
 		if [ "${NAMEPAGE}" == "" ] ; then
 			echo "Neplatný identifikátor stránky ${2}" >> /dev/stderr
 			exit 12
@@ -250,6 +267,7 @@ function setmeta {
 }
 
 function printmeta {
+	# Funkce pro výpis meta atributů
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo 'all' nebo atribut
 	# $3 - atribut, nebo klíčové slovo 'all' (default)
@@ -266,7 +284,7 @@ function printmeta {
 	else
 		identifypage ${1} ${2}
 		PAGE=$?
-		NAMEPAGE=$(identifyname ${1} ${PAGE})
+		local NAMEPAGE=$(identifyname ${1} ${PAGE})
 		if [ "${NAMEPAGE}" == "" ] ; then
 			if [ "${2}" == "all" ] ; then
 				echo "Globální metadata souboru ${1##*/} :" >> /dev/stderr
@@ -327,11 +345,12 @@ function printmeta {
 }
 
 function unsetmeta {
+	# Funkce pro odstranění meta atributu
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo nebo soubor
 	# $3 - key
 	identifypage ${1} ${2}
-	NAMEPAGE=$(identifyname ${1} $?)
+	local NAMEPAGE=$(identifyname ${1} $?)
 	if [ "${NAMEPAGE}" == "" ] ; then
 		echo "Odstraňuji globální atribut.."
 		${DJVUSED} ${1} -e "print-meta" > ${TEMPDIR}/${1/.djvu/.temp}
@@ -356,75 +375,143 @@ function unsetmeta {
 function exportpage {
 	# $1 - svazek
 	# $2 - identifikátor
+	# zbytek - pokud číslo - identifikátor
+	# končí-li na djvu stránka a zbytek je adresář..
 	# $3 - cíl (adresář)
-	if [ ${#3} -eq "0" ] ; then
-		TARGETDIR=$(${REALPATH} ./)
-	elif [ -f "${3}" ] ; then
-		TARGET=$(${REALPATH} ${3})
-		TARGETDIR=${TARGET%/*}
-	elif [ -d "${3}" ] ; then
-		TARGETDIR=$(${REALPATH} ${3})
+	log 1 "exportpage: předáno -$1-+-$2-+-$3-"
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	log 1 "exportpage: FILE -${FILE}- SOURCE -${SOURCE}-"
+	local CHARSTRING="$2"
+	local CHARCOUNT=$((${#CHARSTRING} + 1))
+	local CHARPOS=0
+	local STRPOS=0
+	while [ "${CHARCOUNT}" -gt "0" ] ; do
+		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
+			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+				log 1 "exportpage: Soubor... -${PAGENAME}-"
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
+				log 1 "exportpage: CHARSTRING.. ${CHARSTRING}"
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+				log 1 "exportpage: CHARCOUNT.. ${CHARCOUNT}"
+			;;
+		esac
+		local CHARPOS=$((CHARPOS + 1))
+		local CHARCOUNT=$((CHARCOUNT - 1))
+	done
+	if [ -z "${PAGENAME}" ] ; then
+		local TEMP=${CHARSTRING##+([[:blank:]])}
+		local IDPAGE=${TEMP%%+([[:blank:]])*}
+		local CHARSTRING=${TEMP#${IDPAGE}}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportpage: Exportuji stránku s IDPAGE -${IDPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
 	else
-		mkdir -p $3
-		if [ $? == "0" ] ; then
-			TARGETDIR=$(${REALPATH} ${3})
-		else
-			echo "Cílový adresář $3 nelze vytvořit"
-			exit 1
+		local NAMEPAGE=${PAGENAME##+([[:blank:]])}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportpage: Exportuji stránku s NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	fi
+
+
+	# Vytvoření cílového adresáře
+	if [ -z "${TARGETDIR}" ] ; then
+		log 1 "exportpage: Žádný adresář nebyl předán použiju aktuální adresář"
+		local TARGETDIR=$(${REALPATH} -m -P ./)
+	else
+		local TARGETDIR=$(${REALPATH} -m -P ${TARGETDIR})
+		if [ ! -d "${TARGETDIR}" ] ; then
+			mkdir -p "${TARGETDIR}"
 		fi
 	fi
-	echo "-$2-" >> /dev/stderr
-	case "$2" in
-		all) lastpage ${1}
-			PAGES=$?
-			NUMPAGE=1
-			echo $PAGES >> /dev/stderr
+
+	local BUNDLE=$(djvuinfo "${SOURCE}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		echo "Soubor ${FILE} je single-page DjVu" >> /dev/stderr
+		exit 0
+	else
+		if [ -z "${IDPAGE}" ] ; then
+			local EXPORTPAGE=$(identifyname "${SOURCE}" "${NAMEPAGE}")
+		elif [ "${IDPAGE}" == "all" ] ; then
+			# V tomto bodě by šel ošetřit export stránek daný rozsahem
+			log 1 "exportpage: Exportuji všechny stránky souboru ${FILE}"
+			local PAGES=$(lastpage "${SOURCE}")
+			local NUMPAGE=1
 			while [ ${PAGES} -gt "0" ] ; do
-				identifypage ${1} ${NUMPAGE}
-				PAGE=$?
-				NAMEPAGE=$(identifyname ${1} $PAGE)
-				echo "Zpracovávám stránku ${NAMEPAGE}" >> /dev/stderr
-				NUMPAGE=$((NUMPAGE + 1))
-				PAGES=$((PAGES - 1))
-			done
-			if [ ${XML} == "yes" ] ; then
-				exportxml ${1} ${TARGETDIR}
-			fi
-			if [ ${DSED} == "yes" ] ; then
-				exportdsed ${1} ${TARGETDIR}
-			fi
-		;;
-		*) identifypage ${1} ${2}
-			NAMEPAGE=$(identifyname ${1} $?)
-			echo "$NAMEPAGE" >> /dev/stderr
-			if [ "${NAMEPAGE}" == "" ] ; then
-				echo "Neplatný identifikátor stránky $2. Pokud mají být ze souboru vyexportovány všechny stránky, je třeba uvést klíčové slovo - all" >> /dev/stderr
-				exit 13
-			else
-#				echo "export stránky $EXTRACTPAGE - $NAMEPAGE ${#NAMEPAGE} - DSED $DSED - XML $XML - THUMBNAIL $THUMBNAIL - FORCE $FORCE" >> /dev/stderr
-				if [ ${IMGPAGE} != "no" ] ; then
-					exportimg ${1} ${NAMEPAGE} ${TARGETDIR}
-				fi
-				if [ ${EXTRACTPAGE} == "yes" ] ; then
-					${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-					if [ -f "${TARGETDIR}/${NAMEPAGE}" ] ; then
-						echo "Stránka, kterou se chystáte exportovat již v cílové pozici existuje. Chcete ji přepsat?"
-						potvrdit && mv "${TEMPDIR}/${NAMEPAGE}" "${TARGETDIR}/"
-						exit 33
+				local EXPORTPAGE=$(identifyname "${SOURCE}" "${NUMPAGE}")
+				log 1 "exportpage: Exportuji stránku ${EXPORTPAGE}"
+				pushd ${TARGETDIR}
+				if [ "${PAGE}" == "yes" ] ; then
+					if [ -f "${EXPORTPAGE}" ] ; then
+						if [ "${FORCE}" == "yes" ] ; then
+							${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
+						elif [ "${FORCE}" == "skip" ] ; then
+							log 1 "Soubor ${EXPORTPAGE} již v adresáři ${TARGETDIR} existuje."
+						else
+							echo "Soubor ${EXPORTPAGE} již v adresáři ${TARGETDIR} existuje.." >> /dev/stderr
+							potvrdit && ${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
+						fi
 					else
-						mv "${TEMPDIR}/${NAMEPAGE}" "${TARGETDIR}/"
+						${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
 					fi
+				else
+					echo "Pokud byste chtěli exportovat z DjVu svazku celou stránku v DjVu formátu, musíte použít volbu -p" >> /dev/stderr
 				fi
-				if [ ${XML} == "yes" ] ; then
-					exportxml ${1} ${2} ${TARGETDIR}
+				if [ "${XML}" != "no" ] ; then
+					exportxml "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
 				fi
-				if [ ${DSED} == "yes" ] ; then
-					exportdsed ${1} ${2} ${TARGETDIR}
+				if [ "${DSED}" != "no" ] ; then
+					exportdsed "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 				fi
+				if [ ${IMGPAGE} != "no" ] ; then
+					exportimg "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+				fi
+				popd
+				local NUMPAGE=$((NUMPAGE + 1))
+				local PAGES=$((PAGES - 1))
+			done
+			# A kromě jednotlivých stránek ještě udělat export pro celý soubor
+			exportdsed "${SOURCE}" "${TARGETDIR}"
+			exportxml "${SOURCE}" "${TARGETDIR}"
+			return 0
+		else
+			local EXPORTPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
+			log 1 "exportpage: EXPORTPAGE -${EXPORTPAGE}-"
+		fi
+
+		if [ -z "${EXPORTPAGE}" ] ; then
+			echo "Stránka ${NAMEPAGE} ve svazku ${FILE} není" >> /dev/stderr
+			exit 1
+		else
+			# Exportuji stránku přes djvused..
+			pushd ${TARGETDIR}
+			if [ "${PAGE}" == "yes" ] ; then
+				if [ -f "${EXPORTPAGE}" ] ; then
+					if [ "${FORCE}" == "yes" ] ; then
+						${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
+					elif [ "${FORCE}" == "skip" ] ; then
+						log 1 "Soubor ${EXPORTPAGE} již v adresáři ${TARGETDIR} existuje."
+					else
+						echo "Soubor ${EXPORTPAGE} již v adresáři ${TARGETDIR} existuje.." >> /dev/stderr
+					potvrdit && ${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
+					fi
+				else
+					${DJVUSED} -e "select '${EXPORTPAGE}'; save-page-with '${EXPORTPAGE}'" "${SOURCE}"
+				fi
+			else
+				echo "Pokud byste chtěli exportovat z DjVu svazku celou stránku v DjVu formátu, musíte použít volbu -p" >> /dev/stderr
 			fi
-		;;
-	esac
-	exit 0
+			if [ "${XML}" != "no" ] ; then
+				exportxml "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+			fi
+			if [ "${DSED}" != "no" ] ; then
+				exportdsed "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
+			fi
+			if [ ${IMGPAGE} != "no" ] ; then
+				exportimg "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+			fi
+			popd
+		fi
+	fi
 }
 
 
@@ -432,89 +519,247 @@ function exportdsed {
 	# $1 - svazek
 	# $2 - identifikátor nebo adresář
 	# $3 - adresář
-	case "${#@}" in
-		3) identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
-			if [ -f "${3}/${NAMEPAGE/.djvu/.dsed}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ${3}/${NAMEPAGE/.djvu/.dsed}
-			else
-				${DJVUSED} ${1} -e "select $PAGE; output-all" > ${3}/${NAMEPAGE/.djvu/.dsed}
-			fi
+	log 1 "exportdsed: předáno -$1-+-$2-+-$3-"
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+
+	local CHARSTRING="$2"
+	local CHARCOUNT=$((${#CHARSTRING} + 1))
+	local CHARPOS=0
+	local STRPOS=0
+	while [ "${CHARCOUNT}" -gt "0" ] ; do
+		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
+			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+				log 1 "exportdsed: Soubor... -${PAGENAME}-"
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
+				log 1 "exportdsed: CHARSTRING.. ${CHARSTRING}"
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+				log 1 "exportdsed: CHARCOUNT.. ${CHARCOUNT}"
+			;;
+		esac
+		local CHARPOS=$((CHARPOS + 1))
+		local CHARCOUNT=$((CHARCOUNT - 1))
+	done
+	if [ -z "${PAGENAME}" ] ; then
+		local TEMP=${CHARSTRING##+([[:blank:]])}
+		local IDPAGE=${TEMP%%+([[:blank:]])*}
+		local CHARSTRING=${TEMP#${IDPAGE}}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportdsed: Exportuji stránku s IDPAGE -${IDPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	else
+		local NAMEPAGE=${PAGENAME##+([[:blank:]])}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportdsed: Exportuji stránku s NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	fi
+
+	case "${DSED}" in
+		yes|all) local EXPORT="output-all"
 		;;
-		2) if [ -d ${2} ] ; then
-			# echo "Předaný je adresář, bude do něj exportován celý obsah"
-			if [ -f "${2}/${1/.djvu/.dsed}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e output-all > ${2}/${1/.djvu/.dsed}
-			else
-				${DJVUSED} ${1} -e output-all > ${2}/${1/.djvu/.dsed}
-			fi
-		else
-			identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
-			if [ -f "./${NAMEPAGE/.djvu/.dsed}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e "select $PAGE; output-all" > ./${NAMEPAGE/.djvu/.dsed}
-			else
-				${DJVUSED} ${1} -e "select $PAGE; output-all" > ./${NAMEPAGE/.djvu/.dsed}
-			fi
-		fi
+		txt) local EXPORT="output-txt"
 		;;
-		1) if [ -f "./${1/.djvu/.dsed}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
-			else
-				${DJVUSED} ${1} -e output-all > ./${1/.djvu/.dsed}
-			fi
+		ant) local EXPORT="output-ant"
 		;;
-		*) echo "Z nějakého důvodu nelze provést export dsed souboru" >> /dev/stderr && exit 1
+		no) return 0
 		;;
 	esac
+
+	log 1 "exportdsed: FILE -${FILE}- SOURCE -${SOURCE}- NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}- DSED -${DSED}-"
+		# Vytvoření cílového adresáře
+	if [ -z "${TARGETDIR}" ] ; then
+		log 1 "exportpage: Žádný adresář nebyl předán - je možné, že se má exportovat celý soubor"
+		if [ "${IDPAGE:0:1}" == "/" ] ; then
+			echo "Obsah souboru ${FILE} se bude exportovat celý" >> /dev/stderr
+			local TARGETDIR=$(${REALPATH} -m -P ${IDPAGE})
+			if [ ! -d "${TARGETDIR}" ] ; then
+				mkdir -p "${TARGETDIR}"
+			fi
+			local TARGET=${FILE/.djvu/.dsed}
+			pushd "${IDPAGE}"
+			if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+				if [ "${FORCE}" == "yes" ] ; then
+					${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+				elif [ "${FORCE}" == "skip" ] ; then
+					log 1 "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+				else
+					echo "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte volbu --force yes" >> /dev/stderr
+					potvrdit && ${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+				fi
+			else
+				${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+			fi
+			popd
+			return 0
+		else
+			local TARGETDIR=$(${REALPATH} -m -P ./)
+		fi
+	else
+		local TARGETDIR=$(${REALPATH} -m -P ${TARGETDIR})
+		if [ ! -d "${TARGETDIR}" ] ; then
+			mkdir -p "${TARGETDIR}"
+		fi
+	fi
+
+	local BUNDLE=$(djvuinfo "${SOURCE}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		echo "Soubor ${FILE} je single-page DjVu" >> /dev/stderr
+		pushd "${TARGETDIR}"
+		local TARGET=${FILE/.djvu/.dsed}
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte volbu --force yes" >> /dev/stderr
+				potvrdit && ${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+			fi
+		else
+			${DJVUSED} "${SOURCE}" -e "${EXPORT}" > "${TARGETDIR}/${TARGET}"
+		fi
+		popd
+	else
+		pushd "${TARGETDIR}"
+		local PAGE=$(identifyname "${SOURCE}" "${NAMEPAGE}")
+		local TARGET=${PAGE/.djvu/.dsed}
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DJVUSED} "${SOURCE}" -e "select '${PAGE}'; ${EXPORT}" > "${TARGETDIR}/${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportdsed: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte volbu --force yes" >> /dev/stderr
+				potvrdit && ${DJVUSED} "${SOURCE}" -e "select '${PAGE}'; ${EXPORT}" > "${TARGETDIR}/${TARGET}"
+			fi
+		else
+			${DJVUSED} "${SOURCE}" -e "select '${PAGE}'; ${EXPORT}" > "${TARGETDIR}/${TARGET}"
+		fi
+		popd
+	fi
 }
 
 function exportxml {
 	# $1 - svazek
 	# $2 - identifikátor nebo adresář
 	# $3 - adresář
-	case "${#@}" in
-		3) identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
-			if [ -f "${3}/${NAMEPAGE/.djvu/.xml}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
-			else
-				${DJVUTOXML} --page ${PAGE} ${1} ${3}/${NAMEPAGE/.djvu/.xml}
-				exportimg ${1} ${PAGE} ${3}
-			fi
+	log 1 "exportxml: předáno -$1-+-$2-+-$3-"
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+
+	local CHARSTRING="$2"
+	local CHARCOUNT=$((${#CHARSTRING} + 1))
+	local CHARPOS=0
+	local STRPOS=0
+	while [ "${CHARCOUNT}" -gt "0" ] ; do
+		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
+			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+				log 1 "exportxml: Soubor... -${PAGENAME}-"
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
+				log 1 "exportxml: CHARSTRING.. ${CHARSTRING}"
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+				log 1 "exportxml: CHARCOUNT.. ${CHARCOUNT}"
+			;;
+		esac
+		local CHARPOS=$((CHARPOS + 1))
+		local CHARCOUNT=$((CHARCOUNT - 1))
+	done
+	if [ -z "${PAGENAME}" ] ; then
+		local TEMP=${CHARSTRING##+([[:blank:]])}
+		local IDPAGE=${TEMP%%+([[:blank:]])*}
+		local CHARSTRING=${TEMP#${IDPAGE}}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportxml: Exportuji stránku s IDPAGE -${IDPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	else
+		local NAMEPAGE=${PAGENAME##+([[:blank:]])}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportxml: Exportuji stránku s NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	fi
+
+	case "${XML}" in
+		yes|all) local EXPORT="--with-text --with-anno"
 		;;
-		2) if [ -d ${2} ] ; then
-				if [ -f "${2}/${1/.djvu/.xml}" ] ; then
-					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
-				else
-					${DJVUTOXML} ${1} ${2}/${1/.djvu/.xml}
-				fi
-				exportimg ${1} ${2}
-			else
-			identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
-				if [ -f "./${NAMEPAGE/.djvu/.xml}" ] ; then
-					[ "${FORCE}" == "yes" ] && ${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
-				else
-					${DJVUTOXML} --page ${PAGE} ${1} ./${NAMEPAGE/.djvu/.xml}
-				fi
-				exportimg ${1} ${PAGE} ./
-			fi
+		txt) local EXPORT="--with-text --without-anno"
 		;;
-		1) if [ -f "./${1/.djvu/.xml}" ] ; then
-				[ "${FORCE}" == "yes" ] && ${DJVUTOXML} ${1} ./${1/.djvu/.xml}
-			else
-				${DJVUTOXML} ${1} ./${1/.djvu/.xml}
-			fi
-			exportimg ${1} ./
+		ant) local EXPORT="--without-text --with-anno"
 		;;
-		*) echo "Z nějakého důvodu nelze provést export xml souboru" >> /dev/stderr && exit 1
+		no) return 0
 		;;
 	esac
+
+	log 1 "exportxml: FILE -${FILE}- SOURCE -${SOURCE}- NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}- XML -${XML}-"
+		# Vytvoření cílového adresáře
+	if [ -z "${TARGETDIR}" ] ; then
+		log 1 "exportxml: Žádný adresář nebyl předán - je možné, že se má exportovat celý soubor"
+		if [ "${IDPAGE:0:1}" == "/" ] ; then
+			echo "Obsah souboru ${FILE} se bude exportovat celý" >> /dev/stderr
+			local TARGETDIR=$(${REALPATH} -m -P ${IDPAGE})
+			if [ ! -d "${TARGETDIR}" ] ; then
+				mkdir -p "${TARGETDIR}"
+			fi
+			local TARGET=${FILE/.djvu/.xml}
+			pushd "${IDPAGE}"
+			if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+				if [ "${FORCE}" == "yes" ] ; then
+					${DJVUTOXML} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+				elif [ "${FORCE}" == "skip" ] ; then
+					log 1 "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+				else
+					echo "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte parametr --force" >> /dev/stderr
+					potvrdit && ${DJVUTOXML} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+				fi
+			else
+				${DJVUTOXML} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+			fi
+			popd
+			return 0
+		else
+			local TARGETDIR=$(${REALPATH} -m -P ./)
+		fi
+	else
+		local TARGETDIR=$(${REALPATH} -m -P ${TARGETDIR})
+		if [ ! -d "${TARGETDIR}" ] ; then
+			mkdir -p "${TARGETDIR}"
+		fi
+	fi
+
+	local BUNDLE=$(djvuinfo "${SOURCE}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		echo "Soubor ${FILE} je single-page DjVu" >> /dev/stderr
+		pushd "${TARGETDIR}"
+		local TARGET=${FILE/.djvu/.xml}
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DJVUTOXML} "${EXPORT}" "${SOURCE}" "${TARGETDIR}/${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte parametr --force" >> /dev/stderr
+				potvrdit && ${DJVUTOXML} "${EXPORT}" "${SOURCE}" "${TARGETDIR}/${TARGET}"
+			fi
+		else
+			${DJVUTOXML} "${EXPORT}" "${SOURCE}" "${TARGETDIR}/${TARGET}"
+		fi
+		popd
+	else
+		pushd "${TARGETDIR}"
+		local PAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+		local TARGET=${NAMEPAGE/.djvu/.xml}
+		log 1 "exportxml: PAGE -${PAGE}-"
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportxml: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte parametr --force" >> /dev/stderr
+				potvrdit && ${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+			fi
+		else
+			${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${SOURCE}" "${TARGETDIR}/${TARGET}"
+		fi
+		popd
+	fi
 }
 
 function exportimg {
@@ -525,8 +770,8 @@ function exportimg {
 	# $3 - adresář
 	case "${#@}" in
 		3) identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
+			local PAGE=$?
+			local NAMEPAGE=$(identifyname ${1} $PAGE)
 			case "${IMGPAGE}" in
 				yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ${3}" >> /dev/stderr
 				if [ -f "${3}/${NAMEPAGE/.djvu/.png}" ] ; then
@@ -558,12 +803,12 @@ function exportimg {
 		;;
 		2) if [ -d ${2} ] ; then
 			lastpage ${1}
-			PAGES=$?
-			NUMPAGE=1
+			local PAGES=$?
+			local NUMPAGE=1
 			while [ ${PAGES} -gt "0" ] ; do
 				identifypage ${1} ${NUMPAGE}
-				PAGE=$?
-				NAMEPAGE=$(identifyname ${1} $PAGE)
+				local PAGE=$?
+				local NAMEPAGE=$(identifyname ${1} $PAGE)
 				case "${IMGPAGE}" in
 					yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ${2}" >> /dev/stderr
 					if [ -f "${2}/${NAMEPAGE/.djvu/.png}" ] ; then
@@ -592,13 +837,13 @@ function exportimg {
 						fi
 					;;
 				esac
-				NUMPAGE=$((NUMPAGE + 1))
-				PAGES=$((PAGES - 1))
+				local NUMPAGE=$((NUMPAGE + 1))
+				local PAGES=$((PAGES - 1))
 			done
 		else
 			identifypage ${1} ${2}
-			PAGE=$?
-			NAMEPAGE=$(identifyname ${1} $PAGE)
+			local PAGE=$?
+			local NAMEPAGE=$(identifyname ${1} $PAGE)
 			case "${IMGPAGE}" in
 				yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ./" >> /dev/stderr
 				if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
@@ -630,12 +875,12 @@ function exportimg {
 		fi
 		;;
 		1) lastpage ${1}
-			PAGES=$?
-			NUMPAGE=1
+			local PAGES=$?
+			local NUMPAGE=1
 			while [ ${PAGES} -gt "0" ] ; do
 				identifypage ${1} ${NUMPAGE}
-				PAGE=$?
-				NAMEPAGE=$(identifyname ${1} $PAGE)
+				local PAGE=$?
+				local NAMEPAGE=$(identifyname ${1} $PAGE)
 				case "${IMGPAGE}" in
 					yes)  echo "Exportuji ${NAMEPAGE/.djvu/.png} do ./" >> /dev/stderr
 					if [ -f "./${NAMEPAGE/.djvu/.png}" ] ; then
@@ -664,8 +909,8 @@ function exportimg {
 						fi
 					;;
 				esac
-				NUMPAGE=$((NUMPAGE + 1))
-				PAGES=$((PAGES - 1))
+				local NUMPAGE=$((NUMPAGE + 1))
+				local PAGES=$((PAGES - 1))
 			done
 		;;
 		*) echo "Z nějakého důvodu nelze provést export náhledových souborů" >> /dev/stderr && exit 1
@@ -773,71 +1018,65 @@ function identifybundle {
 	fi
 }
 
-function identifypage2 {
-	# Funkce vracející pořadové číslo DjVu stránky , která je založena na djvm
-	# $1 soubor
-	# $2 testovaná hodnota
-	# NEUMÍ PŘEVZÍT KE ZPRACOVÁNÍ JMÉNA SOUBORŮ S MEZERAMI!!
-	if [ "${2}" == "" ] ; then
-		return 0
-	elif [ "${2%%+([0-9])}" == "" ] ; then
-		local PAGE="\[P$2\]"
-	else
-		local PAGE="\{${2}\}"
-	fi
-	local OUTPUT=$(${DJVUDUMP} ${1} | grep FORM:DJVU | grep ${PAGE} | awk -F'[{}]' '{print $3}')
-	local ORDER=${OUTPUT//+([\]P\[])/}
-	echo ${ORDER}
-}
-
 function identifypage {
-	# Funkce vracející pořadové číslo DjVu stránky, která je založena na djvm
+	# Funkce vrací pořadové číslo DjVu stránky na základě identifikátoru stránky
 	# $1 soubor
 	# $2 testovaná hodnota
-	local BUNDLE=$(djvuinfo "${1}")
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local IDENTIFICATOR="${2##+([[:blank:]])}"
+	log 1 "identifypage: FILE -${FILE}- SOURCE -${SOURCE}- IDENTIFICATOR -${IDENTIFICATOR}-"
+	local BUNDLE=$(djvuinfo "${SOURCE}")
 	if [ "${BUNDLE}" == "none" ] ; then
 		return 0
 	else
-#		echo "identifypage: Zjišťuji výskyt ${2} -${2//+([0-9\ ])}-" >> /dev/stderr
-	if [ "${2//+([0-9\ ])}" == "" ] ; then
-			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka na pozici - ${2}"
-			local OUTPUT=($(${DJVM} -l ${1} | grep \#${2//\ }\ ))
-			local PAGEORDER=${OUTPUT[@]:2:1}
-#			echo "identifypage: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
-			echo -n ${PAGEORDER#\#}
+		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
+			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka na pozici - ${IDENTIFICATOR}"
+			local SEARCHPOS="#${IDENTIFICATOR} "
+			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep "${SEARCHPOS}")
+			log 1 "identifypage: OUTPUT -${OUTPUT}-"
 		else
-			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka s názvem - ${2}"
-			local OUTPUT=($(${DJVM} -l ${1} | grep \"${2}$\"))
-			local PAGEORDER=${OUTPUT[@]:2:1}
-#			echo "identifypage: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
-			if [ -z "${OUTPUT}" ] ; then
-#				log 1 "identifypage: stránka ${2} se v souboru ${1} nevyskytuje"
-				return 0
-			else
-				echo -n ${PAGEORDER#\#}
-			fi
+			log 1 "identifypage: Zjišťuji, zda se vyskytuje stránka s názvem - ${IDENTIFICATOR}"
+			local SEARCHNAME="${IDENTIFICATOR}$"
+			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep "${SEARCHNAME}")
+		fi
+#		echo "identifyname: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+		if [ -z "${OUTPUT}" ] ; then
+			log 1 "identifypage: stránka ${2} se v souboru ${1} nevyskytuje"
+			return 0
+		else
+			local TEMP=( $OUTPUT )
+			local POS=${TEMP[@]:2:1}
+#			echo "identifypage: POS -${POS}-" >> /dev/stderr
+			echo -n "${POS#\#}"
 		fi
 	fi
 }
+
 
 function identifyname {
 	# Funkce vrací jméno stránky na základě identifikátoru stránky
 	# $1 soubor
 	# $2 testovaná hodnota
-	local BUNDLE=$(djvuinfo "${1}")
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local IDENTIFICATOR="${2##+([[:blank:]])}"
+	log 1 "identifyname: FILE -${FILE}- SOURCE -${SOURCE}- IDENTIFICATOR -${IDENTIFICATOR}-"
+	local BUNDLE=$(djvuinfo "${SOURCE}")
 	if [ "${BUNDLE}" == "none" ] ; then
 		return 0
 	else
-		if [ "${2//+([0-9\ ])}" == "" ] ; then
-			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka na pozici - ${2}"
-			local SEARCHPOS="#${2}"
-			local OUTPUT=$(${DJVM} -l ${1} | grep ${SEARCHPOS})
+		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
+			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka na pozici - ${IDENTIFICATOR}"
+			local SEARCHPOS="#${IDENTIFICATOR} "
+			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep "${SEARCHPOS}")
+			log 1 "identifyname: OUTPUT -${OUTPUT}-"
 		else
-			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka s názvem - ${2} \"${2# }\""
-			local SEARCHNAME="${2# }"
-			local OUTPUT=$(${DJVM} -l ${1} | grep ${SEARCHNAME}$)
+			log 1 "identifyname: Zjišťuji, zda se vyskytuje stránka s názvem - ${IDENTIFICATOR}"
+			local SEARCHNAME="${IDENTIFICATOR}$"
+			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep "${SEARCHNAME}")
 		fi
-		echo "identifyname: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
+#		echo "identifyname: Kontrolní výstup ${OUTPUT[@]}"  >> /dev/stderr
 		if [ -z "${OUTPUT}" ] ; then
 			log 1 "identifyname: stránka ${2} se v souboru ${1} nevyskytuje"
 			return 0
@@ -957,7 +1196,7 @@ function rotatepage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany která se má rotovat
 	# $3 - hodnota rotace
-	echo "$*" >> /dev/stderr
+#	echo "$*" >> /dev/stderr
 	local INFO="""
 Uvedenou hodnotu rotace nelze akceptovat. Rotaci lze nastavit buď 
 absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
@@ -972,19 +1211,31 @@ absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
 
 Každá jiná hodnota parametru je ignorována."""
 	local PARAMS=($2)
-	case "${PARAMS[$((${#PARAMS[@]} -1))]}" in
-		0|1|2|3|180|left|right)  echo "Jak mám otáčet $1" >> /dev/stderr
-			local ROTATE="${PARAMS[$((${#PARAMS[@]} -1))]}"
-			echo "rotatepage: před ořezáním -$2-"
-			local TEMP="${2% ${ROTATE}}"
-			local IDPAGE=${TEMP##+([[:blank:]])}
-			echo "rotatepage: po ořezání -${IDPAGE}-"
-		;;
-		*) echo "Neplatný parametr rotace - ${2}" >> /dev/stderr
-			exit 1
-		;;
-	esac
-	echo "rotatepage: ${IDPAGE} - ${ROTATE}" >> /dev/stderr
+	if [ "${#PARAMS[@]}" -gt "1" ] ; then
+		case "${PARAMS[$((${#PARAMS[@]} -1))]}" in
+			0|1|2|3|180|left|right) # echo "Jak mám otáčet $1" >> /dev/stderr
+				local ROTATE="${PARAMS[$((${#PARAMS[@]} -1))]}"
+#				echo "rotatepage: před ořezáním -$2-"
+				local TEMP="${2% ${ROTATE}}"
+				local IDPAGE=${TEMP##+([[:blank:]])}
+#				echo "rotatepage: po ořezání -${IDPAGE}-"
+			;;
+			*) echo "Neplatný parametr rotace - ${2}" >> /dev/stderr
+				exit 1
+			;;
+		esac
+	else
+#		echo "Rotuji dokument globálně.. ${PARAMS}" >> /dev/stderr
+		case "${PARAMS}" in
+			0|1|2|3|180|left|right) #  echo "Jak mám otáčet $1" >> /dev/stderr
+				local ROTATE="${PARAMS}"
+			;;
+			*) echo "Neplatný parametr rotace - ${PARAMS}" >> /dev/stderr
+				exit 1
+			;;
+		esac
+	fi
+#	echo "rotatepage: ${IDPAGE} - ${ROTATE}" >> /dev/stderr
 
 	local BUNDLE=$(djvuinfo "${1}")
 	if [ "${BUNDLE}" == "none" ] ; then
@@ -1022,7 +1273,7 @@ Každá jiná hodnota parametru je ignorována."""
 		fi
 	else
 		if [ -z "${IDPAGE}" ] ; then
-			echo "Bude se otáčet celý dokument"
+			echo "Při globálním natočení stránek dokumentu dávejte pozor, zda-li nastavujete absolutní hodnotu natočení, nebo, zda-li otáčíte stránky relativně (left/right). Při točení se upravuje natočení všech stránek. Buďte tedy při této operaci opatrní a raději si předem zkontrolujte, zda-li tím neovlivníte i některou ze stránek. Pokud ano, pak zvolte buť relativní parametr natočení, nebo ji pak otočte do správné pozice dodatečně."
 			if $(potvrdit) ; then
 				case "${ROTATE}" in
 					0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${1}"
@@ -1162,10 +1413,19 @@ function djvuinfo {
 	fi
 	if [ -z "${2}" ] ; then
 		echo "${PAGES}"
-	else
+	elif [ "${2}" == "all" ] ; then
+		echo "Info pro celý soubor.."
 		local INFO="DjVu pages"
 		echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${PAGES}\n" >> /dev/stderr
 		${EXIFTOOL} "${1}"
+	else
+		# extrakce stránky do dočasného adresáře..
+		local NAMEPAGE=$(identifyname "${1}" "${2}")
+		echo "djvuinfo: ${NAMEPAGE}" >> /dev/stderr
+		exportpage "${1}" "${NAMEPAGE} ${TEMPDIR}"
+		local INFO="DjVu pages"
+		echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${PAGES}\n" >> /dev/stderr
+		${EXIFTOOL} "${TEMPDIR}/${NAMEPAGE}"
 	fi
 }
 
@@ -1399,19 +1659,18 @@ function fromxcf {
 function help {
 	echo -n """[1mNápověda pro [1m[2m${0##*/}[0m : """
 	case "$1" in
-		exporttodjvu) echo """volba [1m-p[0m ([1m--page[0m)
+		page) echo """volba [1m-p[0m ([1m--page[0m)
 
-  Extrakce DjVu stránky ze svazku
+  Extrakce DjVu stránky ze svazku při akci [2mexport[22m
 
   [1m${0##*/}[0m ... {-p|--page} [yes|no] ...
   
-  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
-  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
-  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
-  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
-  uživatelského konfiguračního souboru umístěného v v adresáři:
-
-    ${HOME}/.config/${NAME}/
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - yes.
+  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
+    PAGE do souboru v adresáři ${HOME}/.config/${NAME}/
+  * Exportované stránky se ukládají pod svým původním názvem.
 """
 		;;
 		exporttopng) echo """volba [1m[1m--img[0m
@@ -1437,34 +1696,78 @@ Použitelné parametry:
   Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
 """
 		;;
-		exporttoxml) echo """volba [1m-x[0m ([1m--xml[0m)
+		dsed) echo """volba [1m-d[0m ([1m--dsed[0m)
 
-  Extrakce DjVu stránky ze svazku
+  Extrakce skryté textové vrstvy DjVu stránky ve formátu pro djvused.
+  Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
 
-  [1m${0##*/}[0m ... {-x|--xml} [yes|no] ...
+  [1m${0##*/}[0m ... {-d|--dsed} [yes|no|all|txt|ant] ...
   
-  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
-  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
-  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
-  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
-  uživatelského konfiguračního souboru umístěného v v adresáři:
+         yes - stejný efekt jako volba all
+         no  - textová vrstva se neexportuje (default)
+         all - exportuje se celý obsah skryté textové vrstvy
+         txt - exportuje se pouze obsah stránky
+         ant - exportují se meta atributy stránky, hyperlinky, atp.
 
-    ${HOME}/.config/${NAME}/
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - yes.
+  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
+    DSED do souboru v adresáři ${HOME}/.config/${NAME}/
+  * Exportovaná data se ukládají do souborů s příponou [3m.dsed[23m.
 """
 		;;
-		exporttodsed) echo """volba [1m-d[0m ([1m--dsed[0m)
+		force) echo """volba [1m-f[0m ([1m--force[0m)
 
-  Extrakce DjVu stránky ze svazku
+  Nastavením této volby si lze vynutit výchozí chování k souborům při
+  akci [2mexport[22m. Není-li uvedena, tak se skript před každým
+  přepsáním již existujícího souboru zeptá, zda-li má, nebo nemá
+  pokračovat.
 
-  [1m${0##*/}[0m ... {-x|--xml} [yes|no] ...
+  [1m${0##*/}[0m ... {-f|--force} [yes|no|skip] ...
   
-  Prostřednictvím této volby lze zvolit zda se má, nebo nemá při akci
-  [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
-  nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
-  Výchozí nastavení (no), lze implicitně změnit prostřednictvím
-  uživatelského konfiguračního souboru umístěného v v adresáři:
+         yes  - všechny soubory se budou bez keců přepisovat.
+         no   - skript se před přepsáním souboru bude dotazovat, zda-li
+                má soubor přepsat.
+         skip - pokud bude cílový soubor existovat, tak se akce přeskočí.
 
-    ${HOME}/.config/${NAME}/
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - skip.
+  * Výchozí parametr hodnotu parametru  (skip) - lze implicitně změnit
+    nastavením proměnné FORCE v uživatelském konfiguračním souboru.
+"""
+		;;
+		verbose) echo """volba [1m-v[0m ([1m--verbose[0m)
+
+  Prostřednictvím této volby si lze přesměrovat výstup doplňujících
+  informačních výpisů na konzoli. Díky nim pak lze podrobně sledovat
+  postup skriptu při zpracování souboru
+
+  [1m${0##*/}[0m ... {-v|--verbose} ...
+"""
+		;;
+		xml) echo """volba [1m-x[0m ([1m--xml[0m)
+
+  Extrakce skryté textové vrstvy DjVu stránky ve formátu XML.
+  Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
+
+  [1m${0##*/}[0m ... {-d|--dsed} [yes|no|all|txt|ant] ...
+  
+         yes - stejný efekt jako volba all
+         no  - textová vrstva se neexportuje (default)
+         all - exportuje se celý obsah skryté textové vrstvy
+         txt - exportuje se pouze obsah stránky
+         ant - exportují se meta atributy stránky
+
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - yes.
+  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
+    XML do souboru v adresáři ${HOME}/.config/${NAME}/
+  * Exportovaná data se ukládají do souborů s příponou [3m.xml[23m.
+
+[1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
 """
 		;;
 		exporttometa) echo """volba [1m-m[0m ([1m--meta[0m)
@@ -1492,19 +1795,6 @@ Použitelné parametry:
   [3mexport[23m z DjVu svazku exportovat i celá DjVu stránka. Pokud za volbou
   nenásleduje parametr, pak se automaticky předpokládá že ano (yes).
   Výchozí nastavení (no), lze implicitně změnit prostřednictvím
-  uživatelského konfiguračního souboru umístěného v v adresáři:
-
-    ${HOME}/.config/${NAME}/
-"""
-		;;
-		force) echo """volba [1m-f[0m ([1m--force[0m)
-
-  Vynucení akce
-
-  [1m${0##*/}[0m ... {-f|--force} ...
-  
-  Prostřednictvím této volby si lze vynutit realizaci akce.
-  Výchozí nastavení (no), lze implicitně změnit na (yes) prostřednictvím
   uživatelského konfiguračního souboru umístěného v v adresáři:
 
     ${HOME}/.config/${NAME}/
@@ -1544,7 +1834,7 @@ Použitelné parametry:
   Vliv dpi na zpracování obrazu..
 """
 		;;
-		level) echo"""
+		level) echo """
 [1mParametr[0m
          -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
                                při konverzi. Před nastavením této hodnoty vyzkoušejte
@@ -1560,10 +1850,12 @@ Použitelné parametry:
         --lossy        100 - ignorují se plochy
 """
 		;;
-		keywords-export) echo """vytvoření xml, dsed a náhledu
-  Export náhledu a textového obsahu DjVu souboru do externích souborů.
+		keywords-export) echo """akce [1mexport[0m
 
-[1mSyntaxe[0m
+  Export z DjVu svazku. O tom co bude předmětem exportu rozhodují další 
+  volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
+  se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
+  při volbě [3m-p[23m.
 
   [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all} [<dir>]
 
@@ -1571,16 +1863,13 @@ Použitelné parametry:
          name - jméno stránky v DjVu svazku
          dir  - adresář do kterého má být výstup uložen
 
-[3mPoznámka:[23m
-  Je-li místo pořadového čísla stránky, nebo jejího názvu, uvedeno all tak
-  se bude exportovat obsah textových vrstev celého DjVu svazku.
-  Formát exportovaného souboru je ve výchozím stavu .xml, ale s využitím 
-  volby -d (--dsed) lze textovou vrstvu exportovat i ve formátu pro djvused.
-  Je-li uveden také parametr --thumb, bude vyexportován i náhled v .png
-  Není-li uveden adresář, je použit aktuální adresář. Pro pojmenování souborů
-  je využit název stránky v takové podobě, jak je uložen v DjVu svazku.
-  Pokud již soubory se stejným názvem v adresáři existují, lze si vynutit
-  jejich přepsání volbou -f (--force)
+[4mPoznámka:[24m
+  * Je-li místo pořadového čísla stránky, nebo jejího názvu, uvedeno [3mall[23m
+    tak se bude exportovat celého DjVu svazku.
+  * Není-li uveden cílový adresář, budou soubory exporované do adresáře,
+    kde byl [1m${0##*/}[0m spuštěn.
+  * Přepsání již existujících souborů si lze vynutit volbou [3m--force yes[23m
+    Výchozí chování je - [3mskip[23m (existující soubory se znovu neexportují)
 """
 		;;
 		keywords-import) echo """
@@ -1689,7 +1978,7 @@ Použitelné parametry:
 		;;
 		keywords-rotate) echo """akce [1mrotate[0m
 
-  [4mOtočení DjVu stránky[24m.
+  Úprava výchozího natočení DjVu stránek.
 
   [1m${0##*/}[0m [volby] <svazek> rotate {<num>|<name>} <value>
 
@@ -1849,7 +2138,7 @@ CreationDate - Čas vytvoření dokumentu
   -h|--help     Nápověda
   -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
   -d|--dsed     Při akci export ukládat obsah textové vrstvy do souboru .dsed
-  -f|--force    Vynucení akce
+  -f|--force    Vynucená akce
   -i|--indirect Výsledekm zpracování bude volný svazek
   -m|--meta     Při akci export ukládat meta informace z DjVu stránky či svazku do soubor s příponou .meta
   -p|--page     Vytažení celé stránky z DjVu svazku
@@ -1959,404 +2248,464 @@ function main {
 #	echo "$@" >> /dev/stderr
 #	echo "$*" >> /dev/stderr
 
-#local VSTUP="$*"
-while [ $# -gt 0 ]
-do case "$1" in
-	-a|--algorithm) [ "$2" == "-h" ] && for i in ${ALG[@]} ; do 
-					echo "$i"
-				done && exit 0 || ALG="$2" ; shift
-		;;
-	-d|--dsed) if [ "$2" == "-h" ] ; then
-				help exporttodsed && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				DSED="${2}"
-				shift
-			else
-				DSED="yes"
-			fi
-	;;
-	-e|--ext) case "$2" in
-			jpg|jpeg|png|tiff|pnm|pbm|gif|djvu) EXTENSION=".$2" && shift
-				;;
-				*) help suffix && exit 0
+local VSTUP="$*"
+local COUNT=${#VSTUP}
+local POS=0
+local START=0
+while [ $POS -lt $COUNT ]
+do local POS=$((POS+1))
+	case "${VSTUP:$START:$POS}" in
+		-a|--algorithm) # Volba pro akci insert
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help algorithm && exit 0
 				;;
 			esac
-		;;
-	-f|--force) if [ "$2" == "-h" ] ; then
-				help force && exit 0
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+#			echo "$VALUE" >> /dev/stderr
+			if [ "${VALUE:0:1}" == "-" ] ; then
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
 			else
-				FORCE=yes
-			fi
-	;;
-	--img) if [ "$2" == "-h" ] ; then
-				help exporttopng && exit 0
-			else
-				case "${2}" in
-					yes|no|color|black|foreground|background|mask) IMGPAGE="${2}" && shift
-					;;
-					*) IMGPAGE="yes"
-					;;
-				esac
-			fi
-		;;
-	--dpi) if [ "$2" -ge "72" ] || [ "$2" -le "6000" ] ; then
-				DPI="$2"
-				shift
-			else
-				help dpi && exit 0
-			fi
-	;;
-    -h) if [ "$2" == "-h" ] ; then
-				help options
-			else
-				help
-			fi
-			exit 0
-		;;
-	--indirect) if [ "$2" == "-h" ] ; then
-				help indirect && exit 0
-			else
-				INDIRECT=yes
-			fi
-	;;
-	--clean) LEVEL="--loss-level=1"
-	;;
-	--lossy) LEVEL="--loss-level=100"
-	;;
-	--lossless) LEVEL="--loss-level=0"
-	;;
-	--loss-level) if [ "$2" -ge "0" ] || [ "$2" -lt "200" ] ; then
-				LEVEL="--loss-level=1"
-				shift
-			else
-				help level && exit 0
+				for i in ${VALUE//,/ } ; do
+#					echo "$i" >> /dev/stderr
+					local TEST="no"
+					for y in ${ALGORITHM[@]} ; do
+						[ "$i" == "$y" ] && local TEST="yes"
+					done
+					[ "${TEST}" == "no" ] && echo "Algoritmus $i nelze použít" >> /dev/stderr && exit 0
+				done
+				ALG=(${VALUE//,/ })
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
 			fi
 		;;
-	--manual) [ -f $0.manual ] && less -R $0.manual
-		exit 0
-		;;
-	-m|--meta) if [ "$2" == "-h" ] ; then
-				help exporttometa && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				EXTRACTMETA="${2}"
-				shift
-			else
-				EXTRACTMETA="yes"
-			fi
-		;;
-	--pdf) PDF2DJVU=$(which pdf2djvu)
-[ ! ${PDF2DJVU} ] && echo 'Není nainstalován balík pdf2djvu, který je nezbytný pokud chcete provést přímou konverzi PDF souboru do DjVu formátu' && PDF2DJVU=false
-	;;
-	-o|--ocr) if [ "$2" == "-h" ] ; then
-				help ocr && exit 0
-			elif [ "${#2}" == "3" ] ; then
-				OCR="$2"
-				shift
-			else
-				OCR="ces"
-			fi
-		;;
-	-p|--page) if [ "$2" == "-h" ] ; then
-				help exporttodjvu && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				EXTRACTPAGE="${2}"
-				shift
-			else
-				EXTRACTPAGE="yes"
-			fi
-		;;
-	-r|--rename) case "$2" in
-		*0) RENAME="$2" && shift
+		-d|--dsed) # Volba pro akci export
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help dsed && exit 0
 				;;
-		*) help rename && exit 0
-			;;
-		esac
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			case "${VALUE%%+([[:blank:]])}" in
+				yes|no|txt|ant|all) DSED="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro DSED parametr - ${DSED}"
+				;;
+				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
+				DSED="yes"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+			esac
 		;;
-	--test) TEST="yes"
-			# Implementovat volby --test-conversion a --test-view
-		;;
-	--test-conversion) ALG="abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction"
-		TEST="yes"
-		;;
-	--test-view) # Zobrazení testovacího souboru pomocí djview
-			echo "Ještě neimplementováno"
-			exit 100
-			if [ -f "$2" ] ; then
-				# Předává se soubor... obrázek či něco jiného?
-				todoview "${2}"
-			elif [ -d "$2" ] ; then
-				# Předává se adresář
-				echo "Ještě není implementováno"
+		--dpi) # Volba pro akci insert
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help dpi && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP% ${NEXT}}"
+#			echo "${VALUE//+([[:digit:]])}" >> /dev/stderr
+			if [ "${VALUE//+([[:digit:]])}" == "" ] ; then
+				if [ "${VALUE}" -ge "72" ] && [ "${VALUE}" -le "6000" ] ; then
+					DPI="${VALUE%%+([[:blank:]])}"
+					local VSTUP="${NEXT}"
+					local POS=0
+					local COUNT=${#VSTUP}
+					log 1 "main: Aplikuji pro DPI parametr - ${DPI}"
+				else
+					echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
+					exit 1
+				fi
 			else
-				$0 -h
+				echo "Nebyla uvedena hodnota dpi. Pokud chcete volbou --dpi změnit výchozí hodnotu (300), musíte ji uvést jako číselný parametr" >> /dev/stderr
+				exit 1
+			fi
+		;;
+		-f|--force) local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help force && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			case "${VALUE%%+([[:blank:]])}" in
+				yes|no|skip) FORCE="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro FORCE parametr - ${FORCE}"
+				;;
+				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
+				FORCE="skip"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+			esac
+		;;
+		--clean|--lossy|--lossless|--level) # Volba pro akci insert
+			local PARAM=${VSTUP:0:$POS}
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help force && exit 0
+				;;
+			esac
+			case "${PARAM}" in
+				--lossy) LEVEL="--loss-level=100"
+					local VSTUP="${TEMP}"
+					local POS=0
+				;;
+				--lossless) LEVEL="--loss-level=0"
+					local VSTUP="${TEMP}"
+					local POS=0
+				;;
+				--clean) LEVEL="--loss-level=1"
+					local VSTUP="${TEMP}"
+					local POS=0
+				;;
+				--level)
+							local NEXT="${TEMP#* }"
+						local VALUE="${TEMP%${NEXT}}"
+						local XXX=${VALUE%%+([[:blank:]])}
+						if [ "${XXX//+([[:digit:]])}" == "" ] ; then
+						local VSTUP="${NEXT}"
+						local POS=0
+						local COUNT=${#VSTUP}
+						if [ "${XXX}" -ge "0" ] && [ "${XXX}" -lt "200" ] ; then
+							LEVEL="--loss-level=${XXX}"
+							log 1 "main: Aplikuji pro LEVEL hodnotu - ${LEVEL}"
+						else
+							help level && exit 0
+						fi
+					else
+						echo "main: Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
+						exit 1
+					fi
+				;;
+				*) echo "Sem se nikdy neměl dostat"
+				;;
+			esac
+			log 1 "Úroveň ztrátovosti při kompresi ${LEVEL}"
+		;;
+		-m|--meta) # Volba pro akci export
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help meta && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			if [ "${VALUE%%+([[:blank:]])}" == "yes" ] || [ "${VALUE%%+([[:blank:]])}" == "no" ] ; then
+				META="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro META parametr - ${META}"
+			else
+				META="yes"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
+			fi
+		;;
+		-o|--ocr) # Volba pro akci insert
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) ${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
 				exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP% ${NEXT}}"
+#			echo "$VALUE" >> /dev/stderr
+#			echo $(${TESSERACT} --list-langs 2>&1 | sed '1d;x') >> /dev/stderr
+			for i in ${VALUE//+/ } ; do
+				local TEST="no"
+				for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
+					[ "$i" == "$y" ] && local TEST="yes"
+#					echo "$i - $y" >> /dev/stderr
+				done
+				[ "${TEST}" == "no" ] && echo "Pro jazyk $i nemá tesseract nainstalovanou jazykovou podporu" >> /dev/stderr && exit 0
+			done
+			if [ "${TEST}" == "yes" ] ; then
+				OCR="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro OCR parametr - ${OCR}"
+			else
+				OCR="${OCR=ces}"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
 			fi
 		;;
-	-x|--xml) if [ "$2" == "-h" ] ; then
-				help exporttoxml && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				XML="${2}"
-				shift
+		-p|--page) # Volba pro akci export
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help page && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			if [ "${VALUE%%+([[:blank:]])}" == "yes" ] || [ "${VALUE%%+([[:blank:]])}" == "no" ] ; then
+				PAGE="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro PAGE parametr - ${PAGE}"
 			else
+				log 1 "Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
+				PAGE="yes"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+			fi
+		;;
+		-t|--thumb) # Volba pro akci insert
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help thumb && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP% ${NEXT}}"
+#			echo "${VALUE//+([[:digit:]])}" >> /dev/stderr
+			if [ "${VALUE//+([[:digit:]])}" == "" ] ; then
+				if [ "${VALUE}" -ge "32" ] && [ "${VALUE}" -le "256" ] ; then
+					THUMB="${VALUE%%+([[:blank:]])}"
+					local VSTUP="${NEXT}"
+					local POS=0
+					local COUNT=${#VSTUP}
+					log 1 "main: Aplikuji pro THUMB parametr - ${DPI}"
+				else
+					echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
+					exit 1
+				fi
+			else
+				echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
+				exit 1
+			fi
+		;;
+		-v|--verbose) # Volba pro ukecaný výstup
+			local PARAM=${VSTUP:0:$POS}
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help verbose && exit 0
+				;;
+			esac
+			case "${PARAM}" in
+				-v|--verbose) LOG="/dev/stderr"
+					local VSTUP="${TEMP}"
+					local POS=0
+				;;
+			esac
+			log 1 "Nastavuji ukecaný výstup"
+		;;
+		-x|--xml) # Volba pro akci export
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help xml && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			case "${VALUE%%+([[:blank:]])}" in
+				yes|no|txt|ant|all) XML="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro XML parametr - ${XML}"
+				;;
+				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
 				XML="yes"
-			fi
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+			esac
 		;;
-	-t|--thumb) if [ "$2" == "-h" ] ; then
-				help exporttothumb && exit 0
-			elif [ "${2}" == "yes" ] || [ "${2}" == "no" ] ; then
-				THUMBNAIL="${2}"
-				shift
+		*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
+# tady vzniká problém, pokud akce nemá žádné další parametry...
+			local FILE="${VSTUP:0:$POS}"
+			local TEMP=${VSTUP#${FILE}}
+#			echo "Délka řetězce ${#TEMP} -${TEMP}-" >> /dev/stderr
+			local OREZ=${TEMP##+([[:blank:]])}
+#			echo "Délka řetězce ${#OREZ} -${OREZ}-" >> /dev/stderr
+			local CHARSTRING="${OREZ#* }"
+#			echo "CHARSTRING Délka řetězce ${#CHARSTRING} -${CHARSTRING}-" >> /dev/stderr
+			if [ "${#CHARSTRING}" -eq "${#OREZ}" ] ; then
+				local KEY="${CHARSTRING}"
+				local CHARSTRING=""
 			else
-				THUMBNAIL="yes"
+				local TEMP="${OREZ%${CHARSTRING}}"
+				local KEY="${TEMP%%+([[:blank:]])}"
 			fi
+			log 1 "KEY -${KEY}-"
+			log 1 "FILE -${FILE}-"
+			log 1 "CHARSTRING -${CHARSTRING}-"
+		break
 		;;
-	*) #Předaný parametr není zachycen předchozích volbách
-	# Může to být řetězec, nebo řetězec s mezerami
-	# v takovém případě může být rozhodující výskyt klíčového slova ve zbytku...
-	# Sjet ve smyčce zbytek příkazové řádky a otestovat ji na výskyt klíčového slova---
-	# Přerušit..
-#	echo "Předáno: $VSTUP" >> /dev/stderr
-	local CHARSTRING="${@:1}"
-	local CHARCOUNT=$((${#CHARSTRING} + 1))
-	local CHARPOS=0
-	local STRPOS=0
-	while [ "${CHARCOUNT}" -gt "0" ] ; do
-#		echo "${CHARSTRING}" >> /dev/stderr
-		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
-			*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) local FILE="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
-#				echo "Soubor... -${FILE}-" >> /dev/stderr
-				local STRPOS="${CHARPOS}"
-				local CHARSTRING="${CHARSTRING#${FILE}}"
-#				echo "Zbytek.. ${CHARSTRING}" >> /dev/stderr
-				local CHARCOUNT=$((${#CHARSTRING} + 1))
-			;;
-			\ back |\ delete |\ export |\ fore |\ import |\ info |\ print |\ rotate |\ set |\ unset ) local KEY="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
-#				echo "Klíč.. ${KEY}" >> /dev/stderr
-				local STRPOS="${CHARPOS}"
-				local CHARSTRING="${CHARSTRING#${KEY}}"
-#				echo "Zbytek.. ${CHARSTRING}" >> /dev/stderr
-				break
-				local CHARCOUNT=$((${#CHARSTRING} + 1))
-			;;
-		esac
-		local CHARPOS=$((CHARPOS + 1))
-		local CHARCOUNT=$((CHARCOUNT - 1))
-	done
-#	echo "Soubor se kterým budu pracovat: ${FILE}" >> /dev/stderr 
-#	echo "Akce kterou chci realizovat: ${KEY}" >> /dev/stderr 
-#	echo "Zbytek co jí předám: ${CHARSTRING}" >> /dev/stderr
-	case "${CHARSTRING// /}" in
+	esac
+done
+
+	case "${CHARSTRING}" in
 		*-h|*--help|-h*|--help*) if [ -z "${KEY}" ] ; then
 				help
 			else
-				echo "keywords-${KEY// /}" >> /dev/stderr
-				help "keywords-${KEY// /}"
+				echo "keywords-${KEY}" >> /dev/stderr
+				help "keywords-${KEY}"
 			fi
 			exit 77
 		;;
 	esac
 
-	if [ -z "{FILE}" ] ; then
-		# Nebyl předán soubor
-#		echo "Ve zbytku může být cesta do adresáře..."
-		if [ -d "${CHARSTRING}" ] ; then
-			echo "Byl předán adresář ${CHARSTRING}" >> /dev/stderr
-			echo "ToDo" >> /dev/stderr
-			exit 0
-		else
-			echo "Byl předán neplatný řetězec ${CHARSTRING}" >> /dev/stderr
-			exit 1
-		fi
-	else
-#		local FILE="$(escape_path ${FILE})"
-		local FILE=$(${REALPATH} "${FILE}")
-		# Tady je k dispozici soubor ke zpracování...
-		if [ -f "${FILE}" ] ; then
-#			log 1 "main: Soubor -${FILE}- existuje.."
-#			FILE=${FILE//\ /\\ }
-			case $(testfile "${FILE}") in
-				djvu)
-					#echo "AKCE ${KEY}" >> /dev/stderr
-					#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
-					case "${KEY// /}" in
-						delete) deletepage "${FILE}" "${CHARSTRING}"
-							exit 0
-						;;
-						insert) # ToDo - zpracovat ${CHARSTRING}
-							exit 1
-								if [ -f "${3}" ] ; then
-								if [ $(testfile ${3}) == "djvu" ] ; then
-									log 1 "main - insert: Soubor je typu djvu"
-									local INSERTFILE=${3}
-								else
-									[ "${#ALG[@]}" == "1" ] || exit 32
-									local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
-									todjvu ${3} ${INSERTFILE}
-									if [ $? -gt "0" ] ; then
-										echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
-										exit 1
-									fi
+	if [ -f "${FILE}" ] ; then
+#		log 1 "main: Soubor -${FILE}- existuje.."
+#		FILE=${FILE//\ /\\ }
+		case $(testfile "${FILE}") in
+			djvu)
+				#echo "AKCE ${KEY}" >> /dev/stderr
+				#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
+				case "${KEY}" in
+					delete) deletepage "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					insert) # ToDo - zpracovat ${CHARSTRING}
+						exit 1
+						if [ -f "${3}" ] ; then
+							if [ $(testfile ${3}) == "djvu" ] ; then
+								log 1 "main - insert: Soubor je typu djvu"
+								local INSERTFILE=${3}
+							else
+								[ "${#ALG[@]}" == "1" ] || exit 32
+								local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
+								todjvu ${3} ${INSERTFILE}
+								if [ $? -gt "0" ] ; then
+									echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
+									exit 1
 								fi
-								# Určit pozici...
-								local P=$(identifypage ${1} ${4})
-								log 1 "main - insert: Cílová pozice je $P"
-								if [ -z "${P}" ] ; then
-									if [ -z "${4}" ] ; then
-										echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
-										insertpage ${1} ${INSERTFILE}
-									else
-										echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
-										exit 1
-									fi
+							fi
+							# Určit pozici...
+							local P=$(identifypage ${1} ${4})
+							log 1 "main - insert: Cílová pozice je $P"
+							if [ -z "${P}" ] ; then
+								if [ -z "${4}" ] ; then
+									echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
+									insertpage ${1} ${INSERTFILE}
 								else
-									log 1 "main - insert: Vkládám ${INSERTFILE} na pozici $P"
-									insertpage ${1} ${INSERTFILE} ${P}
+									echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
+									exit 1
 								fi
 							else
-								echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
-								exit 1
+								log 1 "main - insert: Vkládám ${INSERTFILE} na pozici $P"
+								insertpage ${1} ${INSERTFILE} ${P}
 							fi
-							exit 0
-						;;
-						set) setmeta "${FILE}" "${CHARSTRING}"
-							exit 0
-						;;
-						print) printmeta ${FILE} "${CHARSTRING}"
-							exit 0
-						;;
-						unset) unsetmeta ${FILE} "${CHARSTRING}"
-							exit 0
-						;;
-						fore)  # ToDo - zpracovat ${CHARSTRING}
+						else
+							echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
 							exit 1
-								[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
-#								echo "akce forvard ${1} - ${3} - ${4}" >> /dev/stderr
-								forwardpage ${1} ${3} ${4}
-								exit 0
-							;;
-						back)  # ToDo - zpracovat ${CHARSTRING}
-							exit 1
-							[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
-								backpage ${1} ${3} ${4}
-								exit 0
-						;;
-						rotate) rotatepage "${FILE}" "${CHARSTRING}"
-								exit 0
-						;;
-						export)   # ToDo - zpracovat ${CHARSTRING}
-							exit 1
-								exportpage ${FILE} ${CHARSTRING}
-								exit 0
-							;;
-						import)   # ToDo - zpracovat ${CHARSTRING}
-							exit 1
-							;;
-						info) djvuinfo "${FILE}" "${CHARSTRING}"
-								exit 0
-							;;
-						rename)   # ToDo - zpracovat ${CHARSTRING}
-							exit 1
-							;;
-							*) help keywords && exit 0
-							;;
-						esac
-				;;
-				jpeg|png) echo "Bude se zpracovávat soubor v bitmapovém formátu"
-					echo "ToDo"
-					exit 1
-				;;
-				xcf|tiff|mng) echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
-					exit 1
-				;;
-				xml|XML) echo "má-li první soubor příponu xml"
-					echo "ToDo"
-					exit 1
-				;;
-				unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
-				exit 1
-				;;
-				*) echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
-					echo '''Pokud následuje djvu soubor'''
-					echo '''Pokud následuje adresář'''
-					echo '''to je existující soubor typu bundle a:
-					- nenásleduje žádný další existující soubor typu djvu, nebo adresář
-					a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
-					- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
-					- djvu soubor, má se připojit
-					- xml soubor, má se vložit
-					- soubor typu dsed má se zpracovat
-					- jiný soubor - obrázek, který se má převést a vložit
-					'''
-				
-
-					echo "Zpracování souborů jako je $2 zatím není implementováno"
-					exit 1
-				;;
-			esac
-		log 1 "main: Tudy může projet pouze v případě, že položka ${1} je existující soubor a není odchycena některou z akcí"
-		else
-			echo "Chystáte se zpracovávat neexistující soubor ${FILE}" >> /dev/stderr
-			echo "ToDo"
-			exit 1
-		fi
-	fi
-# xxxxxxx
-echo '''
-	elif [ -d "${1}" ] ; then
-		log 1 "main: Sem spadne pouze existující adresář - to může znamenat, že se bude dále pracovat v něm, nebo s ním - záleží na dalších parametrech"
-			DIRECTORY="${1:0:$((${#1}-1))}"
-	elif [ -z "${2}" ] ; then
-		log 1 "main: Sem se spadne, je-li následující položka prázdná"
-	elif [ "${2}" == "-h" ] || [ "${2}" == "--help" ] ; then
-		help
-		exit 0
-	else
-		log 1 "main: Sem se spadne, pokud předcházející položka ${1} není adresář a nevede také existující soubor"
-		echo "main: ${1} $(testfile ${1})" >> /dev/stderr
-			if [ "${1:$((${#1}-1)):1}" == "/" ] ; then
-				if [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
-					log 1 "main: Rozbalení DjVu svazku : První položka je jméno adresáře a druhá DjVu soubor, který se má rozbalit"
-					djvuunbundle "$1" "$2" 
-					exit 0
-				else
-					if [ -f "{2}" ] ; then
-						log 1 "main: První položka je jméno adresáře a druhá jméno existujícího souboru, který není typu DjVu"
-					else
-						log 1 "main: První položka je jméno adresáře a druhá řetězec - pravděpodobně bude následovat položka třetí... to mohl být vzorek"
-					fi
-				fi
-			elif [ "${2:$((${#2}-5))}" == ".djvu" ] ; then
-				log 1 "main: Sestavení DjVu svazku - konverze, OCR, textové soubory, náhled, integrace a nakonec sestavení"
-				# $1 vzorek
-				# $2 jméno budoucího DjVu svazku
-				# $2 číslo souboru, který se má zpracovat (není-li uvedeno, zpracují se všechny)
-				djvubundle "$1" "$2" "$3"
-				exit 0
-			else
-				log 1 "Sem to propadne, když soubor ${1} nebyl rozpoznán jako djvu soubor..."
-				case "${2:$((${#2}-3))}" in
-					tiff) echo "Soubor $1 se bude exportovat do souboru $2"
-						;;
-					pdf) echo "Soubor $1 se bude exportovat do souboru $2"
-						;;
-					xcf) echo "za řetězcem následuje jméno xcf souboru, takže pokud neexistuje $DIRECTORY, je $1 - jméno budoucího djvu souboru a $2 jméno vícevrstvého xcf souboru."
-						echo "zavolat funkci pro konverzi xcf2djvu a skončit"
+						fi
 						exit 0
-						;;
-					mng) echo "Soubor $1 se bude exportovat do souboru $2"
-						;;
-					*) echo "Pokud zpracování příkazové řádky došlo až sem, tak to znamená, že je pravděpodobně chybně uvedené jméno DjVu souboru se kterým se má pracovat. Zkontrolujte, zda následující jméno skutečně odpovídá jménu souboru se kterým chcete pracovat - ${1}"
+					;;
+					set) setmeta "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					print) printmeta ${FILE} "${CHARSTRING}"
+						exit 0
+					;;
+					unset) unsetmeta ${FILE} "${CHARSTRING}"
+						exit 0
+					;;
+					fore)  # ToDo - zpracovat ${CHARSTRING}
 						exit 1
-						;;
+						[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+#						echo "akce forvard ${1} - ${3} - ${4}" >> /dev/stderr
+						forwardpage ${1} ${3} ${4}
+						exit 0
+					;;
+					back)  # ToDo - zpracovat ${CHARSTRING}
+						exit 1
+						[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
+						backpage ${1} ${3} ${4}
+						exit 0
+					;;
+					rotate) rotatepage "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					export)   # ToDo - zpracovat ${CHARSTRING}
+						exportpage "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					import)   # ToDo - zpracovat ${CHARSTRING}
+						exit 1
+					;;
+					info)	echo "procházím"
+						djvuinfo "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					rename)   # ToDo - zpracovat ${CHARSTRING}
+						exit 1
+					;;
+					*) echo "Jsem tu -${KEY}-" >> /dev/stderr
+						help keywords && exit 0
+					;;
 				esac
-			fi
+			;;
+			jpeg|png) echo "Bude se zpracovávat soubor v bitmapovém formátu"
+				echo "ToDo"
+				exit 1
+			;;
+			xcf|tiff|mng) echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
+				exit 1
+			;;
+			xml|XML) echo "má-li první soubor příponu xml"
+				echo "ToDo"
+				exit 1
+			;;
+			unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
+				exit 1
+			;;
+			*) echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
+				echo '''Pokud následuje djvu soubor'''
+				echo '''Pokud následuje adresář'''
+				echo '''to je existující soubor typu bundle a:
+				- nenásleduje žádný další existující soubor typu djvu, nebo adresář
+				a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
+				- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
+				- djvu soubor, má se připojit
+				- xml soubor, má se vložit
+				- soubor typu dsed má se zpracovat
+				- jiný soubor - obrázek, který se má převést a vložit
+				'''
+				echo "Zpracování souborů jako je $2 zatím není implementováno"
+				exit 1
+			;;
+		esac
+	else
+		echo "Tady se dostane pokud ${FILE} neexistuje" >> /dev/stderr
 	fi
-''' > /dev/null
-# xxxxxxx
-	;;
-	esac
-	shift
-done
 }
 
 main "$*"
