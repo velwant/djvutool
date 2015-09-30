@@ -41,7 +41,8 @@ LOG="${LOG=/dev/null}"
 XML="${XML=no}"
 DPI="${DPI=300}"
 DSED="${DSED=no}"
-DSED="${PAGE=no}"
+PAGE="${PAGE=no}"
+IMG="${IMG=no}"
 INDIRECT="${INDIRECT=no}"
 FORCE="${FORCE=skip}"
 RENAME="no"
@@ -457,13 +458,13 @@ function exportpage {
 					echo "Pokud byste chtěli exportovat z DjVu svazku celou stránku v DjVu formátu, musíte použít volbu -p" >> /dev/stderr
 				fi
 				if [ "${XML}" != "no" ] ; then
-					exportxml "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+					exportxml "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 				fi
 				if [ "${DSED}" != "no" ] ; then
 					exportdsed "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 				fi
-				if [ ${IMGPAGE} != "no" ] ; then
-					exportimg "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+				if [ "${IMG}" != "no" ] ; then
+					exportimg "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 				fi
 				popd
 				local NUMPAGE=$((NUMPAGE + 1))
@@ -501,13 +502,13 @@ function exportpage {
 				echo "Pokud byste chtěli exportovat z DjVu svazku celou stránku v DjVu formátu, musíte použít volbu -p" >> /dev/stderr
 			fi
 			if [ "${XML}" != "no" ] ; then
-				exportxml "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+				exportxml "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 			fi
 			if [ "${DSED}" != "no" ] ; then
 				exportdsed "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 			fi
-			if [ ${IMGPAGE} != "no" ] ; then
-				exportimg "${SOURCE}" "${EXPORTPAGE}" "${TARGETDIR}"
+			if [ "${IMG}" != "no" ] ; then
+				exportimg "${SOURCE}" "${EXPORTPAGE} ${TARGETDIR}"
 			fi
 			popd
 		fi
@@ -763,6 +764,137 @@ function exportxml {
 }
 
 function exportimg {
+	# $1 - svazek
+	# $2 - identifikátor nebo adresář
+	# $3 - adresář
+	log 1 "exportimg: předáno -$1-+-$2-+-$3-"
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+
+	local CHARSTRING="$2"
+	local CHARCOUNT=$((${#CHARSTRING} + 1))
+	local CHARPOS=0
+	local STRPOS=0
+	while [ "${CHARCOUNT}" -gt "0" ] ; do
+		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
+			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
+				log 1 "exportimg: Soubor... -${PAGENAME}-"
+				local STRPOS="${CHARPOS}"
+				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
+				log 1 "exportimg: CHARSTRING.. ${CHARSTRING}"
+				local CHARCOUNT=$((${#CHARSTRING} + 1))
+				log 1 "exportimg: CHARCOUNT.. ${CHARCOUNT}"
+			;;
+		esac
+		local CHARPOS=$((CHARPOS + 1))
+		local CHARCOUNT=$((CHARCOUNT - 1))
+	done
+	if [ -z "${PAGENAME}" ] ; then
+		local TEMP=${CHARSTRING##+([[:blank:]])}
+		local IDPAGE=${TEMP%%+([[:blank:]])*}
+		local CHARSTRING=${TEMP#${IDPAGE}}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportimg: Exportuji stránku s IDPAGE -${IDPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	else
+		local NAMEPAGE=${PAGENAME##+([[:blank:]])}
+		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
+		log 1 "exportimg: Exportuji stránku s NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}-"
+	fi
+
+	case "${IMG}" in
+		yes) local EXPORT="-mode=color"
+		;;
+		color|black|foreground|background|mask) local EXPORT="-mode=${IMG}"
+		;;
+		no) return 0
+		;;
+	esac
+
+	log 1 "exportimg: FILE -${FILE}- SOURCE -${SOURCE}- NAMEPAGE -${NAMEPAGE}- do adresáře TARGETDIR -${TARGETDIR}- IMG -${IMG}-"
+		# Vytvoření cílového adresáře
+	if [ -z "${TARGETDIR}" ] ; then
+		log 1 "exportimg: Žádný adresář nebyl předán - je možné, že se budou exportovat náhledy pro celý svazek"
+		if [ "${IDPAGE:0:1}" == "/" ] ; then
+			echo "Budou se exportovat náhledy pro všechny stránky souboru ${FILE}" >> /dev/stderr
+			local TARGETDIR=$(${REALPATH} -m -P ${IDPAGE})
+			if [ ! -d "${TARGETDIR}" ] ; then
+				mkdir -p "${TARGETDIR}"
+			fi
+			pushd "${TARGETDIR}"
+			log 1 "exportimg Exportuji náhledy pro všechny stránky"
+			local PAGES=$(lastpage "${SOURCE}")
+			local NUMPAGE=1
+			while [ "${PAGES}" -gt "0" ] ; do
+				local EXPORTPAGE=$(identifyname "${SOURCE}" "${NUMPAGE}")
+				log 1 "exportimg: Generuji náhled pro stránku ${EXPORTPAGE}"
+				local TARGET="${EXPORTPAGE/.djvu/.png}"
+				if [ -f "${TARGET}" ] ; then
+					if [ "${FORCE}" == "yes" ] ; then
+						${DDJVU} -format=pnm "${EXPORT}" -page="${NUMPAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+					elif [ "${FORCE}" == "skip" ] ; then
+						log 1 "Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+					else
+						echo "Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje.." >> /dev/stderr
+						potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${NUMPAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+					fi
+				else
+					${DDJVU} -format=pnm "${EXPORT}" -page="${NUMPAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+				fi
+				local NUMPAGE=$((NUMPAGE + 1))
+				local PAGES=$((PAGES - 1))
+			done
+			popd
+			return 0
+		else
+			local TARGETDIR=$(${REALPATH} -m -P ./)
+		fi
+	else
+		local TARGETDIR=$(${REALPATH} -m -P ${TARGETDIR})
+		if [ ! -d "${TARGETDIR}" ] ; then
+			mkdir -p "${TARGETDIR}"
+		fi
+	fi
+
+	local BUNDLE=$(djvuinfo "${SOURCE}")
+	if [ "${BUNDLE}" == "none" ] ; then
+		echo "Soubor ${FILE} je single-page DjVu" >> /dev/stderr
+		pushd "${TARGETDIR}"
+		local TARGET=${FILE/.djvu/.png}
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DDJVU} -format=pnm "${EXPORT}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportimg: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportimg: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte volbu --force yes" >> /dev/stderr
+				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+			fi
+		else
+			${DDJVU} -format=pnm "${EXPORT}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+		fi
+		popd
+	else
+		pushd "${TARGETDIR}"
+		local PAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+		local TARGET=${NAMEPAGE/.djvu/.png}
+		if [ -f "${TARGETDIR}/${TARGET}" ] ; then
+			if [ "${FORCE}" == "yes" ] ; then
+				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+			elif [ "${FORCE}" == "skip" ] ; then
+				log 1 "exportpng: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje."
+			else
+				echo "exportpng: Soubor ${TARGET} již v adresáři ${TARGETDIR} existuje. Pokud chcete soubory přepisovat bez dotazování, použijte volbu --force yes" >> /dev/stderr
+				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+			fi
+		else
+			${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${SOURCE}" | ${PNMTOPNG} > "${TARGET}"
+		fi
+		popd
+	fi
+}
+
+
+function exportimg1 {
 	# Webeditor náhled akceptuje pouze pokud vyhovuje numerickému tvaru - tedy ne tvar 001!!!
 	# Náhled se znovu exportuje pouze za předpokladu, že je současně uvedena volba --force
 	# $1 - svazek
@@ -1673,11 +1805,11 @@ function help {
   * Exportované stránky se ukládají pod svým původním názvem.
 """
 		;;
-		exporttopng) echo """volba [1m[1m--img[0m
+		image) echo """volba [1m-i[0m ([1m--img[0m)
 
   [4mExtrakce obrazové vrstvy[24m DjVu stránky do bitmapového souboru
 
-  [1m${0##*/}[0m ... --img [yes|no|<layer>] ...
+  [1m${0##*/}[0m ... {-i|--img} [yes|no|<layer>] ...
 
   Je-li parametrem volby [3myes[23m, tak se bude při akci [2mexport[22m generovat z DjVu
   stránky plnobarevný bitmapový obrázek ve formátu PNG.
@@ -2401,6 +2533,29 @@ do local POS=$((POS+1))
 				;;
 			esac
 			log 1 "Úroveň ztrátovosti při kompresi ${LEVEL}"
+		;;
+		-i|--image) # Volba pro akci export
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help image && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP%${NEXT}}"
+			case "${VALUE%%+([[:blank:]])}" in
+				yes|no|color|black|foreground|background|mask) IMG="${VALUE%%+([[:blank:]])}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro IMG parametr - ${IMG}"
+				;;
+				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
+				IMG="yes"
+				local VSTUP="${TEMP}"
+				local POS=0
+				local COUNT=${#VSTUP}
+			esac
 		;;
 		-m|--meta) # Volba pro akci export
 			local POS=$((POS+1))
