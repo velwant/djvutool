@@ -1014,13 +1014,9 @@ function deletepage {
 	# REVIZE NUTNÁ!!!
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany co se má odstranit
-	local P=$(identifypage ${1} ${2})
-	PAGE=$P
-#	echo "deletepage: Stránka má aktuálně pořadové číslo $PAGE" >> /dev/stderr
+	local PAGE=$(identifypage "${1}" "${2}")
 	if [ ! -z "${PAGE}" ] ; then
-#		echo "deletepage: Odstraňuji stránku $2 - $PAGE ze souboru ${1}"  >> /dev/stderr
 		${DJVM} -d ${1} ${PAGE}
-#		echo "deletepage: Odstraněna stránka $2 - $PAGE - $?"  >> /dev/stderr
 	else
 		echo "Stránka $2 v souboru není. Nezapomeňte, že konvertovanému souboru se mění přípona!!"
 		exit 1
@@ -1780,6 +1776,13 @@ Použitelné parametry:
               ...
 """
 		;;
+		keywords-list) echo """akce [1mlist[0m
+
+  [4mSeznam stránek v DjVu souboru[24m.
+
+  [1m${0##*/}[0m [volby] <file> list
+"""
+		;;
 		keywords-forward) echo """akce [1mforward[0m
 
   Přesun stránky v rámci DjVu svazku o pozici vpřed. [4mPřed stránku, která[24m
@@ -2523,6 +2526,9 @@ done
 					;;
 					info)	echo "procházím"
 						djvuinfo "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					list) ${DJVUSED} "${FILE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3"\t"$2}'
 						exit 0
 					;;
 					rename)   # ToDo - zpracovat ${CHARSTRING}
