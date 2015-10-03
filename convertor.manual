@@ -1,3 +1,138 @@
+= Jak vytvořit obsah (outline) =
+
+Nástroje z DjVuLibre umožňují obsah DjVu svazku vyexportovat pouze v dsed formátu, proto tato utilita provádí při importu a exportu jeho konverzi do lépe editovatelné formy.
+
+== Pojmenování souboru s obsahem ==
+U souboru s obsahem svazku se předpokládá, že má stejný název, jako DjVu svazek, pouze s tím rozdílem, že má místo ''.djvu'' příponu ''.outline''
+
+Je to obyčejný textový soubor, který lze editovat libovolným textovým editorem.
+
+POZOR na tabelátory!!!  Pro úroveň zanoření položky obsahu se totiž používá odsazení pomocí mezer, a při použití znaku TAB (\t) místo mezer by došlo k chybné interpretaci souboru při jeho importu do svazku.
+
+Položka obsahu je vždy tvořena dvěma textovými řetězci, uzavřenými v jednoduchých závorkách
+
+ "Popis obsahu" "cílová stránka"
+
+; Popis obsahu : je text, který se vygeneruje jako položka obsahu v prohlížeči
+; cílová stránka : je buď název, nebo pořadové číslo stránky v DjVu svazku, na kterou položka obsahu odkazuje. Aby nebylo nutné obsah opravovat po každé změně v pořadí stránek, je lepší z praktického hlediska vždy používat název cílové stránky, místo jejího aktuálního pořadí.
+
+Poznámka: Pořadového číslo je vždy uvozeno znakem '#' (mřížka)
+
+Nejrychlejším způsob, jak získat základ pro vytvoření obsahu DjVu svazku, je použít akci outline
+
+outline order
+
+"" "#1"
+"" "#2"
+...
+
+outline name
+
+"" "page1.djvu"
+"" "page2.djvu"
+...
+
+outline print
+
+Vypíše stávající obsah na konzoli
+
+outline dump
+
+Vyexportuje stávající obsah v dsed formátu
+
+U stránek na které má položka obsahu odkazovat přidat popisek
+Vnoření obsahu - odsazení mezerami, nebo tabulátorem
+
+A
+B
+C
+
+je-li odsazení větší, než u předchozí položky, dojde k zanoření o další úroveň
+A
+  B
+    C
+
+je-li odsazení menší, dojde k vyvoření úrovně..
+A
+ B
+  C
+ D
+
+je-li hodnota odsazení stejná
+	uzavřít předchozí položku
+	nastavit LEVEL na hodnotu odsazení
+
+je-li hodnota odsazení větší
+	neuzavírat předchozí položku
+	navýšit LEVEL na hodnotu odsazení
+
+je-li hodnota odsazení menší o jednu jednotku..
+	uzavřít předchozí položku
+	odečíst jeden LEVEL
+	uzavřít položku
+	a zkontrolovat je-li LEVEL po odečtení na hodnotě odsazení..
+
+hodnota odsazení - počet mezer podle úrovně levelu
+při navyšování hodnoty odsazení pro LEVEL - (
+při snižování hodnoty odsazení pro LEVEL )
+při stejné hodnotě odsazení mezery
+
+LEVEL=0
+IFS=''
+while read line ; do
+	NEW="${line##+( )}" && echo "${NEW}"
+	TAB="${line%${NEW}}" && echo "${#TAB}"
+	if [ "${#LEVEL}" -eq "${#TAB}" ] ; then
+		# Odsazení se nemění
+		echo ") ("${line}
+	elif [ "${#LEVEL}" -gt "${#TAB}" ] ; then
+		# Odsazení se zmenšilo.. O kolik?
+		COUNT=0
+		while [ "${#LEVEL}" -gt "${#TAB}" ] ; then
+			COUNT=$((COUNT+1))
+			LEVEL=${LEVEL%${TAB}}
+		done
+		# 
+		printf '%.s)' {0..${COUNT}} && echo '( '${line}
+	else
+		# Tady se může odsazení pouze zvětšit..
+		# Odsazení se zvětšilo.. O kolik?
+		COUNT=0
+		while [ "${#TAB}" -gt "${#LEVEL}" ] ; then
+			COUNT=$((COUNT+1))
+			LEVEL="${LEVEL}${TABS}"
+		done
+		# 
+		printf '%.s(' {0..${COUNT}} && echo ${line}
+	fi
+done < test1.outline
+
+
+(A -- LEVEL=0
+  (B -- LEVEL=1
+    (C -- LEVEL=2
+   )(D -- LEVEL=3
+)
+
+
+Import upraveného obsahu do DjVu stránky
+========================================
+
+Obsah skryté textové vrstvy je uložen do dvou základních oblastí:
+
+ant
+---
+Obsahuje meta atributy, poznámky, k obsahu, aktivní oblasti (hyperlinky)
+obsah (outline - bookmarks)
+
+txt
+---
+Obsahuje textový obsah
+
+Pro úpravu textového obsahu je vhodný javascriptový editor ..., který pracuje s XML souborem.
+Obsah (outline, bookmarks, záložky) lze vytvořit přes Djvusmooth) a nebo ho naimportovat ze souboru
+
+
 [1mNápověda..
 
 Vložení znaku ESC - Ctrl+Shift+u
