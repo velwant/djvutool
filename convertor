@@ -181,6 +181,7 @@ function tabs {
 	sed "s/\t/${TAB}/g" "${1}"
 }
 
+# REMOVE - Nepoužitá funkce
 function escape_path {
 # Zatím nepoužitá
 	echo "escape_path $*" >> /dev/stderr
@@ -228,6 +229,7 @@ function potvrdit {
     esac
 }
 
+# REMOVE - Nepoužitá funkce?
 function rozvazat {
 	# $1 - soubor
 	# $2 - adresář
@@ -242,6 +244,7 @@ function rozvazat {
 	fi
 }
 
+# TODO - meta
 function setmeta {
 	# Funkce pro nastavení meta atrinutů
 	# $1 - svazek
@@ -271,6 +274,7 @@ function setmeta {
 	fi
 }
 
+# TODO - meta
 function printmeta {
 	# Funkce pro výpis meta atributů
 	# $1 - svazek
@@ -426,6 +430,7 @@ exit 0
 	fi
 }
 
+# TODO - meta
 function unsetmeta {
 	# ToDo
 	# Funkce pro odstranění meta atributu
@@ -863,7 +868,6 @@ function importoutline {
 	done
 	echo "${OUTLINE}" | tee > ${TEMPDIR}/final_outline.dsed
 	${DJVUSED} "${1}" -e "set-outline ${TEMPDIR}/final_outline.dsed; save"
-	exit 33
 }
 
 function parseoutline {
@@ -976,6 +980,7 @@ function importxmlpage {
 	esac
 }
 
+# TODO - meta - Nepoužitá funkce
 function exportmetabundle {
 	# $1 - DjVu file - full path
 	# $2 - targetdir - full path
@@ -999,6 +1004,7 @@ function exportmetabundle {
 	popd
 }
 
+# TODO - meta - Nepoužitá funkce
 function exportmetapage {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
@@ -1077,6 +1083,7 @@ function exportdjvupage {
 	popd
 }
 
+# REMOVE - Nepoužitá funkce
 function inserttext {
 	if [ -f ${1/.djvu/.xml} ] ; then
 		${DJVUXMLPARSER} -o ${1} ${1/.djvu/.xml}
@@ -1085,12 +1092,14 @@ function inserttext {
 	fi
 }
 
+# REMOVE - Nepoužitá funkce
 function insertxmp {
 	if [ -f ${1/.djvu/.xmp} ] ; then
 		echo "Vkládám xmp informace, pokud jsou.."
 	fi
 }
 
+# TODO - insert
 function konvertor {
 	# $1 - vstup
 	# $2 - výstup
@@ -1144,6 +1153,7 @@ function konvertor {
 	fi
 }
 
+# TODO - insert
 function getocr {
 	# $1 - jméno djvu souboru 
 	if [ "${OCR}" ] ; then
@@ -1278,6 +1288,7 @@ function list {
 	${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
 }
 
+# TODO - insert
 function insertpage {
 	# $1 - soubor se kterým se pracuje
 	# $2 - djvu soubor co se má vložit
@@ -1551,6 +1562,7 @@ function forwardpage {
 	insertpage ${1} "${TEMPDIR}/${A}" ${BORDER}
 }
 
+# TODO - back
 function backpage {
 	# REVIZE NUTNÁ!!!
 	# $1 - soubor
@@ -1608,6 +1620,7 @@ function djvuinfo {
 	fi
 }
 
+# TODO
 function djvubundle {
 	# REVIZE NUTNÁ!!!
 	# Funkce pro vytvoření svazku..
@@ -1818,6 +1831,7 @@ function djvubundle {
 	fi
 }
 
+# TODO - insert - Nepoužitá funkce
 function fromxcf {
 	if [ "${1##*.}" == "xcf" ] ; then
 		TEMPORARY="/tmp/$WINDOWID$BASHPID"
@@ -2298,6 +2312,7 @@ CreationDate - Čas vytvoření dokumentu
                   textové vrstvy, náhled stránky v png, atp.
          import - importuje do DjVu stránky či svazku obsah skryté textové
                   vrstvy z xml stránky
+        outline - vypisuje obsah (outline, bookmarks) DjVu svazku
          rename - přejmenování stránek v DjVu souboru dle nastaveného vzoru
 
 [3mPoznámka:[23m
@@ -2388,6 +2403,7 @@ Parametrické volby:
 	esac
 }
 
+# TODO - insert
 function todjvu {
 	# $1 - soubor ke konverzi
 	# $2 - cílový DjVu soubor
@@ -2427,18 +2443,21 @@ function todjvu {
 	fi
 }
 
+# TODO - test - testovací enkode proces
 function todotest {
 	for i in ${ALG[@]} ; do 
 		${DIDJVU} encode -o "${1%.*}-$i.djvu" -d 300 -m "$i" "$1"
 	done
 }
 
+# TODO - test - zobrazení testovacích DjVu souborů
 function todoview {
 	for i in ${ALG[@]} ; do 
 		(${DJVIEW} ${1%.*}-$i.djvu &)
 	done
 }
 
+# TODO - insert
 function todjvuclassic {
     RANDOMKEY=$[ 8000 + $[ RANDOM % 1000 ]]
     TEMP_DIR="${TEMPDIR}/$WINDOWID$BASHPID$RANDOMKEY"
