@@ -67,9 +67,11 @@ case $CHYBA in
  ;;
  22) echo "ERROR: readlink - tool for detection absolute path of directory"
  ;;
- 23) echo "Není nainstalován balík netpbm-sf"
+ 23) echo "ERROR: netpbm-sf - pack of utilities for image conversions not installed "
  ;;
- 24) "ERROR: imagemagick - tool for image convert is not installed"
+ 24) echo "ERROR: imagemagick - tool for image convert is not installed"
+ ;;
+ 25) echo "ERROR: xmlstarlet - tool for work with xml not installed"
  ;;
  31) echo "Není nainstalován balík ocrodjvu, na djvu soubory nelze aplikovat OCR. Buďto jej doinstalujte, nebo odstraňte z příkazové řádky parametr -o (--ocr)" >> /dev/stderr
  ;;
@@ -129,6 +131,8 @@ EXIFTOOL=$(which exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
 TESSERACT=$(which tesseract)
 [ ! -x "${TESSERACT}" ] && exit 31
+XMLSTARLET=$(which xmlstarlet)
+[ ! -x "${XMLSTARLET}" ] && exit 25
 
 
 NETPBM=0
@@ -466,11 +470,6 @@ function import {
 	fi
 
 	if [ -d "${FROM}" ] ; then
-		# Parsing $2
-		# Může být adresář.. Pak se nasypou z tohoto adresáře do souboru všechny soubory dle voleb
-		# Může být soubor.. Pak se nasype pouze obsah tohoto souboru..
-#		echo "V adresář ${FROM} vyhledám soubory, jejichž obsah bude možné naimportovat do souboru ${FILE}" >> /dev/stderr
-#		echo "Priorita je následující - nejprve naimportuji soubory dsed (pokud existují) a pak XML (pokud existují). Na závěr pak naimportuji meta" >> /dev/stderr
 		local LIST=$(list "${SOURCE}")
 		local IFS_BAK=$IFS
 		local IFS=$'\n'
@@ -497,6 +496,8 @@ function import {
 			importoutline "${SOURCE}" "${FROM}/${FILE/.djvu/.outline}"
 		fi
 	elif [ -f "${FROM}" ] ; then
+		local FROMFILE="${FROM##*/}"
+		echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
 		if [ "${FILE%.*}" == "${FROMFILE%.*}" ] ; then
 			local FROMFILE="${FROM##*/}"
 			log 1 "import: Importuji textová data do svazku ${FROMFILE}"
@@ -517,7 +518,6 @@ function import {
 				;;
 			esac
 		else
-			local FROMFILE="${FROM##*/}"
 			log 1 "import: Importuji data do stránky ${FROMFILE}"
 			local LIST=$(list "${SOURCE}")
 			local IFS_BAK=$IFS
@@ -654,6 +654,38 @@ function exportdjvuall {
 	done
 	exportdsedbundle "${1}" "${2}"
 	exportxmlbundle "${1}" "${2}"
+}
+
+function exportoutline {
+	# $1 - DjVu file - full path
+	# $2 - parameter
+	case "${2}" in
+		print) local TABS='        '
+			${DJVUSED} "${1}" -e "print-outline" | sed -n '{
+			s_(_<element>_g
+			s_)_</element>_g
+			p
+		}' | tr '\n' ' ' | sed 's_\\_\\0_g' | ${XMLSTARLET} pyx | while read line ; do
+			case "$line" in
+				-|-bookmarks)
+				;;
+				\(element) local LEVEL="$LEVEL$TABS"
+				;;
+				\)element) local LEVEL="${LEVEL%${TABS}}"
+				;;
+				*) local OUTPUT="${LEVEL}${line#-}" && echo -e "${OUTPUT#${TABS}${TABS}}"
+				;;
+			esac
+		done
+		;;
+		dump) ${DJVUSED} "${1}" -e "print-outline"
+		;;
+		order) ${DJVM} -l "${1}" |  awk '{if (NR>2) print "\"\" \""$3"\""}'
+		;;
+		name) ${DJVUSED} "${1}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print "\"\" \""$2"\""}'
+		;;
+		*) help keywords-outline
+	esac
 }
 
 function exportdsedbundle {
@@ -838,7 +870,7 @@ function parseoutline {
 	# $1 - outline file
 	local TARGET="${TEMPDIR}/outline.dsed"
 	# počet mezer odpovídá použitému odsazení
-	local TABS='    '
+	local TABS='        '
 	# počet závorek ovlivňuje počet zpracovatelných úrovní
 	local O='(((((('
 	local C='))))))'
@@ -847,7 +879,7 @@ function parseoutline {
 	local IFS=''
 	local LINES=1
 	printf '%s' '(bookmarks ' >> ${TARGET}
-	while read line ; do
+	sed "s/\t/$TABS/g" "${1}" | while read line ; do
 		local NEW="${line##+( )}"
 		local TAB="${line%${NEW}}"
 		if [ "${line}" == "" ] ; then
@@ -889,7 +921,7 @@ function parseoutline {
 			echo "Jiná varianta" >> /dev/stderr
 		fi
 		local LINES=$((LINES+1))
-	done <  "${1}"
+	done
 	printf '%s' '))' >> ${TARGET}
 }
 
@@ -907,12 +939,6 @@ function importdsedall {
 	esac
 }
 
-function importdsedpage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - source DSED file - full path
-	echo "Import META informací.." >> /dev/stderr
-}
 function importdsedpage {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
@@ -2212,6 +2238,30 @@ CreationDate - Čas vytvoření dokumentu
   klíče lze nastavit přes akci [2mset[22m.
 """
 		;;
+		keywords-outline) echo """akce [1moutline[0m
+
+  Pomocná akce pro výpis a export obsahu (bookmarks,outline) Djvu svazku.
+
+  [1m${0##*/}[0m <svazek> outline {dump|print|order|name}
+
+         dump  - dump aktuálního obsahu DjVu svazku v dsed formátu
+         print - výpis aktuálního obsahu DjVu svazku ve formátu .outline
+         order - vygenerování šablony pro .outline formát s adresováním
+                 stránek dle pořadových čísel
+         name  - vygenerování šablony pro .outline formát s adresováním
+                 stránek podle jejich názvů
+
+[3mPoznámka:[23m
+  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
+  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
+  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
+                   1 úroveň = 1 tabulátor = 8 mezer
+  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
+  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
+[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
+  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
+"""
+		;;
 		keywords-print) echo """akce [1mprint[0m
 
   [4mVýpis klíčů a jejich obsahu[24m z metainformací uložených v Djvu svazku.
@@ -2854,8 +2904,10 @@ done
 						djvuinfo "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					list) importoutline "${FILE}" "${CHARSTRING}"
-					#list "${FILE}"
+					list) list "${FILE}"
+						exit 0
+					;;
+					outline) exportoutline "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
 					rename)   # ToDo - zpracovat ${CHARSTRING}
