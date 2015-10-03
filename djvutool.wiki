@@ -126,6 +126,8 @@
 		''identifyname''
 		''identifypage''
 		''exportdjvuall''
+			''exportoutline''
+				''help''
 	''import''
 		''list''
 		''importdsedpage''
@@ -160,6 +162,25 @@
 # todotest
 # todoview
 # unsetmeta
+
+= INFO =
+
+Info o DjVu souboru..
+indirect svazek
+: exiftool nevypisuje meta atributy svazku i jeho stránek
+: neuvádí nic o velikosti stránek, rozlišení
+: uvádí jen typ 'DJVU (multi-page'
+
+bundle svazek
+: exiftool vypisuje metaatributy 
+: uvádí subfiletype
+
+Single page uvádí jen DJVU
+
+Mělo by vypsat tyto informace..
+
+#1 {jméno stránky} <orientation> <resolution> <size> 
+
 
 = Jak vytvořit obsah (outline) =
 

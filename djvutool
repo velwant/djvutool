@@ -463,9 +463,9 @@ function import {
 	# Import nevkládá nové stránky, ale importuje soubory textové vrstvy
 	# $1 - DjVu file
 	# $2 - soubor identifikátor + cílový adresář
-	echo "1- ${1}" >> /dev/stderr
-	echo "2- ${2}" >> /dev/stderr
-	echo "3- ${3}" >> /dev/stderr
+	#echo "1- ${1}" >> /dev/stderr
+	#echo "2- ${2}" >> /dev/stderr
+	#echo "3- ${3}" >> /dev/stderr
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	if [ -z "${2}" ] ; then
@@ -636,15 +636,19 @@ function export {
 	[ "${DSED}" != "no" ] && exportdsedpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export text content from DjVu page in dsed format we must use option -d" >> /dev/stderr
 	[ "${XML}" != "no" ] && exportxmlpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
 	[ "${IMG}" != "no" ] && exportimgpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
+	[ "${META}" != "no" ] && exportmetapage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
 }
 
 function exportdjvuall {
 	# $1 - DjVu file - full path
 	# $2 - targetdir - full path
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
 	[ "${PAGE}" != "no" ] || echo "exportdjvuall: For export pages in DjVu format we must use option -p" >> /dev/stderr
 	[ "${DSED}" != "no" ] || echo "exportdjvuall: For export hidden text layer of pages from DjVu bundle in dsed format we must use option -d" >> /dev/stderr
 	[ "${XML}" != "no" ] || echo "exportdjvuall: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
 	[ "${IMG}" != "no" ] || echo "exportdjvuall: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
+	[ "${META}" != "no" ] || echo "exportdjvuall: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
 	local PAGES=$(lastpage "${SOURCE}")
 	local NUMPAGE=1
 	while [ ${PAGES} -gt "0" ] ; do
@@ -654,11 +658,14 @@ function exportdjvuall {
 		exportdsedpage "${1}" "${NAMEPAGE}" "${2}"
 		exportxmlpage "${1}" "${NAMEPAGE}" "${2}"
 		exportimgpage "${1}" "${NAMEPAGE}" "${2}"
+		exportmetapage "${1}" "${NAMEPAGE}" "${2}"
 		local NUMPAGE=$((NUMPAGE + 1))
 		local PAGES=$((PAGES - 1))
 	done
 	exportdsedbundle "${1}" "${2}"
 	exportxmlbundle "${1}" "${2}"
+	exportmetabundle "${1}" "${2}"
+	exportoutline "${1}" print > "${2}/${FILE/.djvu/.outline}"
 }
 
 function exportoutline {
@@ -1277,7 +1284,6 @@ function lastpage {
 	local FILE="${SOURCE##*/}"
 	[ "$(testfile ${SOURCE})" == "djvu" ] || exit 1
 	log 1 "lastpage: Count of all pages in ${FILE}"
-#	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | wc -l)
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
 	echo -n "${OUTPUT}"
 	
@@ -1504,10 +1510,192 @@ Každá jiná hodnota parametru je ignorována."""
 	fi
 }
 
+function parseparameter {
+	# Funkce pro zpracování akcí fore a back
+	# Vstup - řetězec => Výstup pole
+local VSTUP="$*"
+log 1 "parseparameter ${VSTUP}"
+local COUNT=${#VSTUP}
+local POS=0
+local START=0
+while [ $POS -lt $COUNT ]
+do local POS=$((POS+1))
+	echo "${VSTUP:$START:$POS}" >> /dev/stderr
+	case "${VSTUP:$START:$POS}" in
+		*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
+# tady vzniká problém, pokud akce nemá žádné další parametry...
+			local FILE="${VSTUP:0:$POS}"
+			echo "Zachycen soubor $FILE" >> /dev/stderr
+			# otestovat jestli to je stráka v  soubor..
+
+			#local TEMP=${VSTUP#${FILE}}
+#			echo "Délka řetězce ${#TEMP} -${TEMP}-" >> /dev/stderr
+			#local OREZ=${TEMP##+([[:blank:]])}
+#			echo "Délka řetězce ${#OREZ} -${OREZ}-" >> /dev/stderr
+			#local CHARSTRING="${OREZ#* }"
+#			echo "CHARSTRING Délka řetězce ${#CHARSTRING} -${CHARSTRING}-" >> /dev/stderr
+#			if [ "${#CHARSTRING}" -eq "${#OREZ}" ] ; then
+#				local KEY="${CHARSTRING}"
+				local CHARSTRING=""
+			#else
+			#	local TEMP="${OREZ%${CHARSTRING}}"
+			#	local KEY="${TEMP%%+([[:blank:]])}"
+			#fi
+			#log 1 "KEY -${KEY}-"  >> /dev/stderr
+			#log 1 "FILE -${FILE}-"  >> /dev/stderr
+			#log 1 "CHARSTRING -${CHARSTRING}-" >> /dev/stderr
+		#break
+		;;
+	esac
+done
+
+# Není-li FILE, ani CHARSTRING - jenom identifikátory
+# Načítá se až po výskyt koncovky 
+# pokud se objeví..
+
+}
+
 function forwardpage {
-	# $1 - soubor
-	# $2 - stránka k přesunu
-	# $3 - pozice k přesunu
+	# $1 - DjVu file
+	# $2 - Parametry
+	#	zdroj : identifikátor pozice
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+
+	local VSTUP="${2}"
+	local COUNT=${#VSTUP}
+	local POS=0
+	local START=0
+	while [ $POS -lt $COUNT ]
+	do local POS=$((POS+1))
+#		echo "${VSTUP:$START:$POS}" >> /dev/stderr
+		case "${VSTUP:$START:$POS}" in
+			*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
+				local SOUBOR="${VSTUP:0:$POS}"
+				log 1 "Zachycen soubor $SOUBOR - ${SOUBOR:$((${#SOUBOR} - 4)):4}"
+				if [ "${SOUBOR:$((${#SOUBOR} - 4)):4}" == "djvu" ] ; then
+					# Soubor může být stránka ve svazku
+					local A=$(identifypage "${SOURCE}" "${SOUBOR}")
+					if [ -z "${A}" ] ; then
+						# Neplatný název stránky.. Může jít o stránku, která se má teprve vložit..
+						if [ -f "${SOUBOR}" ] ; then
+							local FROM="${SOUBOR}"
+							local VSTUP="${VSTUP#${SOUBOR} }"
+							local COUNT=${#VSTUP}
+							local POS=0
+							echo "Ok, jde o DjVu soubor ${SOUBOR} co se má vložit" >> /dev/stderr
+						else
+							local TEST=( ${SOUBOR} )
+							if [ "${#TEST}" -gt "0" ] ; then
+								local A="${TEST[0]}"
+								if [ "${A%%+([[:digit:]])}" == "" ] ; then
+									local BNAME="${SOUBOR##${A}+([[:blank:]])}"
+									local B=$(identifyname "${SOURCE}" "${BNAME}")
+									if [ -z "${B}" ] ; then
+										echo "Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
+										exit 1
+									else
+										log 1 "Pořadové číslo přesouvané stránky A - ${A}, která se bude přesouvat před stránu -${BNAME}- na pozici ${B}"
+										break
+									fi
+								else
+									echo "Nezačíná to číslem - chyba." >> /dev/stderr
+									exit 1
+								fi
+							else
+								echo "S názvem souboru není něco v pořádku" >> /dev/stderr
+							fi
+						fi
+					else
+						if [ -z "${ANAME}" ] ; then
+							local ANAME="${SOUBOR}"
+							local VSTUP="${VSTUP#${SOUBOR} }"
+							local COUNT=${#VSTUP}
+							local POS=0
+							log 1 "Stránka ${ANAME} je na pozici ${A}, zjišťuji cílovu stránku, která MUSÍ být ve svazku"
+						elif [ "${ANAME}" == "none" ] ; then
+							local B=$(identifypage "${1}" "${SOUBOR}")
+							if [ -z "${B}" ] ; then
+								echo "Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
+								exit 1
+							else
+								local A=""
+								local BNAME="${SOUBOR}"
+								log 1 "Vkládá se konvertovaná stránka ${FROM} před stránu -${BNAME}- na pozici ${B}"
+								break
+							fi
+						else
+							local B=$(identifypage "${1}" "${SOUBOR}")
+							if [ -z "${B}" ] ; then
+								echo "Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
+								exit 1
+							else
+								local A=$(identifypage "${1}" "${ANAME}")
+								local BNAME="${SOUBOR}"
+								log 1 "Pořadové číslo přesouvané stránky ${ANAME} je ${A}, a bude se přesouvat před stránu -${BNAME}- na pozici ${B}"
+								break
+							fi
+						fi
+					fi
+				else
+					if [ -f "${SOUBOR}" ] ; then
+						local FROM="${SOUBOR}"
+						##### KONVERZE #######
+						local ANAME="none"
+						local VSTUP="${VSTUP#${SOUBOR}}"
+						local COUNT=${#VSTUP}
+						local POS=0
+						echo "Soubor ${SOUBOR}, který není v djvu formátu musí před vložením do svazku projít konverzí" >> /dev/stderr
+					else
+						echo "Soubor ${SOUBOR} neexistuje" >> /dev/stderr
+						exit 1
+					fi
+				fi
+			;;
+		esac
+	done
+
+	if [ -z "${FROM}" ] ; then
+		if [ -z "${ANAME}" ] ; then
+			local TEST=( ${VSTUP} )
+			if [ "${#TEST}" -gt "0" ] ; then
+				local ANAME=$(identifyname "${SOURCE}" "${TEST[0]}")
+				if [ ! -z "${ANAME}" ] ; then
+					local BNAME=$(identifyname "${SOURCE}" "${TEST[1]}")
+				fi
+			fi 
+		fi
+	else
+		local A=""
+		local ANAME=""
+		if [ -z "${BNAME}" ] ; then
+			echo "Musím získat pozici ze ${VSTUP}" >> /dev/stderr
+			local TEST=( ${VSTUP} )
+			if [ "${#TEST}" -gt "0" ] ; then
+				local BNAME=$(identifyname "${SOURCE}" "${TEST[0]}")
+			fi 
+		fi
+	fi
+
+	if [ -z "${BNAME}" ] ; then
+		echo "Neplatná cílová stránka" >> /dev/stderr
+		exit 1
+	else
+		if [ -z "${FROM}" ] && [ -z "${ANAME}" ] ; then
+			echo "Neplatná identifikace stránky se kterou se má pracovat" >> /dev/stderr
+			exit 1
+		fi
+	fi
+
+	echo "FROM - ${FROM}" >> /dev/stderr
+	echo "A - ${A}" >> /dev/stderr
+	echo "ANAME - ${ANAME}" >> /dev/stderr
+	echo "B - ${B}" >> /dev/stderr
+	echo "BNAME - ${BNAME}" >> /dev/stderr
+
+# Do tohoto místa probíhá zpracování stejně pro fore i back
+# Následuje další zpracování parametrů - především porovnání ..
+	exit 33
 	local BORDER=$(identifypage "${1}" "${3}")
 	if [ -z "${BORDER}" ] ; then
 #		echo "Pouze se posouvá, pokud nejde o klíčové slovo.."
@@ -1568,6 +1756,7 @@ function backpage {
 	# $1 - soubor
 	# $2 - stránka k přesunu
 	# $3 - pozice k přesunu
+	exit 33
 	local P=$(identifypage $1 $2)
 	AORDER=$P
 	A=$(identifyname $1 $AORDER)
@@ -1851,7 +2040,7 @@ function fromxcf {
 }
 
 function help {
-	echo -n """[1mNápověda pro [1m[2m${0##*/}[0m : """
+	[ -z "${1}" ] || echo -n """[1mNápověda pro [1m[2m${0##*/}[0m : """
 	case "$1" in
 		page) echo """volba [1m-p[0m ([1m--page[0m)
 
@@ -2149,16 +2338,17 @@ Použitelné parametry:
   [1m${0##*/}[0m [volby] <file> list
 """
 		;;
-		keywords-forward) echo """akce [1mforward[0m
+		keywords-fore) echo """akce [1mfore[0m
 
-  Přesun stránky v rámci DjVu svazku o pozici vpřed. [4mPřed stránku, která[24m
+  Umístění nové stránky, nebo stránky v rámci DjVu svazku již existující před stránku identifikovanou jménem, nebo aktuální pozicí. o pozici vpřed. [4mPřed stránku, která[24m
   [4mji má následovat[24m. V případě, už přesouvaná stránka je na první pozici,
   se nestane nic.
 
-  [1m${0##*/}[0m [volby] <svazek> fore {<num>|<name>} [<num>|<name>]
+  [1m${0##*/}[0m [volby] <svazek> fore {<num>|<name>|<file>} [<num>|<name>]
 
          num  - pořadové číslo stránky v DjVu svazku
          name - jméno stránky v DjVu svazku
+         file - DjVu soubor nebo naskenovaná stránka v bitmapovém formátu
 
   Je doporučeno použít jako identifikátor jména stránek, místo jejich 
   aktuální pozice. A to z toho důvodu, že se pozice stránek mohou v průběhu
@@ -2303,17 +2493,20 @@ CreationDate - Čas vytvoření dokumentu
 
          delete - odstraní stránku ze svazku
          insert - vloží novou stránku do svazku
-     fore, back - přesune stránku v rámci svazku
+     [2mfore, back[22m - přesune stránku v rámci svazku
          rotate - mění orientaci vybrané stránky
-            set - nastavuje metainformace DjVu stránek a svazku
-          print - vypisuje metainformace z DjVu stránek a svazku
-          unset - odstraňuje metainformace DjVu stránek i svazku
+            [2mset[22m - nastavuje metainformace DjVu stránek a svazku
+          [2mprint[22m - vypisuje metainformace z DjVu stránek a svazku
+          [2munset[22m - odstraňuje metainformace DjVu stránek i svazku
          export - exportuje djvu stránku, dsed nebo xml soubor s obsahem
                   textové vrstvy, náhled stránky v png, atp.
          import - importuje do DjVu stránky či svazku obsah skryté textové
                   vrstvy z xml stránky
+         info - importuje do DjVu stránky či svazku obsah skryté textové
+                  vrstvy z xml stránky
+           list - vypisuje seznam stránek DjVu svazku
         outline - vypisuje obsah (outline, bookmarks) DjVu svazku
-         rename - přejmenování stránek v DjVu souboru dle nastaveného vzoru
+         [2mrename[22m - přejmenování stránek v DjVu souboru dle nastaveného vzoru
 
 [3mPoznámka:[23m
           Pro podrobnější nápovědu použijte volbu -h za klíčovým slovem
@@ -2366,38 +2559,29 @@ CreationDate - Čas vytvoření dokumentu
 """
 			;;
 		options) echo """
-[1mPřehled akceptovaných voleb[0m: 
-  -h|--help     Nápověda
-  -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
-  -d|--dsed     Při akci export ukládat obsah textové vrstvy do souboru .dsed
-  -f|--force    Vynucená akce
-  -i|--indirect Výsledekm zpracování bude volný svazek
-  -m|--meta     Při akci export ukládat meta informace z DjVu stránky či svazku do soubor s příponou .meta
-  -p|--page     Vytažení celé stránky z DjVu svazku
-  -x|--xml      Při akci export ukládat obsah textové vrstvy do souboru .xml
-  -t|--thumb    Vygenerování náhledů v DjVu svazku, resp. při akci export vytažení náhledu do souboru s příponou .thumb (obrazová vrstva, kódvaná v  IW44)
-
-Parametrické volby:
-   -n|--name    parametr zajistí, že se soubory přejmenují
-   -r|--rename  řetězec, který se má použít k pojmenování souborů místo 
-                stávajících názvů souborů při sestavení svazku 
-                soubor_0000 - soubor_0001.djvu .. soubor_0123.djvu
-                soubor_0 -    soubor_1.djvu ,, soubor_123.djvu
 """
 		;;
 		*) echo """
-   Toto je nástroj pro práci s DjVu soubory a svazky.
+DJVUTOOL - tool for manipulation with DjVu files & bundles
 
-      [1m${0##*/}[0m [volby] ... <akce>
+Using:
 
- Nápovědu k volbám a jejich parametrům vypíše volba -h
- Přehled všech dostupných voleb vypíšete takto...
+  [1m${0##*/}[0m [options] <DjVu file> {ACTION} [...]
 
-      [1m${0##*/}[0m -h -h
+Options:
+ -h, --help    Main options for get help about using option, or action
+ -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
+ -d|--dsed    Při akci export ukládat obsah textové vrstvy do souboru .dsed
+ -f|--force   Vynucená akce
+ -i|--indirect Výsledekm zpracování bude volný svazek
+ -m|--meta     Při akci export ukládat meta informace z DjVu stránky či svazku do soubor s příponou .meta
+ -p|--page     Vytažení celé stránky z DjVu svazku
+ -x|--xml      Při akci export ukládat obsah textové vrstvy do souboru .xml
+ -t|--thumb    Vygenerování náhledů v DjVu svazku, resp. při akci export vytažení náhledu do souboru s příponou .thumb (obrazová vrstva, kódvaná v  IW44)
 
- Přehled akcí vypíšete takto...
+For list of all actions use next command:
 
-      [1m${0##*/}[0m [volby] <soubor> -h
+  [1m${0##*/}[0m [options] <DjVu file> -h
 """
 		;;
 	esac
@@ -2897,14 +3081,14 @@ done
 					unset) unsetmeta ${FILE} "${CHARSTRING}"
 						exit 0
 					;;
-					fore)  # ToDo - zpracovat ${CHARSTRING}
-						exit 1
+					fore) forwardpage "${FILE}" "${CHARSTRING}"
+						exit 0
 						[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 #						echo "akce forvard ${1} - ${3} - ${4}" >> /dev/stderr
 						forwardpage ${1} ${3} ${4}
 						exit 0
 					;;
-					back)  # ToDo - zpracovat ${CHARSTRING}
+					back) backpage "${FILE}" "${CHARSTRING}"
 						exit 1
 						[ -f ${3} ] && echo "pro vložení nové stránky do souboru je určena akce insert" >> /dev/stderr && exit 1
 						backpage ${1} ${3} ${4}
@@ -2968,7 +3152,9 @@ done
 			;;
 		esac
 	else
-		echo "Tady se dostane pokud ${FILE} neexistuje" >> /dev/stderr
+		#echo "Tady se dostane pokud ${FILE} neexistuje" >> /dev/stderr
+		help
+		exit 0
 	fi
 }
 
