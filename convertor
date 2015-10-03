@@ -501,13 +501,17 @@ function import {
 			local FROMFILE="${FROM##*/}"
 			log 1 "import: Importuji textová data do svazku ${FROMFILE}"
 			case "${FROMFILE}" in
-				*.dsed) importdsedall "${SOURCE}" "${FROM}"
+				*.dsed) DSED="yes"
+					importdsedall "${SOURCE}" "${FROM}"
 				;;
-				*.meta) importmetaall "${SOURCE}" "${FROM}"
+				*.meta) META="yes"
+					importmetaall "${SOURCE}" "${FROM}"
 				;;
-				*.outline) importoutline "${SOURCE}" "${FROM}"
+				*.outline) OUTLINE="yes"
+					importoutline "${SOURCE}" "${FROM}"
 				;;
-				*.xml) importxmlpage "${SOURCE}" "${FROM}"
+				*.xml) XML="yes"
+					importxmlpage "${SOURCE}" "${FROM}"
 				;;
 				*) echo "import: Při importu textových dat do celého svazku jsou akceptovány pouze soubory s příponou .dsed, .xml, .outline a .meta" >> /dev/stderr
 				;;
@@ -523,11 +527,14 @@ function import {
 				if [ "${PAGENAME%.*}" == "${FROMFILE%.*}" ] ; then
 					echo "Importuji data ze souboru ${FROM} do stránky ${PAGENAME} v souboru ${FILE}" >> /dev/stderr
 					case "${FROMFILE}" in
-						*.dsed) importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
+						*.dsed) DSED="yes"
+							importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
 						;;
-						*.meta) importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}"
+						*.meta) META="yes"
+							importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}"
 						;;
-						*.xml) importxmlpage "${SOURCE}" "${FROM}"
+						*.xml) XML="yes"
+							importxmlpage "${SOURCE}" "${FROM}"
 						;;
 						*) echo "import: Při importu textových dat do stránky jsou akceptovány pouze soubory s příponou .dsed, .xml a .meta" >> /dev/stderr
 						;;
