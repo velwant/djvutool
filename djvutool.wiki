@@ -1,5 +1,5 @@
 = Funkce =
-# backpage
+# backpage - nahrazuje funkce move
 :* deletepage
 	''identifybundle''
 	''identifypage''
@@ -73,6 +73,7 @@
 	''popd''
 	''identifypage''
 	''potvrdit''
+# forwardpage - nahrazuje funkce move
 # formxcf
 # getocr
 :* help
@@ -94,7 +95,7 @@
 ::* importoutline
 	''tabs''
 ::* importxmlpage
-# insertpage
+# insertpage - nahrazuje funkce move
 # inserttext
 # insertxmp
 # konvertor
@@ -114,8 +115,15 @@
 	'''setmeta'''
 	'''printmeta'''
 	'''unsetmeta'''
-	'''forwardpage'''
-	'''backpage'''
+	'''forwardpage''' - nahrazuje funkce move
+	'''backpage''' - nahrazuje funkce move
+	''move''
+		''identifypage''
+		''identifyname''
+		''exportdjvupage''
+		''deletepage''
+			''identifybundle''
+			''identifypage''
 	''rotatepage''
 		''identifybundle''
 			''testfile''
