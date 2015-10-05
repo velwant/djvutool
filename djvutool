@@ -133,6 +133,10 @@ TESSERACT=$(which tesseract)
 [ ! -x "${TESSERACT}" ] && exit 31
 XMLSTARLET=$(which xmlstarlet)
 [ ! -x "${XMLSTARLET}" ] && exit 25
+IDENTIFY=$(which identify)
+[ ! -x "${IDENTIFY}" ] && echo exit 24
+CONVERT=$(which convert)
+[ ! -x "${CONVERT}" ] && echo exit 24
 
 
 NETPBM=0
@@ -1161,11 +1165,12 @@ function konvertor {
 	fi
 }
 
-# TODO - insert
 function getocr {
-	# $1 - jméno djvu souboru 
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
 	if [ "${OCR}" ] ; then
-		[ "${OCRODJVU%%+([0-9])}" == "" ] && exit ${OCRODJVU} || ${OCRODJVU} --in-place -l ${OCR} "$1"
+		${OCRODJVU} --in-place -l "${OCR}" "${SOURCE}"
+		[ "$?" ] && log 1 "getocr: OCR was applicated on ${FILE}" 
 	fi
 }
 
@@ -1269,7 +1274,9 @@ function identifypage {
 		log 1 "identifypage: Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
 		local SEARCH="\{${IDENTIFICATOR}\}"
 	fi
+#	echo "${SEARCH}" >> /dev/stderr
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $3}')
+#	echo "${OUTPUT}" >> /dev/stderr
 	if [ -z "${OUTPUT}" ] ; then
 		log 1 "identifypage: FAIL - for DjVu bundle ${FILE} identificator ${IDENTIFICATOR} is NOT VALID."
 		return 0
@@ -1513,51 +1520,6 @@ Každá jiná hodnota parametru je ignorována."""
 	fi
 }
 
-function parseparameter {
-	# Funkce pro zpracování akcí fore a back
-	# Vstup - řetězec => Výstup pole
-local VSTUP="$*"
-log 1 "parseparameter ${VSTUP}"
-local COUNT=${#VSTUP}
-local POS=0
-local START=0
-while [ $POS -lt $COUNT ]
-do local POS=$((POS+1))
-	echo "${VSTUP:$START:$POS}" >> /dev/stderr
-	case "${VSTUP:$START:$POS}" in
-		*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
-# tady vzniká problém, pokud akce nemá žádné další parametry...
-			local FILE="${VSTUP:0:$POS}"
-			echo "Zachycen soubor $FILE" >> /dev/stderr
-			# otestovat jestli to je stráka v  soubor..
-
-			#local TEMP=${VSTUP#${FILE}}
-#			echo "Délka řetězce ${#TEMP} -${TEMP}-" >> /dev/stderr
-			#local OREZ=${TEMP##+([[:blank:]])}
-#			echo "Délka řetězce ${#OREZ} -${OREZ}-" >> /dev/stderr
-			#local CHARSTRING="${OREZ#* }"
-#			echo "CHARSTRING Délka řetězce ${#CHARSTRING} -${CHARSTRING}-" >> /dev/stderr
-#			if [ "${#CHARSTRING}" -eq "${#OREZ}" ] ; then
-#				local KEY="${CHARSTRING}"
-				local CHARSTRING=""
-			#else
-			#	local TEMP="${OREZ%${CHARSTRING}}"
-			#	local KEY="${TEMP%%+([[:blank:]])}"
-			#fi
-			#log 1 "KEY -${KEY}-"  >> /dev/stderr
-			#log 1 "FILE -${FILE}-"  >> /dev/stderr
-			#log 1 "CHARSTRING -${CHARSTRING}-" >> /dev/stderr
-		#break
-		;;
-	esac
-done
-
-# Není-li FILE, ani CHARSTRING - jenom identifikátory
-# Načítá se až po výskyt koncovky 
-# pokud se objeví..
-
-}
-
 function move {
 	# $1 - DjVu file
 	# $2 - Parametry
@@ -1577,7 +1539,9 @@ function move {
 				local SOUBOR="${VSTUP:0:$POS}"
 				log 1 "move: Zachycen soubor $SOUBOR - ${SOUBOR:$((${#SOUBOR} - 4)):4}"
 				if [ "${SOUBOR:$((${#SOUBOR} - 4)):4}" == "djvu" ] ; then
-					local TESTORDER=$(identifypage "${SOURCE}" "${SOUBOR}")
+#					echo "Před testem.. '${SOUBOR##+([[:blank:]])}'" >> /dev/stderr
+					local TESTORDER=$(identifypage "${SOURCE}" "${SOUBOR##+([[:blank:]])}")
+#					echo "Po testu.." >> /dev/stderr
 					if [ -z "${TESTORDER}" ] ; then
 						if [ -f "${SOUBOR}" ] ; then
 							local FROM="${SOUBOR}"
@@ -1587,6 +1551,7 @@ function move {
 							echo "move: OK - jde o DjVu soubor ${SOUBOR} co se má vložit" >> /dev/stderr
 							##### Ve zbytku musí být identifikátor
 							# ....
+							echo "Insert djvu file yet not implemented!!!" >> /dev/stderr
 							return 0
 						else
 							local TEST=( ${SOUBOR} )
@@ -1599,7 +1564,7 @@ function move {
 										echo "move: FAIL - for DjVu file ${FILE} identificator target page ${BTEST} is not valid." >> /dev/stderr
 										exit 1
 									else
-										#### tady budu realizovat přesun...?
+										#FINITO### tady budu realizovat přesun...?
 										local ANAME=$(identifyname "${SOURCE}" "${A}")
 										local BNAME=$(identifyname "${SOURCE}" "${B}")
 										if [ "${ANAME}" == "${BNAME}" ] ; then
@@ -1648,7 +1613,7 @@ function move {
 										fi
 									fi
 								else
-									echo "move: FAIL - Nezačíná to číslem." >> /dev/stderr
+									echo "move: FAIL - identificator '${SOUBOR##+([[:blank:]])}' for file ${FILE} is not valid. Pay attention to the gap - are treacherous!" >> /dev/stderr
 									exit 1
 								fi
 							else
@@ -1662,7 +1627,7 @@ function move {
 							local A="${TESTORDER}"
 							local VSTUP="${VSTUP#${SOUBOR}}"
 							if [ "${VSTUP##+([[:blank:]])}" == "" ] ; then
-								#### tady budu realizovat přesun...?
+								#FINITO### tady budu realizovat přesun...?
 								if [ "${MOVE}" == "fore" ] ; then
 									if [ "$A" == "1" ] ; then
 										echo "move: INFO - page ${ANAME} is on first position in ${FILE}." >> /dev/stderr
@@ -1692,13 +1657,13 @@ function move {
 							else
 								local TEST="${VSTUP##+([[:blank:]])}"
 								if [ "${TEST##+([[:digit:]])}" == "" ] ; then
-									# Pořadové číslo - budu přesouvat..
+#									# Pořadové číslo - budu přesouvat..
 									local B=$(identifypage "${SOURCE}" "${TEST}")
 									if [ -z "${B}" ] ; then
 										echo "move: ERROR - target position is not valid for file ${FILE}" >> /dev/stderr
 										exit 1
 									else
-										### Budu přesouvat
+										#FINITO## Budu přesouvat
 										if [ "${A}" == "${B}" ] ; then
 											echo "move: FAIL - If you want move page on position ${A}, which is the same page as target. If you want moved page from position ${2} before actual position, use command without identification of target position." >> /dev/stderr
 											exit 1
@@ -1749,7 +1714,7 @@ function move {
 								fi
 							fi
 						elif [ "${ANAME}" == "none" ] ; then
-							# ANAME je none
+#							# ANAME je none
 							local B=$(identifypage "${1}" "${SOUBOR}")
 							if [ -z "${B}" ] ; then
 								echo "move: ERROR - Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
@@ -1761,9 +1726,8 @@ function move {
 								break
 							fi
 						else
-							# všechny ostatní případy
-							# Zde lze odhalit, jestli položka ANAME není shodná s cílovou
-							echo "move: ${A} ${TESTORDER}" >> /dev/stderr
+#							#FINITO### Budu přesouvat..
+#							echo "move: ${A} ${TESTORDER}" >> /dev/stderr
 							if [ "${A}" == "${TESTORDER}" ] ; then
 								echo "move: FAIL - If yu want move page ${ANAME} in ${FILE} about one position. You must for it use action ${MOVE} only with identificator of page to move." >> /dev/stderr
 								exit 1
@@ -1775,8 +1739,51 @@ function move {
 								else
 									local A=$(identifypage "${1}" "${ANAME}")
 									local BNAME="${SOUBOR}"
-									log 1 "move: Pořadové číslo přesouvané stránky ${ANAME} je ${A}, a bude se přesouvat před stránu -${BNAME}- na pozici ${B}"
-									break
+#									#FINITO## Budu přesouvat ####
+									if [ "${ANAME}" == "${BNAME}" ] ; then
+										echo "move: FAIL - If you want move page on position ${A}, which is the same page as target. If you want moved page from position ${2} before actual position, use command without identification of target position." >> /dev/stderr
+										exit 1
+									fi
+									if [ "${MOVE}" == "fore" ] ; then
+										if [ "$A" == "1" ] ; then
+											echo "move: INFO - page ${ANAME} is on first position in ${FILE}." >> /dev/stderr
+											return 1
+										elif [ "$A" == "$((${B} - 1))" ] ; then
+											echo "move: INFO - page ${ANAME} is on previous position (${A}) in ${FILE} before page ${BNAME} (position ${B})." >> /dev/stderr
+											return 1
+										else
+											PAGE="yes"
+											exportdjvupage "${SOURCE}" "${ANAME}" "${TEMPDIR}"
+											deletepage "${SOURCE}" "${ANAME}"
+											if [ "${A}" -gt "${B}" ] ; then
+												${DJVM} -i "${SOURCE}" "${TEMPDIR}/${ANAME}" "${B}"
+											else
+												${DJVM} -i "${SOURCE}" "${TEMPDIR}/${ANAME}" "$((${B} - 1))"
+											fi
+											return 0
+										fi
+									elif [ "${MOVE}" == "back" ] ; then
+										local TEST=$(lastpage "${1}")
+										if [ "$A" == "${TEST}" ] ; then
+											echo "move: INFO - page ${ANAME} is on last position in ${FILE}." >> /dev/stderr
+											return 1
+										elif [ "$A" == "$((${B} + 1))" ] ; then
+											echo "move: INFO - page ${ANAME} is on next position in ${FILE} after page ${BNAME}." >> /dev/stderr
+											return 0
+										else
+											PAGE="yes"
+											exportdjvupage "${SOURCE}" "${ANAME}" "${TEMPDIR}"
+											deletepage "${SOURCE}" "${ANAME}"
+											if [ "${A}" -lt "${B}" ] ; then
+												${DJVM} -i "${SOURCE}" "${TEMPDIR}/${ANAME}" "${B}"
+											else
+												${DJVM} -i "${SOURCE}" "${TEMPDIR}/${ANAME}" "$((${B} - 1))"
+											fi
+											return 0
+										fi
+									else
+										echo "move: Nedělám nic" >> /dev/stderr
+									fi
 								fi
 							fi
 						fi
@@ -1790,6 +1797,9 @@ function move {
 						local COUNT=${#VSTUP}
 						local POS=0
 						echo "move: Soubor ${SOUBOR}, který není v djvu formátu musí před vložením do svazku projít konverzí" >> /dev/stderr
+						echo "Conversion into djvu file yet not implemented!!!" >> /dev/stderr
+						filetodjvu "${SOUBOR}" "${TEMPDIR}/${SOUBOR%.*}.djvu"
+						exit 33
 					else
 						echo "move: ERROR - Soubor ${SOUBOR} neexistuje" >> /dev/stderr
 						exit 1
@@ -1849,6 +1859,7 @@ function move {
 					echo "move: FAIL - identificator ${TEST[0]} is not valid for DjVu file ${FILE}" >> /dev/stderr
 					exit 1
 				else
+#					#FINITO## Zpracovávám přesun..
 					if [ "${ANAME}" == "${BNAME}" ] ; then
 						local A=$(identifypage "${SOURCE}" "${ANAME}")
 						if [ "${MOVE}" == "fore" ] ; then
@@ -1879,7 +1890,7 @@ function move {
 						fi
 					else
 #						echo "move: INFO - move page -${ANAME}- -${A}- ${MORE} page -${BNAME}- -${B}-" >> /dev/stderr
-						### Zpracovávám přesun..
+#						#FINITO## Zpracovávám přesun..
 						local B=$(identifypage "${SOURCE}" "${BNAME}")
 						if [ "${ANAME}" == "${BNAME}" ] ; then
 							echo "move: FAIL - If you want move page on position ${A}, which is the same page as target. If you want moved page from position ${2} before actual position, use command without identification of target position." >> /dev/stderr
@@ -1962,89 +1973,6 @@ function move {
 # 4b, le-li pozice A = lastpage skončit
 #
 # Má se přesouvat kupředu
-
-	exit 33
-	local BORDER=$(identifypage "${1}" "${3}")
-	if [ -z "${BORDER}" ] ; then
-#		echo "Pouze se posouvá, pokud nejde o klíčové slovo.."
-		case "${3}" in
-			end) # Přesun na předposlední pozici
-				echo "ToDo" >> /dev/stderr && exit 0
-			;;
-			begin) # Přesun na začátek souboru
-				echo "ToDo" >> /dev/stderr && exit 0
-			;;
-			*) local AORDER=$(identifypage $1 $2)
-				if [ -z "${AORDER}" ] ; then
-					echo "Stránka $2 v souboru $1 není" >> /dev/stderr
-					exit 1
-				else
-					echo "Není jiná pozice, bude se posouvat vpřed" >> /dev/stderr
-					if [ "${AORDER}" -gt "1" ] ; then
-						local B=$(identifyname ${1} $((${AORDER} - 1)))
-						local A=$(identifyname ${1} ${AORDER})
-						echo "Strana $A se bude se přesouvat před $B, mohu přikročit k rozebrání a vyjmutí stránky" >> /dev/stderr
-						rozvazat ${1} ${TEMPDIR}
-						deletepage ${1} ${A}
-					else
-						echo "Stránka $AORDER se již nachází na první pozici" >> /dev/stderr
-						exit 1
-					fi
-				fi
-			;;
-		esac
-	else
-		echo "plná - cílová pozice, či stránka existuje. Je třeba zjistit, zda identifikátor není v kolizi"
-		local AORDER=$(identifypage $1 $2)
-		if [ -z "${AORDER}" ] ; then
-			echo "Stránka s identifikátorem $2 v souboru $1 není" >> /dev/stderr
-			exit 1
-		else
-			echo "Stránka vy se mohla přesouvat také na sebe samu" >> /dev/stderr
-			local B=$(identifyname $1 ${BORDER})
-			local A=$(identifyname $1 ${AORDER})
-			if [ "${B}" == "${A}" ] ; then
-				echo "Identifikátor cílové pozice odpovídá aktuální pozici" >> /dev/stderr
-				exit 1
-			else
-				echo "Mohu přikročit k rozebrání a vyjmutí stránky"
-				rozvazat ${1} ${TEMPDIR}
-				deletepage ${1} ${A}
-			fi
-		fi
-	fi
-	local BORDER=$(identifypage $1 $B)
-	echo "Vkládám stránku ${A} na pozici $BORDER"
-	insertpage ${1} "${TEMPDIR}/${A}" ${BORDER}
-}
-
-# TODO - back
-function backpage {
-	# REVIZE NUTNÁ!!!
-	# $1 - soubor
-	# $2 - stránka k přesunu
-	# $3 - pozice k přesunu
-	exit 33
-	local P=$(identifypage $1 $2)
-	AORDER=$P
-	A=$(identifyname $1 $AORDER)
-	local P=$(identifypage $1 $3)
-	BORDER=$P
-	if [ -z "${BORDER}" ] ; then
-		if [ -z "${AORDER}" ] ; then
-			echo "Stránka $2 v souboru není.."
-			exit 1
-		else
-			B=$(identifyname $1 $((${AORDER} + 1)))
-		fi
-	else
-		B=$(identifyname $1 ${BORDER})
-	fi
-	echo "forwardpage: Přesouvám A -> $A před B -> $B" >>/dev/stderr
-	${DJVMCVT} -i ${1} ${TEMPDIR} index.djvu
-	deletepage ${1} ${A}
-	local P=$(identifypage $1 $B)
-	insertpage ${1} "${TEMPDIR}/${A}" $(($P + 1))
 }
 
 function djvuinfo {
@@ -2293,6 +2221,12 @@ function fromxcf {
 	if [ "${1##*.}" == "xcf" ] ; then
 		TEMPORARY="/tmp/$WINDOWID$BASHPID"
 		mkdir $TEMPORARY
+		# Pojmenování souborů...
+		# identify -format "%n" multipage.{mng|tiff|xcf} (zobrazí počet scén)
+		# convert *.xcf test%04d.jpg
+		# test0000.jpg
+		# test0001.jpg
+		# ..
 		convert ${1} ${TEMPORARY}/test.png
 		pushd $TEMPORARY
 			BUNDLE=" "
@@ -2786,11 +2720,11 @@ CreationDate - Čas vytvoření dokumentu
           Pro podrobnější nápovědu použijte volbu -h za klíčovým slovem
 """
 		;;
-		rename) echo """
-[1mParametr[0m
-         -r|--rename  <[2mvzor[22m>  Vzor, podle jakého se mají přejmenovat
-                              dílčí DjVu soubory, ze kterých se pak bude
-                              sestavovat DjVu svazek.
+		rename) echo """ volba [1m-r[0m, [1m--rename[0m
+ Nastavení vzorku, podle jakého se mají pojmenovat, nebo přejmenovat DjVu soubory v DjVu svazku.
+
+Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky, při konverzi vícestránkových bitmapových souborů (tiff, png, xcf)
+
 [4mPopis:[24m
   Pomocí [2mvzoru[22m lze upravit názvy zkonvertovaných DjVu souborů
   před jejich sestavením do DjVu svazku. [2mVzor[22m může být tvořen:
@@ -2861,41 +2795,80 @@ For list of all actions use next command:
 	esac
 }
 
-# TODO - insert
+function filetodjvu {
+	echo "filetodjvu: vstupuji sem.." >> /dev/stderr
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local TARGETPATH=$(${REALPATH} -m -P "${2}")
+	local TARGET="${TARGETPATH##*/}"
+	case "${FILE##*.}" in
+		[jJ][pP][gG]|[pP][nN][gG]|[gG][iI][fF]|[pP][nN][mM]) todjvu "${SOURCE}" "${2}"
+		;;
+		[tT][iI][fF][fF]|[xX][cC][fF]|[nM][nN][gG]|[pP][dD][fF]) if [ "${RENAME}" == "no" ] ; then
+			# pojmenování cíle vyjde ze jména souboru
+			local COUNT=$(${IDENTIFY} -format "%n" ${SOURCE})
+			${CONVERT} "${SOURCE}" "${TEMPDIR}/${FILE%.*}_%0${#COUNT}d.png"
+		else
+			# pojmenování vyjde ze vzoru
+			local COUNT=$(${IDENTIFY} -format "%n" ${SOURCE})
+			if [[ ${RENAME} =~ "%" ]] ; then
+				echo "Použiju číslování ze vzoru" >> /dev/stderr
+				${CONVERT} "${SOURCE}" "${TEMPDIR}/${RENAME}.png"
+			else
+				echo "Použiju výchozí číslování" >> /dev/stderr
+				${CONVERT} "${SOURCE}" "${TEMPDIR}/${RENAME}_%0${#COUNT}d.png"
+			fi
+		fi
+		# přidat smyčku pro konverzi vytažených souborů..
+		;;
+		*) echo "filetodjvu: INFO - Format file ${FILE##*\.} is not supported. Sorry!!" >> /dev/stderr && exit 1
+		;;
+	esac
+	exit 33
+}
+
 function todjvu {
 	# $1 - soubor ke konverzi
-	# $2 - cílový DjVu soubor
-	echo "todjvu: Konvertuji soubor $1 - do souboru $2" >> /dev/stderr
-	echo "$(testfile ${1})" >> /dev/stderr
-	if [ $(testfile ${1}) == "djvu" ] ; then
-		echo "DjVu soubory nelze znovu konvertovat" >> /dev/stderr
+	# $2 - target path to new DjVu file (full path!!)
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	case "${FILE##*.}" in
+		[jJ][pP][gG]|[pP][nN][gG]|[gG][iI][fF]|[pP][nN][mM])
+		;;
+		[tT][iI][fF][fF]|[xX][cC][fF]|[nM][nN][gG]|[pP][dD][fF]) echo "todjvu: INFO - Format file ${FILE##*\.} now is not accepted. Sorry!!" >> /dev/stderr && exit 1
+		;;
+		*) echo "todjvu: INFO - Format file ${FILE##*\.} is not supported. Sorry!!" >> /dev/stderr && exit 1
+		;;
+	esac
+	local TARGETPATH=$(${REALPATH} -m -P "${2}")
+	local TARGET="${TARGETPATH##*/}"
+	log 1 "todjvu: From input file ${SOURCE} make DjVu file ${TARGET}" >> /dev/stderr
+	if [ $(testfile "${SOURCE}") == "djvu" ] ; then
+		echo "todjvu: ERROR - ${SOURCE} is DjVu file" >> /dev/stderr
 		exit 1
 	else
 		if [ "${#ALG[@]}" -gt "1" ] ; then
 			for i in ${ALG[@]} ; do 
-				${DIDJVU} encode -o "${2/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "$1"
-				getocr ${2/.djvu/.$i.djvu}
+				${DIDJVU} encode -o "${TARGETPATH/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "${SOURCE}"
+				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH/.djvu/.$i.djvu}"
+				getocr "${TARGETPATH/.djvu/.$i.djvu}"
 			done
 		else
-			if [ -f "${2}" ] ; then
+			if [ -f "${TARGETPATH}" ] ; then
 				if [ "${FORCE}" == "yes" ] ; then
-				log 1 "todjvu: Cílový soubor ${2} existuje, bude se přepisovat"
-					${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
-					getocr ${2}
+				log 1 "todjvu: INFO - rewrite target file ${TARGET}."
+					${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
+				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH}"
+					getocr "${TARGETPATH}"
 				else
-					echo "Mám přepsat cílový soubor ${2}?"
-					potvrdit && ${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
-					getocr ${2}
+					echo "Mám přepsat cílový soubor ${TARGET}?"
+					potvrdit && ${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
+					getocr "${TARGETPATH}"
 				fi
 			else
-				if [ ! -d "${2%/*}" ] ; then
-					log 1 "todjvu: neexistuje adresář pro cílový soubor, musím ho vytvořit"
-					mkdir -p "${2%/*}"
-				fi
-				log 1 "todjvu: konvertuji soubor ${1} do cílového souboru $2"
-				echo "${DIDJVU} encode -o ${2} -d ${DPI-300} ${LEVEL} -m ${ALG} ${1}" >> /dev/stderr
-				${DIDJVU} encode -o "${2}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${1}"
-				getocr ${2}
+				${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
+				getocr "${TARGETPATH}"
+				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH}"
 			fi
 		fi
 	fi
@@ -3197,6 +3170,26 @@ do local POS=$((POS+1))
 				local VSTUP="${TEMP}"
 				local POS=0
 				local COUNT=${#VSTUP}
+			fi
+		;;
+		-r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
+			local POS=$((POS+1))
+			local TEMP=${VSTUP:$POS}
+			case "$TEMP" in
+				-h*|--help*) help rename && exit 0
+				;;
+			esac
+			local NEXT="${TEMP#* }"
+			local VALUE="${TEMP% ${NEXT}}"
+			if [ "${VALUE##+([[:alnum:]%_-])}" == "" ] ; then
+				RENAME="${VALUE}"
+				local VSTUP="${NEXT}"
+				local POS=0
+				local COUNT=${#VSTUP}
+				log 1 "main: Aplikuji pro RENAME parametr - ${RENAME}"
+			else
+				echo "main: FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
+				exit 1
 			fi
 		;;
 		-t|--thumb) # Volba pro akci insert

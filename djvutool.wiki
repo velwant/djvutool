@@ -1,5 +1,9 @@
+= Jak předávat data =
+
+Vzhledem k tomu, že se v djvu souborech mohou vyskytovat i stránky s opakovanými mezerami, je třeba na to pamatovat při práci na příkazové řádce a v takovém případě použít znak '\' (''backslash'')
+
+
 = Funkce =
-# backpage - nahrazuje funkce move
 :* deletepage
 	''identifybundle''
 	''identifypage''
@@ -73,9 +77,13 @@
 	''popd''
 	''identifypage''
 	''potvrdit''
-# forwardpage - nahrazuje funkce move
 # formxcf
-# getocr
+::* filetodjvu
+	''todjvu''
+		''testfile''
+		''potvrdit''
+			''getocr''
+::* getocr
 :* help
 ::* identifybundle
 	''testfile''
@@ -115,8 +123,6 @@
 	'''setmeta'''
 	'''printmeta'''
 	'''unsetmeta'''
-	'''forwardpage''' - nahrazuje funkce move
-	'''backpage''' - nahrazuje funkce move
 	''move''
 		''identifypage''
 		''identifyname''
@@ -124,13 +130,18 @@
 		''deletepage''
 			''identifybundle''
 			''identifypage''
+		''filetodjvu''
+			''todjvu''
+				''testfile''
+				''potvrdit''
+				''getocr''
 	''rotatepage''
 		''identifybundle''
 			''testfile''
 		''potvrdit''
 		''identifyname''
 	''export''
-		''targetdir''
+		'':targetdir''
 		''identifyname''
 		''identifypage''
 		''exportdjvuall''
@@ -152,6 +163,17 @@
 	''list''
 	''exportoutline''
 		''help''
+:* move
+	''identifypage''
+	''identifyname''
+	''exportdjvupage''
+		''identifybundle''
+		''identifypage''
+	''filetodjvu''
+		''todjvu''
+			''testfile''
+			''potvrdit''
+			''getocr''
 :::* parseoutline
 :::* popd
 ::* potvrdit
@@ -165,7 +187,10 @@
 ::* tabs
 ::* targetdir
 :* testfile
-# todjvu
+:::* todjvu
+	''testfile''
+	''potvrdit''
+	''getocr''
 # todjvuclassic
 # todotest
 # todoview
