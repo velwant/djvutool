@@ -38,7 +38,7 @@ shopt -s extglob
 # - implementovat import
 # doplnit nápovědu k rotaci stránky (akce rotate)
 # opravit volby --algoritmus a --view
-NAME="convertor"
+NAME="djvutool"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
 
 LOG="${LOG=/dev/null}"
@@ -598,6 +598,8 @@ function exportoutline {
 	# $1 - DjVu file - full path
 	# $2 - parameter
 	case "${2}" in
+		out) dsedtooutline "${1}"
+		;;
 		print) local TABS='        '
 			${DJVUSED} "${1}" -e "print-outline" | sed -n '{
 			s_(_<element>_g
@@ -773,7 +775,7 @@ function importmetaall {
 	${DJVUSED} "${1}" -e "select; set-meta ${2}; save"
 }
 
-function importoutline {
+function importoutline1 {
 	# $1 - DjVu file - full path
 	# $2 - outline file
 	parseoutline "${2}"
@@ -803,7 +805,118 @@ function importoutline {
 	${DJVUSED} "${1}" -e "set-outline ${TEMPDIR}/final_outline.dsed; save"
 }
 
-function parseoutline {
+function encode {
+	echo "encode: Jsem tu" >> /dev/stderr
+	local SOURCE="${1}"
+	local STRING=$(cat ${SOURCE}| tr '\n' ' ')
+	local COUNT=0
+	local IFS="\ "
+	while [ "${COUNT}" -lt "${#STRING}" ] ; do
+	CHAR=($( echo "${STRING:${COUNT}:1}" | od -A n -t c ))
+#	echo "${#CHAR[@]}" >> /dev/stderr
+	if [ "${#CHAR[@]}" -gt "2" ] ; then 
+#		echo "\\${CHAR[0]}\\${CHAR[1]}" >> /dev/stderr
+		echo -n "\\${CHAR[0]}\\${CHAR[1]}"
+	elif [ "${#CHAR[@]}" == "1" ] ; then 
+		echo -n "\ "
+	else
+		if [ "${#CHAR[0]}" == "0" ] ; then
+			echo -n " "
+		else
+			echo -n "${CHAR[0]}"
+		fi
+	fi
+	local COUNT=$((COUNT + 1))
+	done
+}
+
+function importoutline2 {
+	local TARGET="$1"
+	local IFS=''
+	local TAB=0
+	echo "(bookmarks ("
+	sed -n '
+	s|\ \ \ \ |\t|g
+	p
+	' "${1}" | while read y
+	do
+		local TABS="${y%%\"*}"
+		if [ "${TAB}" -gt "${#TABS}" ] ; then
+			echo "( ${y}"
+			local TAB=$((TAB - 1))
+		elif  [ "${TAB}" -lt "${#TABS}" ] ; then
+			echo "( ${y} )"
+			echo ")"
+			local TAB=$((TAB + 1))
+		else
+			echo "( ${y}"
+		fi
+	done
+	echo ") )"
+}
+
+function dsedtooutline {
+	local TARGET="$1"
+	local BEGIN=""
+	local TAB=0
+	${DJVUSED} "${1}" -e 'print-outline' | sed -n '
+	s|(|\n(\n|g
+	s|)|\n)\n|g
+	s|\\|\\\\0|g
+	p
+	' |	while read y
+	do
+		case "$y" in
+			\)) local TAB=$((TAB - 1))
+			;;
+			\() local TAB=$((TAB + 1))
+			;;
+			\"*) if [ "${BEGIN}" == "" ] ; then
+					local TEXT="$y"
+					local BEGIN="yes"
+				else
+					for i in $(seq $((TAB-2))) ; do echo -en '\t' ; done
+					echo -e "${TEXT} ${y}"
+					local BEGIN=""
+				fi
+			;;
+		esac
+	done
+#	exit 0
+}
+
+function outlinetodsed {
+	local TARGET="$1"
+	local LEVEL="1"
+	IFS=''
+	echo -n "(bookmarks "
+	CONTENT=$(sed '
+		s/\ \ \ \ /\t/g
+		s/^/\t/
+		' "${TARGET}" | while read line ; do
+		local SPACE="${line%%\"*}"
+		if [ "${#SPACE}" -gt "${LEVEL}" ] ; then
+			local PREV="${PREV%)} ( ${line} )"
+			local LEVEL=$((${LEVEL} + 1))
+		elif [ "${#SPACE}" -eq "${LEVEL}" ] ; then
+			local PREV="${PREV} ( ${line} )"
+		elif [ "${#SPACE}" -lt "${LEVEL}" ] ; then
+			local ROZDIL=$((${LEVEL} - ${#SPACE}))
+			local ZAV=$(seq  -f "%1.0f" -s '' ${ROZDIL})
+			local PREV="${PREV} ${ZAV//[[:digit:]]/)} ( $line )"
+			local LEVEL=$((${LEVEL} - ${ROZDIL}))
+		fi
+		echo "${PREV}"
+		echo "-----${LEVEL}"
+	done | sed 's/\t/\ /g' | tail -2)
+	TEST="${CONTENT##*-----}"
+	echo -n "${CONTENT%-----*}"
+	local ZAV=$(seq  -f "%1.0f" -s '' ${TEST})
+	echo "${ZAV//[[:digit:]]/)}"
+#	exit 0
+}
+
+function parseoutline1 {
 	# $1 - outline file
 	local TARGET="${TEMPDIR}/outline.dsed"
 	# počet mezer odpovídá použitému odsazení
@@ -860,6 +973,7 @@ function parseoutline {
 		local LINES=$((LINES+1))
 	done
 	printf '%s' '))' >> ${TARGET}
+	echo "LINES -${LINES}- COUNT -${COUNT}- LEVEL -${LEVEL}- TAB -${TAB}-" >> /dev/stderr
 }
 
 function importdsedall {
@@ -2979,6 +3093,19 @@ done
 					rotate) rotatepage "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
+					edit) case "${CHARSTRING}" in
+							outline) local TARGET="${TEMPDIR}/${FILE##*/}"
+									exportoutline "${FILE}" "out" > "${TARGET/.djvu/.outline}"
+									edit "${TARGET/.djvu/.outline}"
+									outlinetodsed "${TARGET/.djvu/.outline}" > "${TARGET}.outline"
+									encode "${TARGET}.outline" > "${TARGET}.temporar"
+									${DJVUSED}  "${FILE}" -e "set-outline ${TARGET}.temporar; save"
+							;;
+							meta)
+							;;
+						esac
+						exit 33
+					;;
 					export) export "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
@@ -2989,7 +3116,9 @@ done
 						djvuinfo "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					list) list "${FILE}"
+					list) #list "${FILE}"
+						importoutline "${CHARSTRING}"
+						#parseoutline "${FILE}" #"${CHARSTRING}"
 						exit 0
 					;;
 					outline) exportoutline "${FILE}" "${CHARSTRING}"

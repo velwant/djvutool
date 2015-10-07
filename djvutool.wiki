@@ -1,9 +1,89 @@
-= Jak předávat data =
+= DjVutool =
+
+'''DjVutool''' je shellový skript určený pro práci s DjVu soubory v prostředí GNU/Linux, který využívá standardních nástrojů pro práci s textem<ref>awk, sed, vim</ref> a zastřešuje další open source nástroje:
+
+* utility z '''DjVuLibre'''<ref>[http://sourceforge.net/projects/djvu DjVuLibre]</ref>
+* enkódovací utilitu didjvu<ref>[http://jwilk.net/software/didjvu didjvu] - autor Jakub Wilk</ref>
+* OCR nadstavbu '''ocrodjvu'''<ref>[http://jwilk.net/software/ocrodjvu ocrodjvu] - autor Jakub Wilk</ref>
+* konverzní nástroje z balíku '''ImageMagick'''<ref>[http://www.imagemagick.org ImageMagick]</ref>
+* XML command line toolkit  '''xmlstarlet'''<ref>[http://xmlstar.sourceforge.net xmlstarlet]</ref>
+
+S jeho pomocí lze:
+
+* Přidávat nové stránky do DjVu svazků
+* Přesouvat stránky v rámci DjVu svazku
+* Odstraňovat stránky z DjVu svazku
+* Exportovat a importovat data skryté textové vrstvy i celé DjVu stránky z DjVu svazků
+* Editovat obsah (''outline'') a meta atributy DjVu souborů
+
+Po vyexportování obsahu skryté textové vrstvy lze použít pro další zpracování obsahu použít javascriptový editor '''WebDjVuTextEd'''<ref>[http://sourceforge.net/projects/webdjvutexted WebDjVuTextEd] autor Ferenc Veres</ref>, a upravené soubory pomocí [[DjVuTool]] naimportovat zpět.
+
+Pro vytvoření hyperlinků je vhodným nástrojem  '''djvusmooth'''<ref>[http://jwilk.net/software/djvusmooth djvusmooth] - autor Jakub Wilk</ref>.
+
+== Použití ==
+
+ djvutool [volby] <DjVu soubor> {akce} [ ... ]
+
+=== Jak předávat data ===
 
 Vzhledem k tomu, že se v djvu souborech mohou vyskytovat i stránky s opakovanými mezerami, je třeba na to pamatovat při práci na příkazové řádce a v takovém případě použít znak '\' (''backslash'')
 
+== Volby ==
+Pomocí voleb lze nastavit, co vše má být předmětem zpracování během akce
+=== -a|--algorithm ===
+Volbou algoritmu, který se má použít pro vytvoření masky, lze ovlivnit výsledek separace obrazové vrstvy DjVu dokumentu. Není-li touto volbou určeno jinak, použije se výchozí algoritmus ''djvu'', ale protože se výsledek může značně lišit, podle typu předlohy, značně lišit, je možné nastavit i více algoritmů a pomocí akce '''test''' provést testovací konverzi předlohy.
 
-= Funkce =
+=== -d|--dsed ===
+
+=== --dpi ===
+
+=== -f|--force ===
+
+=== --clean|--lossy|--lossless|--level ===
+
+=== -i|--image ===
+
+=== -m|--meta ===
+
+=== -o|--ocr ===
+Je volba, která umožňuje předat utilitě [[ocrodjvu]] kódy jazyků, se kterými se má pracovat při OCR zpracování skryté textové vrstvy
+
+=== -p|--page ===
+Při akci '''export''' a '''import''' 
+
+=== -r|--rename ===
+Nastavení vzoru pro pojmenování stránek při akcích '''rename''', '''fore''' a '''back'''
+
+=== -t|--thumb ===
+
+=== -v|--verbose ===
+
+=== -x|--xml ===
+
+== Akce ==
+
+=== delete ===
+Akce pro odstraňování DjVu stránek
+
+=== export, import ===
+Akce pro export a import DjVu stránek, meta atributů, obsahu a obsahu skryté textové vrstvy.
+
+=== fore, back ===
+Akce pro přesun a import DjVu stránek
+
+=== printmeta, setmeta ===
+Akce pro výpis a nastavení meta atributů DjVu stránek a svazků
+
+=== info ===
+Akce pro výpis informací o DjVu souboru
+
+=== rename ===
+Akce pro přejmenování stránek DjVu svazku podle zvoleného vzoru
+
+=== rotate ===
+Akce pro změnu výchozího natočení DjVu stránek
+
+== Funkce v DjVuTool ==
 :* comparedjvu
 	''potvrdit''
 :* deletepage
