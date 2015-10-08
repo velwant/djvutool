@@ -93,10 +93,12 @@ Akce pro změnu výchozího natočení DjVu stránek
 	''identifybundle''
 	''lastpage''
 	?''exportpage''
+::* dsedtooutline
 :* export
 	''targetdir''
 	''identifypage''
 	''identifyname''
+	''dsedtooutline''
 ::* exportdjvuall
 	''exportdjvupage''
 		''pushd''

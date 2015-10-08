@@ -405,6 +405,7 @@ function import {
 		local IFS_BAK=$IFS
 		local IFS=$'\n'
 		for i in  ${LIST} ; do
+
 			local PAGENAME="${i##*:}"
 			log 1 "import: Hledám soubory pro import dat do stránky ${PAGENAME} v souboru ${FILE}"
 			if [ -f "${FROM}/${PAGENAME/.djvu/.dsed}" ] ; then
@@ -416,6 +417,7 @@ function import {
 			if [ -f "${FROM}/${PAGENAME/.djvu/.meta}" ] ; then
 				importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}/${PAGENAME/.djvu/.meta}"
 			fi
+
 		done
 		local IFS=$IFS_BAK
 		log 1 "import: Importuji meta atributy a obsah pro celý soubor ${FILE}"
@@ -427,54 +429,67 @@ function import {
 			importoutline "${SOURCE}" "${FROM}/${FILE/.djvu/.outline}"
 		fi
 	elif [ -f "${FROM}" ] ; then
-		local FROMFILE="${FROM##*/}"
-		echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
-		if [ "${FILE%.*}" == "${FROMFILE%.*}" ] ; then
-			local FROMFILE="${FROM##*/}"
-			log 1 "import: Importuji textová data do svazku ${FROMFILE}"
-			case "${FROMFILE}" in
-				*.dsed) DSED="yes"
-					importdsedall "${SOURCE}" "${FROM}"
-				;;
-				*.meta) META="yes"
-					importmetaall "${SOURCE}" "${FROM}"
-				;;
-				*.outline) OUTLINE="yes"
-					importoutline "${SOURCE}" "${FROM}"
-				;;
-				*.xml) XML="yes"
-					importxmlpage "${SOURCE}" "${FROM}"
-				;;
-				*) echo "import: Při importu textových dat do celého svazku jsou akceptovány pouze soubory s příponou .dsed, .xml, .outline a .meta" >> /dev/stderr
-				;;
-			esac
-		else
-			log 1 "import: Importuji data do stránky ${FROMFILE}"
-			local LIST=$(list "${SOURCE}")
-			local IFS_BAK=$IFS
-			local IFS=$'\n'
-			for i in  ${LIST} ; do
-				local PAGENAME="${i##*:}"
-				if [ "${PAGENAME%.*}" == "${FROMFILE%.*}" ] ; then
-					echo "Importuji data ze souboru ${FROM} do stránky ${PAGENAME} v souboru ${FILE}" >> /dev/stderr
-					case "${FROMFILE}" in
-						*.dsed) DSED="yes"
-							importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
-						;;
-						*.meta) META="yes"
-							importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}"
-						;;
-						*.xml) XML="yes"
-							importxmlpage "${SOURCE}" "${FROM}"
-						;;
-						*) echo "import: Při importu textových dat do stránky jsou akceptovány pouze soubory s příponou .dsed, .xml a .meta" >> /dev/stderr
-						;;
-					esac
-				fi
-			
-			done
-			local IFS=$IFS_BAK
-		fi
+		case "$(head -c 1 ${FROM})" in
+			\<) echo "import: import XML file" >> /dev/stderr
+				XML="yes"
+				importxmlpage "${SOURCE}" "${FROM}"
+				return 0
+			;;
+			s) echo "import: import file in dsed format" >> /dev/stderr
+				DSED="yes"
+				importdsedall "${SOURCE}" "${FROM}"
+				return 0
+			;;
+			\") echo "import: import outline file" >> /dev/stderr
+				local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+				outlinetodsed "${FROM}" | encode > "${TEMPFILE}"
+				importoutline "${SOURCE}" "${TEMPFILE}"
+				return 0
+			;;
+			\() echo "import: import outline in dsed format" >> /dev/stderr
+				"${SOURCE}" 
+				importoutline "${SOURCE}" "${FROM}"
+				return 0
+			;;
+			\#) echo "import: import meta atribute file" >> /dev/stderr
+				META="yes"
+				importmetaall "${SOURCE}" "${FROM}"
+				return 0
+			;;
+			[[:alpha:]]) echo "import: meta TODO atribute file for one page - not implemented" >> /dev/stderr
+				echo "může jít i o seznam stránek k importu do souboru.." >> /dev/stderr
+				local FROMFILE="${FROM##*/}"
+				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
+				log 1 "import: Importuji data do stránky ${FROMFILE}"
+				local LIST=$(list "${SOURCE}")
+				local IFS_BAK=$IFS
+				local IFS=$'\n'
+				for i in  ${LIST} ; do
+					local PAGENAME="${i##*:}"
+					if [ "${PAGENAME%.*}" == "${FROMFILE%.*}" ] ; then
+						echo "Importuji data ze souboru ${FROM} do stránky ${PAGENAME} v souboru ${FILE}" >> /dev/stderr
+						case "${FROMFILE}" in
+							*.dsed) DSED="yes"
+								importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
+							;;
+							*.meta) META="yes"
+								importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}"
+							;;
+							*.xml) XML="yes"
+								importxmlpage "${SOURCE}" "${FROM}"
+							;;
+							*) echo "import: Při importu textových dat do stránky jsou akceptovány pouze soubory s příponou .dsed, .xml a .meta" >> /dev/stderr
+							;;
+						esac
+					fi
+				done
+				local IFS=$IFS_BAK
+				return 0
+			;;
+			*) echo "import: FAIL - unknown file" >> /dev/stderr
+				exit 1
+			;;
+		esac
 	else
 		echo "import: Parametrem akce import může být buď adresář se soubory, nebo soubor s daty k importu" >> /dev/stderr
 		exit 1
@@ -513,9 +528,19 @@ function export {
 		else
 			log 1 "export: Export page identificated by ${PAGENAME} from ${FILE} into aktual directory - do set TARGETDIR"
 			local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
-			[ -z "${IDPAGE}" ] && echo "export: In ${FILE} is not any page identificated by ${PAGENAME}"  >> /dev/stderr &&  exit 1
-			local NAMEPAGE=$(identifyname "${SOURCE}" "${PAGENAME}")
-			local TARGETDIR=$(targetdir $(pwd))
+			if [ -z "${IDPAGE}" ] ; then
+				case "${PAGENAME%%\ *}" in
+					meta) echo "exportuji vybranou meta stránku"
+						printmeta "${SOURCE}" "${PAGENAME#* }"
+						return 0
+					;;
+					*) echo "export: In ${FILE} is not any page identificated by ${PAGENAME}"  >> /dev/stderr &&  exit 1
+					;;
+				esac
+			else
+				local NAMEPAGE=$(identifyname "${SOURCE}" "${PAGENAME}")
+				local TARGETDIR=$(targetdir $(pwd))
+			fi
 		fi
 	else
 		if [ -z "${PAGENAME}" ] ; then
@@ -524,24 +549,31 @@ function export {
 			local CHARSTRING=${TEMP#${IDPAGE}}
 			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
 			# Tady může být nějaký jiný parametr, než pořadové číslo, a také TARGETDIR může být prázdný.
-			if [ "${IDPAGE}" == "all" ] ; then
-				if [ -z "${TARGETDIR}" ] ; then
-					log 1 "export: Export all pages from ${FILE} into actual directory - do set TARGETDIR"
-					local TARGETDIR=$(targetdir $(pwd))
-					exportdjvuall "${SOURCE}" "${TARGETDIR}"
+			case "${IDPAGE}" in
+				all) if [ -z "${TARGETDIR}" ] ; then
+						log 1 "export: Export all pages from ${FILE} into actual directory - do set TARGETDIR"
+						local TARGETDIR=$(targetdir $(pwd))
+						exportdjvuall "${SOURCE}" "${TARGETDIR}"
+						return 0
+					else
+						log 1 "export: Export all pages from ${FILE} into ${TARGETDIR}"
+						local TARGETDIR=$(targetdir "${TARGETDIR}")
+						exportdjvuall "${SOURCE}" "${TARGETDIR}"
+						return 0
+					fi
+				;;
+				meta) printmeta "${SOURCE}" all
 					return 0
-				else
-					log 1 "export: Export all pages from ${FILE} into ${TARGETDIR}"
+				;;
+				outline) dsedtooutline "${SOURCE}"
+					return 0
+				;;
+				*) log 1 "export: Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
+					local NAMEPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
+					[ -z "${NAMEPAGE}" ] && echo "export: In ${FILE} is not any page on position ${IDPAGE}"  >> /dev/stderr &&  exit 1
 					local TARGETDIR=$(targetdir "${TARGETDIR}")
-					exportdjvuall "${SOURCE}" "${TARGETDIR}"
-					return 0
-				fi
-			else
-				log 1 "export: Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
-				local NAMEPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
-				[ -z "${NAMEPAGE}" ] && echo "export: In ${FILE} is not any page on position ${IDPAGE}"  >> /dev/stderr &&  exit 1
-				local TARGETDIR=$(targetdir "${TARGETDIR}")
-			fi
+				;;
+			esac
 		else
 			local NAMEPAGE=${PAGENAME##+([[:blank:]])}
 			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
@@ -591,9 +623,12 @@ function exportdjvuall {
 	exportdsedbundle "${1}" "${2}"
 	exportxmlbundle "${1}" "${2}"
 	exportmetabundle "${1}" "${2}"
-	exportoutline "${1}" print > "${2}/${FILE/.djvu/.outline}"
+	dsedtooutline "${1}" > "${2}/${FILE/.djvu/.outline}"
 }
 
+# Odstranit? Výstup obsahu přebírají funkce edit a export
+# a generování šablony přebere akce template
+# a výpis všech stránek akce list
 function exportoutline {
 	# $1 - DjVu file - full path
 	# $2 - parameter
@@ -806,6 +841,27 @@ function importoutline1 {
 }
 
 function encode {
+	# Funkce průběžně konvertuje unicode znaky do číselné podoby
+	while read -n 1 a
+	do
+	CHAR=($( echo "$a" | od -A n -t c ))
+	if [ "${#CHAR[@]}" -gt "2" ] ; then 
+		echo -n "\\${CHAR[0]}\\${CHAR[1]}"
+	elif [ "${#CHAR[@]}" == "1" ] ; then 
+		echo -n " "
+	else
+		if [ "${#CHAR[0]}" == "0" ] ; then
+			echo -n " "
+		else
+			echo -n "${CHAR[0]}"
+		fi
+	fi
+	done
+}
+
+
+# Funkce encode, která provádí konverzi obsahu souboru asi je zbytečná...
+function encode1 {
 	echo "encode: Jsem tu" >> /dev/stderr
 	local SOURCE="${1}"
 	local STRING=$(cat ${SOURCE}| tr '\n' ' ')
@@ -882,7 +938,6 @@ function dsedtooutline {
 			;;
 		esac
 	done
-#	exit 0
 }
 
 function outlinetodsed {
@@ -1013,6 +1068,34 @@ function importdsedpage {
 		no) echo "K importu textových dat ze souboru ${3} se přistoupí pouze bude-li uvedena volba -d" >> /dev/stderr
 		;;
 	esac
+}
+
+function importmeta {
+	# $1 - DjVu file - full path
+	# $2 - identificator - page name
+	# $3 - source DSED file - full path
+	if [ -f "${2}" ] ; then
+		if [ "${3}" ] ; then
+			local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+			# Zpracování gobálních metadat
+			awk '/^# select '${i}'$/{flag=1;next} ; /^.$/{flag=0}; flag' "${2}" > ${TEMPFILE}
+			${DJVUSED} "${1}" -e "select ${3}; set-meta ${TEMPFILE}" -s
+		else
+			for i in $(seq $(lastpage ${1})) ; do
+				awk '/^# select '${i}'$/{flag=1;next} ; /^.$/{flag=0}; flag' "${2}" > ${TEMPFILE}
+				if [ "${TEMPFILE}" ] ; then
+					${DJVUSED} "${1}" -e "select ${i}; set-meta ${TEMPFILE}" -s
+				fi
+			done
+		fi
+	else
+		importmeta "${1}" "${3}" 
+	fi
+}
+
+function importoutline {
+	# Import outline in dsed format
+	${DJVUSED}  "${1}" -e "set-outline ${2}" -s
 }
 
 function importxmlpage {
@@ -2164,15 +2247,16 @@ Použitelné parametry:
   se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
   při volbě [3m-p[23m.
 
-  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all} [<dir>]
+  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all|outline|meta [<num>|<name>|all]}  [<dir>]
 
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         dir  - adresář do kterého má být výstup uložen
+      num - pořadové číslo stránky v DjVu svazku
+     name - jméno stránky v DjVu svazku
+      dir - adresář do kterého má být výstup uložen
+      all - předmětem exportu bude obsah celého DjVu svazku
+  outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
+     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
 
 [4mPoznámky:[24m
-  * Je-li místo pořadového čísla stránky, nebo jejího názvu, uvedeno [3mall[23m
-    tak se bude exportovat vše z celého DjVu svazku.
   * Pro zpracování single-page DjVu stránek je parametr [3mall[23m doporučený
   * Není-li uveden cílový adresář, budou soubory exporované do adresáře,
     kde byl [1m${0##*/}[0m spuštěn.
@@ -3037,6 +3121,9 @@ done
 					delete) deletepage "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
+					exif) ${EXIFTOOL} "${FILE}"
+						exit 0
+					;;
 					insert) # ToDo - zpracovat ${CHARSTRING}
 						exit 1
 						if [ -f "${3}" ] ; then
@@ -3095,13 +3182,18 @@ done
 					;;
 					edit) case "${CHARSTRING}" in
 							outline) local TARGET="${TEMPDIR}/${FILE##*/}"
-									exportoutline "${FILE}" "out" > "${TARGET/.djvu/.outline}"
-									edit "${TARGET/.djvu/.outline}"
-									outlinetodsed "${TARGET/.djvu/.outline}" > "${TARGET}.outline"
-									encode "${TARGET}.outline" > "${TARGET}.temporar"
-									${DJVUSED}  "${FILE}" -e "set-outline ${TARGET}.temporar; save"
+								local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+								dsedtooutline "${FILE}" > "${TEMPFILE}"
+								edit "${TEMPFILE}"
+								outlinetodsed "${TEMPFILE}" | encode > "${TARGET/.djvu/.outline}"
+								${DJVUSED}  "${FILE}" -e "set-outline ${TARGET/.djvu/.outline}; save"
 							;;
-							meta)
+							meta) local TARGET="${TEMPDIR}/${FILE##*/}"
+								local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+								printmeta "${FILE}" all > "${TEMPFILE}"
+								edit "${TEMPFILE}"
+#								outlinetodsed "${TEMPFILE}" | encode > "${TARGET/.djvu/.outline}"
+#								${DJVUSED}  "${FILE}" -e "set-outline ${TARGET/.djvu/.outline}; save"
 							;;
 						esac
 						exit 33
@@ -3116,14 +3208,15 @@ done
 						djvuinfo "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					list) #list "${FILE}"
-						importoutline "${CHARSTRING}"
+					list) list "${FILE}"
+						#importoutline "${CHARSTRING}"
 						#parseoutline "${FILE}" #"${CHARSTRING}"
 						exit 0
 					;;
-					outline) exportoutline "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
+# Nahradit funkcí template - která bude generovat šablony...
+#					outline) exportoutline "${FILE}" "${CHARSTRING}"
+#						exit 0
+#					;;
 					rename)   # ToDo - zpracovat ${CHARSTRING}
 						exit 1
 					;;
