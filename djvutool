@@ -23,11 +23,16 @@ shopt -s extglob
 # - upraveny funkce pro export náhledů a souborů textové vrstvy
 # - implementována akce print pro výpis metadat
 
+# Konvence..
+# Hlavní funkce djvu<KEYWORD>
+# Vedlejší funkce <KEYWORD>...
+
 # Otestovat
 # - export ze single-page dokumentu
 #
 
 # ToDo
+# Opravit akci edit meta - dočasný soubor je někde v pytli - binec dělá asi realpath nebo co..
 # přepracovat použití djvudump na djvm -l (je rychlejší..)
 # implementovat kontrolu do funkce todjvu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
 # - přidat kontrolu do akce insert na duplicitní soubory při vkládání
@@ -131,8 +136,6 @@ EXIFTOOL=$(which exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
 TESSERACT=$(which tesseract)
 [ ! -x "${TESSERACT}" ] && exit 31
-XMLSTARLET=$(which xmlstarlet)
-[ ! -x "${XMLSTARLET}" ] && exit 25
 IDENTIFY=$(which identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
 CONVERT=$(which convert)
@@ -225,7 +228,7 @@ function potvrdit {
     esac
 }
 
-# ToDo
+# TO REMOVE - meta
 function setmeta {
 	# Funkce pro nastavení meta atrinutů
 	# $1 - svazek
@@ -274,118 +277,54 @@ function escape_path {
 }
 
 function printmeta {
-	# Funkce pro výpis meta atributů
 	# $1 - svazek
 	# $2 - identifikátor, klíčové slovo 'all' nebo atribut
-	# $3 - atribut, nebo klíčové slovo 'all' (default)
-	# není-li určena stránka ani key vypíše pro celý dokument
-
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
-
-	local CHARSTRING="$2"
-	local CHARCOUNT=$((${#CHARSTRING} + 1))
-	local CHARPOS=0
-	local STRPOS=0
-	while [ "${CHARCOUNT}" -gt "0" ] ; do
-		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
-			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
-				log 1 "printmeta: Soubor... -${PAGENAME}-"
-				local STRPOS="${CHARPOS}"
-				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
-				log 1 "printmeta: CHARSTRING.. ${CHARSTRING}"
-				local CHARCOUNT=$((${#CHARSTRING} + 1))
-				log 1 "printmeta: CHARCOUNT.. ${CHARCOUNT}"
-			;;
-		esac
-		local CHARPOS=$((CHARPOS + 1))
-		local CHARCOUNT=$((CHARCOUNT - 1))
-	done
-	if [ -z "${PAGENAME}" ] ; then
-		local TEMP=${CHARSTRING##+([[:blank:]])}
-		local IDPAGE=${TEMP%%+([[:blank:]])*}
-		local CHARSTRING=${TEMP#${IDPAGE}}
-		local ATTR=${CHARSTRING##+([[:blank:]])}
-		log 1 "printmeta: Meta atrinuty pro stránku IDPAGE -${IDPAGE}- parametr ATTR -${ATTR}-"
-	else
-		local NAMEPAGE=${PAGENAME##+([[:blank:]])}
-		local TARGETDIR=${CHARSTRING##+([[:blank:]])}
-		log 1 "printmeta: Meta atributy stránky NAMEPAGE -${NAMEPAGE}- parametr ATTR -${ATTR}-"
-	fi
-
-if [ ! -z "${NAMEPAGE}" ] ; then
-	local PAGENAME=$(identifyname "${SOURCE}" "${NAMEPAGE}")
-	local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
-	if [ ! -z "${META}" ] ; then
-		echo "# select '${NAMEPAGE}'"
-		echo -e "${META}"
-		echo -e "\n."
-	fi
-elif [ ! -z "${IDPAGE}" ] && [ "${IDPAGE}" != "all" ]; then
-	local PAGENAME=$(identifyname "${SOURCE}" "${IDPAGE}")
-	local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
-	if [ ! -z "${META}" ] ; then
-		echo "# select ${IDPAGE}"
-		echo -e "${META}"
-		echo -e "\n."
-	fi
-elif [ -z "${IDPAGE}" ] && [ -z "${NAMEPAGE}" ]; then
-	local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
-	if [ ! -z "${META}" ] ; then
-		echo "# select"
-		echo -e "${META}"
-		echo -e "\n."
-	fi
-else
-	local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
-	if [ ! -z "${META}" ] ; then
-		echo "# select"
-		echo -e "${META}"
-		echo -e "\n."
-	fi
-	for i in $(seq $(lastpage ${SOURCE})) ; do
-		local META=$(${DJVUSED} "${SOURCE}" -e "select $i; print-meta" | sed 's/\\/\\0/g')
-		if [ ! -z "${META}" ] ; then
-			echo "# select $i"
-			echo -e "${META}"
-			echo -e "\n."
-		fi
-	done
-fi
-#echo "SOURCE -${SOURCE}- IDPAGE -${IDPAGE}- NAMEPAGE -${NAMEPAGE}- parametr ATTR ${ATTR}" >> /dev/stderr
-#exit 0
+	case "${2}" in
+		all) printf "printmeta: All meta attributes for %s\n" "${FILE}" >> ${LOG}
+			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
+			if [ ! -z "${META}" ] ; then
+				echo "#"
+				echo -e "${META}"
+				echo -e "\n."
+			fi
+			for i in $(seq $(lastpage ${SOURCE})) ; do
+				local PAGENAME=$(identifyname "${SOURCE}" "${i}")
+				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
+				if [ ! -z "${META}" ] ; then
+					echo "#$i '${PAGENAME}'"
+					echo -e "${META}"
+					echo -e "\n."
+				fi
+			done
+		;;
+		global) printf "printmeta: Global meta attributes from %s\n" "${FILE}" >> ${LOG}
+			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
+			if [ ! -z "${META}" ] ; then
+				echo "#"
+				echo -e "${META}"
+				echo -e "\n."
+			fi
+		;;
+		+([[:digit:]])|*.djvu) printf "printmeta: Meta attributes for page %s from %s\n" "${2}" "${FILE}" >> ${LOG}
+			local PAGENAME=$(identifyname "${SOURCE}" "${2}")
+			if [ ! -z "${PAGENAME}" ] ; then
+				local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
+				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
+				if [ ! -z "${META}" ] ; then
+					echo "#${IDPAGE} '${PAGENAME}'"
+					echo -e "${META}"
+					echo -e "\n."
+				fi
+			fi
+		;;
+		*) printmeta "${SOURCE}" all
+		;;
+	esac
 }
 
-# TODO - meta
-function unsetmeta {
-	# ToDo
-	# Funkce pro odstranění meta atributu
-	# $1 - svazek
-	# $2 - identifikátor, klíčové slovo nebo soubor
-	# $3 - key
-	identifypage ${1} ${2}
-	local NAMEPAGE=$(identifyname ${1} $?)
-	if [ "${NAMEPAGE}" == "" ] ; then
-		echo "Odstraňuji globální atribut.."
-		${DJVUSED} ${1} -e "print-meta" > ${TEMPDIR}/${1/.djvu/.temp}
-		grep -v "^$2[[:blank:]]" ${TEMPDIR}/${1/.djvu/.temp} >> $TEMPDIR/${1/.djvu/.meta}
-		potvrdit && ${DJVUSED} ${1} -e "set-meta $TEMPDIR/${1/.djvu/.meta}; save"
-	elif [ "${3}" == "" ] ; then
-		echo "Odstraňuji všechny meta informace ze stránky.."
-		potvrdit && ${DJVUSED} ${1} -e "select ${NAMEPAGE}; remove-meta; save"
-	elif [ "${2}" == "global" ] ; then
-		echo "Odstraňuji všechny globální meta informace.."
-		potvrdit && ${DJVUSED} ${1} -e "remove-meta; save"
-	else
-		echo "Odstraňuji atribut ${3} z meta informací stránky ${NAMEPAGE}"
-		echo "$1 - $2 - $3 - $NAMEPAGE"
-		${DJVUSED} ${1} -e "select ${NAMEPAGE}; print-meta" > ${TEMPDIR}/${NAMEPAGE/.djvu/.temp}
-		grep -v "^$3[[:blank:]]" ${TEMPDIR}/${NAMEPAGE/.djvu/.temp} >> ${TEMPDIR}/${NAMEPAGE/.djvu/.meta}
-		potvrdit && ${DJVUSED} ${1} -e "select ${NAMEPAGE}; set-meta $TEMPDIR/${NAMEPAGE/.djvu/.meta}; save"
-	fi
-}
-
-function import {
+function djvuimport {
 	# Import nevkládá nové stránky, ale importuje soubory textové vrstvy
 	# $1 - DjVu file
 	# $2 - soubor identifikátor + cílový adresář
@@ -393,15 +332,18 @@ function import {
 	#echo "2- ${2}" >> /dev/stderr
 	#echo "3- ${3}" >> /dev/stderr
 	local SOURCE=$(${REALPATH} -m -P "${1}")
+	echo "djvuimport: SOURCE ${SOURCE}" >> /dev/stderr
 	local FILE="${SOURCE##*/}"
 	if [ -z "${2}" ] ; then
 		local FROM=$(${REALPATH} -m -P "$(pwd)")
+		echo "djvuimport: FROM ${FROM}" >> /dev/stderr
 	else
 		local FROM=$(${REALPATH} -m -P "${2}")
+		echo "djvuimport: FROM ${FROM}" >> /dev/stderr
 	fi
 
 	if [ -d "${FROM}" ] ; then
-		local LIST=$(list "${SOURCE}")
+		local LIST=$(djvuinfo "${SOURCE}" pages)
 		local IFS_BAK=$IFS
 		local IFS=$'\n'
 		for i in  ${LIST} ; do
@@ -453,7 +395,7 @@ function import {
 			;;
 			\#) echo "import: import meta atribute file" >> /dev/stderr
 				META="yes"
-				importmetaall "${SOURCE}" "${FROM}"
+				importmeta "${SOURCE}" "${FROM}"
 				return 0
 			;;
 			[[:alpha:]]) echo "import: meta TODO atribute file for one page - not implemented" >> /dev/stderr
@@ -461,7 +403,7 @@ function import {
 				local FROMFILE="${FROM##*/}"
 				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
 				log 1 "import: Importuji data do stránky ${FROMFILE}"
-				local LIST=$(list "${SOURCE}")
+				local LIST=$(djvuindo "${SOURCE}" pages)
 				local IFS_BAK=$IFS
 				local IFS=$'\n'
 				for i in  ${LIST} ; do
@@ -473,7 +415,7 @@ function import {
 								importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
 							;;
 							*.meta) META="yes"
-								importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}"
+								importmeta "${SOURCE}" "${PAGENAME}" "${FROM}"
 							;;
 							*.xml) XML="yes"
 								importxmlpage "${SOURCE}" "${FROM}"
@@ -496,7 +438,7 @@ function import {
 	fi
 }
 
-function export {
+function djvuexport {
 	# $1 - DjVu file
 	# $2 - identifikátor + cílový adresář
 	local SOURCE=$(${REALPATH} -m -P "${1}")
@@ -504,6 +446,10 @@ function export {
 
 	# Parsing $2
 	local CHARSTRING="$2"
+	if [ "${CHARSTRING}" == "" ] ; then
+		help keywords-export
+		exit 0
+	fi
 	local CHARCOUNT=$((${#CHARSTRING} + 1))
 	local CHARPOS=0
 	local STRPOS=0
@@ -530,8 +476,7 @@ function export {
 			local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
 			if [ -z "${IDPAGE}" ] ; then
 				case "${PAGENAME%%\ *}" in
-					meta) echo "exportuji vybranou meta stránku"
-						printmeta "${SOURCE}" "${PAGENAME#* }"
+					meta) printmeta "${SOURCE}" "${PAGENAME#* }"
 						return 0
 					;;
 					*) echo "export: In ${FILE} is not any page identificated by ${PAGENAME}"  >> /dev/stderr &&  exit 1
@@ -562,7 +507,7 @@ function export {
 						return 0
 					fi
 				;;
-				meta) printmeta "${SOURCE}" all
+				meta) printmeta "${SOURCE}" "${TARGETDIR}"
 					return 0
 				;;
 				outline) dsedtooutline "${SOURCE}"
@@ -570,8 +515,20 @@ function export {
 				;;
 				*) log 1 "export: Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
 					local NAMEPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
-					[ -z "${NAMEPAGE}" ] && echo "export: In ${FILE} is not any page on position ${IDPAGE}"  >> /dev/stderr &&  exit 1
-					local TARGETDIR=$(targetdir "${TARGETDIR}")
+					if [ -z "${NAMEPAGE}" ] ; then
+						# djvutool bundle.djvu export
+						if [ -e "${IDPAGE}" ] ; then
+							if [ -d "${IDPAGE}" ] ; then
+								djvuexport "${SOURCE}" "all ${IDPAGE}"
+							else
+								echo "export: In ${FILE} is not any page on position ${IDPAGE}"  >> /dev/stderr &&  exit 1
+							fi
+						else
+							djvuexport "${SOURCE}" "all ${IDPAGE}"
+						fi
+					else
+						local TARGETDIR=$(targetdir "${TARGETDIR}")
+					fi
 				;;
 			esac
 		else
@@ -624,43 +581,6 @@ function exportdjvuall {
 	exportxmlbundle "${1}" "${2}"
 	exportmetabundle "${1}" "${2}"
 	dsedtooutline "${1}" > "${2}/${FILE/.djvu/.outline}"
-}
-
-# Odstranit? Výstup obsahu přebírají funkce edit a export
-# a generování šablony přebere akce template
-# a výpis všech stránek akce list
-function exportoutline {
-	# $1 - DjVu file - full path
-	# $2 - parameter
-	case "${2}" in
-		out) dsedtooutline "${1}"
-		;;
-		print) local TABS='        '
-			${DJVUSED} "${1}" -e "print-outline" | sed -n '{
-			s_(_<element>_g
-			s_)_</element>_g
-			p
-		}' | tr '\n' ' ' | sed 's_\\_\\0_g' | ${XMLSTARLET} pyx | while read line ; do
-			case "$line" in
-				-|-bookmarks)
-				;;
-				\(element) local LEVEL="$LEVEL$TABS"
-				;;
-				\)element) local LEVEL="${LEVEL%${TABS}}"
-				;;
-				*) local OUTPUT="${LEVEL}${line#-}" && echo -e "${OUTPUT#${TABS}${TABS}}"
-				;;
-			esac
-		done
-		;;
-		dump) ${DJVUSED} "${1}" -e "print-outline"
-		;;
-		order) ${DJVM} -l "${1}" |  awk '{if (NR>2) print "\"\" \""$3"\""}'
-		;;
-		name) ${DJVUSED} "${1}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print "\"\" \""$2"\""}'
-		;;
-		*) help keywords-outline
-	esac
 }
 
 function exportdsedbundle {
@@ -810,36 +730,6 @@ function importmetaall {
 	${DJVUSED} "${1}" -e "select; set-meta ${2}; save"
 }
 
-function importoutline1 {
-	# $1 - DjVu file - full path
-	# $2 - outline file
-	parseoutline "${2}"
-	local TARGET="${TEMPDIR}/outline.dsed"
-	local CONTENT=$(tabs "${TARGET}" | od -A n -t c | tr '\n' '+' | sed 's/+//g' )
-	local COUNT=${#CONTENT}
-	local POS=0
-	local STEP=4
-	local OUTLINE=""
-	while [ "${COUNT}" -gt "0" ]
-	do
-		local STRING="${CONTENT:${POS}:$STEP}"
-		local CHAR="${STRING##+([[:blank:]])}"
-#		echo "${#STRING} -${STRING}-" >> /dev/stderr
-#		echo "${#CHAR} -${CHAR}-" >> /dev/stderr
-		if [ -z "${CHAR}" ] ; then
-			local OUTLINE="${OUTLINE} "
-		elif [ "${#CHAR}" == "3" ] ; then
-			local OUTLINE="${OUTLINE}\\${CHAR}"
-		else
-			local OUTLINE="${OUTLINE}${CHAR}"
-		fi
-		local POS=$((POS + ${STEP}))
-		local COUNT=$((COUNT - ${STEP}))
-	done
-	echo "${OUTLINE}" | tee > ${TEMPDIR}/final_outline.dsed
-	${DJVUSED} "${1}" -e "set-outline ${TEMPDIR}/final_outline.dsed; save"
-}
-
 function encode {
 	# Funkce průběžně konvertuje unicode znaky do číselné podoby
 	while read -n 1 a
@@ -857,58 +747,6 @@ function encode {
 		fi
 	fi
 	done
-}
-
-
-# Funkce encode, která provádí konverzi obsahu souboru asi je zbytečná...
-function encode1 {
-	echo "encode: Jsem tu" >> /dev/stderr
-	local SOURCE="${1}"
-	local STRING=$(cat ${SOURCE}| tr '\n' ' ')
-	local COUNT=0
-	local IFS="\ "
-	while [ "${COUNT}" -lt "${#STRING}" ] ; do
-	CHAR=($( echo "${STRING:${COUNT}:1}" | od -A n -t c ))
-#	echo "${#CHAR[@]}" >> /dev/stderr
-	if [ "${#CHAR[@]}" -gt "2" ] ; then 
-#		echo "\\${CHAR[0]}\\${CHAR[1]}" >> /dev/stderr
-		echo -n "\\${CHAR[0]}\\${CHAR[1]}"
-	elif [ "${#CHAR[@]}" == "1" ] ; then 
-		echo -n "\ "
-	else
-		if [ "${#CHAR[0]}" == "0" ] ; then
-			echo -n " "
-		else
-			echo -n "${CHAR[0]}"
-		fi
-	fi
-	local COUNT=$((COUNT + 1))
-	done
-}
-
-function importoutline2 {
-	local TARGET="$1"
-	local IFS=''
-	local TAB=0
-	echo "(bookmarks ("
-	sed -n '
-	s|\ \ \ \ |\t|g
-	p
-	' "${1}" | while read y
-	do
-		local TABS="${y%%\"*}"
-		if [ "${TAB}" -gt "${#TABS}" ] ; then
-			echo "( ${y}"
-			local TAB=$((TAB - 1))
-		elif  [ "${TAB}" -lt "${#TABS}" ] ; then
-			echo "( ${y} )"
-			echo ")"
-			local TAB=$((TAB + 1))
-		else
-			echo "( ${y}"
-		fi
-	done
-	echo ") )"
 }
 
 function dsedtooutline {
@@ -971,65 +809,6 @@ function outlinetodsed {
 #	exit 0
 }
 
-function parseoutline1 {
-	# $1 - outline file
-	local TARGET="${TEMPDIR}/outline.dsed"
-	# počet mezer odpovídá použitému odsazení
-	local TABS='        '
-	# počet závorek ovlivňuje počet zpracovatelných úrovní
-	local O='(((((('
-	local C='))))))'
-
-	local LEVEL=""
-	local IFS=''
-	local LINES=1
-	printf '%s' '(bookmarks ' >> ${TARGET}
-	sed "s/\t/$TABS/g" "${1}" | while read line ; do
-		local NEW="${line##+( )}"
-		local TAB="${line%${NEW}}"
-		if [ "${line}" == "" ] ; then
-			if [ "${#LEVEL}" -gt "0" ] ; then
-				local COUNT=0
-				while [ "${#LEVEL}" -gt "0" ] ; do
-					local COUNT=$((COUNT+1))
-					local LEVEL="${LEVEL%${TABS}}"
-				done
-				printf '%s' ${C:0:$((COUNT+1))} >> ${TARGET}
-			fi
-		elif [ "${#LEVEL}" -eq "${#TAB}" ] ; then
-			if [ "${LINES}" == "1" ] ; then
-				printf '%s' '(' >> ${TARGET}
-				printf '%s' ${line##+([[:blank:]])} >> ${TARGET}
-			else
-				printf '%s' ')(' >> ${TARGET}
-				printf '%s' ${line##+([[:blank:]])} >> ${TARGET}
-			fi
-			local LEVEL=${TAB}
-		elif [ "${#LEVEL}" -gt "${#TAB}" ] ; then
-			local COUNT=0
-			while [ "${#LEVEL}" -gt "${#TAB}" ] ; do
-				local COUNT=$((COUNT+1))
-				local LEVEL="${LEVEL%${TABS}}"
-			done
-			printf '%s' ${C:0:$(($COUNT+1))} >> ${TARGET}
-			printf '%s' '(' >> ${TARGET}
-			printf '%s' ${line##+([[:blank:]])} >> ${TARGET}
-		elif [ "${#TAB}" -gt "${#LEVEL}" ] ; then
-			local COUNT=0
-			while [ "${#TAB}" -gt "${#LEVEL}" ] ; do
-				local COUNT=$((COUNT+1))
-				local LEVEL="${LEVEL}${TABS}"
-			done
-			printf '%s' ${O:0:$COUNT} >> ${TARGET}
-			printf '%s' ${line##+([[:blank:]])} >> ${TARGET}
-		else
-			echo "Jiná varianta" >> /dev/stderr
-		fi
-		local LINES=$((LINES+1))
-	done
-	printf '%s' '))' >> ${TARGET}
-	echo "LINES -${LINES}- COUNT -${COUNT}- LEVEL -${LEVEL}- TAB -${TAB}-" >> /dev/stderr
-}
 
 function importdsedall {
 	case "${DSED}" in
@@ -1071,6 +850,41 @@ function importdsedpage {
 }
 
 function importmeta {
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+	local FROM=$(${REALPATH} -m -P "${2}")
+	local FROMFILE="${FROM##*/}"
+	grep '^#' "${FROM}" | while read line ; do
+		echo "$line" >> /dev/stderr
+		local NAMEPAGE=( $line )
+		case "${#NAMEPAGE[@]}" in
+			2) local PAGENAME=$(identifyname "${SOURCE}" "${NAMEPAGE[1]//\'/}")
+				if [ -z "${PAGENAME}" ] ; then
+					echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[1]} not valid" >> /dev/stderr
+				else
+					awk "/.\ '${PAGENAME}'$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
+					${DJVUSED} "${1}" -e "select ${PAGENAME}; set-meta ${TEMPFILE}" -s
+				fi
+			;;
+			1) if [ "${NAMEPAGE[0]}" == "#" ] ; then
+					awk "/^#$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
+					${DJVUSED} "${1}" -e "select ; set-meta ${TEMPFILE}" -s
+				else
+					local PAGENAME=$(identifyname "${SOURCE}" "${NAMEPAGE[0]:1}")
+					if [ -z "${PAGENAME}" ] ; then
+						echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[0]:1} not valid" >> /dev/stderr
+					else
+						awk "/^#${NAMEPAGE[0]:1}$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
+						${DJVUSED} "${1}" -e "select ${PAGENAME}; set-meta ${TEMPFILE}" -s
+					fi
+				fi
+			;;
+		esac
+	done
+}
+
+function importmeta1 {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
 	# $3 - source DSED file - full path
@@ -1312,18 +1126,18 @@ function identifyname {
 	local FILE="${SOURCE##*/}"
 	local IDENTIFICATOR="${2##+([[:blank:]])}"
 	if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-		log 1 "identifyname: What is name of page on position ${IDENTIFICATOR} in DjVu file ${FILE}?"
+#		log 1 "identifyname: What is name of page on position ${IDENTIFICATOR} in DjVu file ${FILE}?"
 		local SEARCH="\[P${IDENTIFICATOR}\]"
 	else
-		log 1 "identifyname: Is page with name ${IDENTIFICATOR} in DjVu file ${FILE}?"
+#		log 1 "identifyname: Is page with name ${IDENTIFICATOR} in DjVu file ${FILE}?"
 		local SEARCH="\{${IDENTIFICATOR}\}"
 	fi
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $2}')
 	if [ -z "${OUTPUT}" ] ; then
-		log 1 "identifyname: FAIL - for DjVu bundle ${FILE} is identificator ${IDENTIFICATOR} is NOT VALID."
+		printf "identifyname: FAIL - for DjVu bundle %s identificator %s is NOT VALID.\n" "${FILE}" "${IDENTIFICATOR}" >> ${LOG}
 		return 0
 	else
-		log 1 "identifyname: OK - name page is ${OUTPUT}"
+		printf "identifyname: OK - name page is %s\n" "${OUTPUT}" >> ${LOG}
 		echo -n "${OUTPUT}"
 	fi
 }
@@ -1336,21 +1150,21 @@ function identifypage {
 	local FILE="${SOURCE##*/}"
 	local IDENTIFICATOR="${2##+([[:blank:]])}"
 	if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-		log 1 "identifypage: Has DjVu file ${FILE} page on position ${IDENTIFICATOR}?"
+#		log 1 "identifypage: Has DjVu file ${FILE} page on position ${IDENTIFICATOR}?"
 		local SEARCH="\[P${IDENTIFICATOR}\]"
 	else
-		log 1 "identifypage: Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
+#		log 1 "identifypage: Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
 		local SEARCH="\{${IDENTIFICATOR}\}"
 	fi
 #	echo "${SEARCH}" >> /dev/stderr
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $3}')
 #	echo "${OUTPUT}" >> /dev/stderr
 	if [ -z "${OUTPUT}" ] ; then
-		log 1 "identifypage: FAIL - for DjVu bundle ${FILE} identificator ${IDENTIFICATOR} is NOT VALID."
+		printf "identifypage: FAIL - for DjVu bundle %s identificator %s is NOT VALID.\n" "${FILE}" "${IDENTIFICATOR}" >> ${LOG}
 		return 0
 	else
 		local ORDER="${OUTPUT//+([\]P\[ ])/}"
-		log 1 "identifypage: OK order page is ${ORDER}."
+		log 1 "identifypage: OK order page is %s.\n" "${ORDER}" >> ${LOG}
 		echo -n "${ORDER}"
 	fi
 }
@@ -1365,11 +1179,6 @@ function lastpage {
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
 	echo -n "${OUTPUT}"
 	
-}
-
-function list {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
 }
 
 function deletepage {
@@ -1387,7 +1196,7 @@ function deletepage {
 	fi
 }
 
-function rotatepage {
+function djvurotate {
 	# $1 - soubor se kterým se pracuje
 	# $2 - číslo, nebo název strany která se má rotovat
 	# $3 - hodnota rotace
@@ -1410,10 +1219,10 @@ Každá jiná hodnota parametru je ignorována."""
 		case "${PARAMS[$((${#PARAMS[@]} -1))]}" in
 			0|1|2|3|180|left|right) # echo "Jak mám otáčet $1" >> /dev/stderr
 				local ROTATE="${PARAMS[$((${#PARAMS[@]} -1))]}"
-#				echo "rotatepage: před ořezáním -$2-"
+#				echo "rotate: před ořezáním -$2-"
 				local TEMP="${2% ${ROTATE}}"
 				local IDPAGE=${TEMP##+([[:blank:]])}
-#				echo "rotatepage: po ořezání -${IDPAGE}-"
+#				echo "rotate: po ořezání -${IDPAGE}-"
 			;;
 			*) echo "Neplatný parametr rotace - ${2}" >> /dev/stderr
 				exit 1
@@ -1430,7 +1239,7 @@ Každá jiná hodnota parametru je ignorována."""
 			;;
 		esac
 	fi
-#	echo "rotatepage: ${IDPAGE} - ${ROTATE}" >> /dev/stderr
+#	echo "rotate: ${IDPAGE} - ${ROTATE}" >> /dev/stderr
 
 	if $(identifybundle "${1}") ; then
 		if [ -z "${IDPAGE}" ] ; then
@@ -1509,7 +1318,7 @@ Každá jiná hodnota parametru je ignorována."""
 	fi
 }
 
-function move {
+function djvumove {
 	# $1 - DjVu file
 	# $2 - Parametry
 	#	zdroj : identifikátor pozice
@@ -2015,41 +1824,102 @@ function move {
 function djvuinfo {
 	# $1 - soubor
 	# $2 - parametry
-#	echo "djvuinfo: ${#@}" >> /dev/stderr
-#	echo "djvuinfo: Soubor ${1}" >> /dev/stderr
-#	echo "djvuinfo: Parametry ${2}" >> /dev/stderr
-	# Ověřuji, je-li soubor typu svazek..
-	if $(identifybundle "${1}") ; then
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	if $(identifybundle "${SOURCE}") ; then
 		local PAGES="none"
 	else
-		local PAGES=$(lastpage "${1}")
+		local PAGES=$(lastpage "${SOURCE}")
 	fi
 	if [ -z "${2}" ] ; then
-		echo "${PAGES}"
-	elif [ "${2}" == "all" ] ; then
-		echo "Info pro celý soubor.."
-		local INFO="DjVu pages"
-		echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${PAGES}\n" >> /dev/stderr
-		${EXIFTOOL} "${1}"
+		case "${PAGES}" in
+			none) local INFO="${FILE}"
+				echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu single-page\n"
+			;;
+			*) local INFO="${FILE}"
+				echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu bundle - ${PAGES} pages\n"
+			;;
+		esac
 	else
-		# extrakce stránky do dočasného adresáře..
-		local NAMEPAGE=$(identifyname "${1}" "${2}")
-		echo "djvuinfo: ${NAMEPAGE}" >> /dev/stderr
-		exportpage "${1}" "${NAMEPAGE} ${TEMPDIR}"
-		local INFO="DjVu pages"
-		echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${PAGES}\n" >> /dev/stderr
-		${EXIFTOOL} "${TEMPDIR}/${NAMEPAGE}"
+		case "${2}" in
+			exif) ${EXIFTOOL} "${SOURCE}"
+			;;
+			meta) printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
+			;;
+			pages) 	${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
+				return 0
+			;;
+			*) case "${2%%\ *}" in
+					meta) if [ "${2#* }" == "all" ] ; then
+							printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
+							return 0
+						elif [ "${2#* }" == "global" ] ; then
+							printmeta "${SOURCE}" global | grep -v '^[#.]\|^$'
+							return 0
+						else
+							printf "Meta atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
+							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							if [ -z "${NAMEPAGE}" ] ; then
+								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
+								exit 1
+							else
+								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								printf "Meta attributes from #%s page in DjVu bundle %s" "${IDPAGE}" "${FILE}" >> ${LOG}
+								printmeta "${SOURCE}" "${NAMEPAGE}" | grep -v '^[#.]\|^$'
+								return 0
+							fi
+						fi
+					;;
+					pages) if [ "${2#* }" == "all" ] ; then
+							${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
+							return 0
+						else
+							printf "View %s item from list %s" "${2#* }" "${FILE}" >> ${LOG}
+							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							if [ -z "${NAMEPAGE}" ] ; then
+								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
+								exit 1
+							else
+								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								printf " [P%d]:%s\n" "${IDPAGE}" "${NAMEPAGE}"
+								return 0
+							fi
+						fi
+					;;
+					exif) if [ "${2#* }" == "all" ] ; then
+							${EXIFTOOL} "${SOURCE}"
+							return 0
+						else
+							printf "Exif atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
+							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							if [ -z "${NAMEPAGE}" ] ; then
+								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
+								exit 1
+							else
+								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								PAGE="yes"
+								djvuexport "${1}" "${NAMEPAGE} ${TEMPDIR}"
+								local INFO="Page #${IDPAGE} from DjVu bundle"
+								echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${FILE}\n"
+								${EXIFTOOL} "${TEMPDIR}/${NAMEPAGE}"
+								return 0
+							fi
+						fi
+					;;
+				esac
+			;;
+		esac
 	fi
 }
 
 function help {
-	case "${1}" in
-		keywords-*|image|verbose) echo -n """Nápověda pro : """
-		;;
-		*) 
-		;;
-	esac
 	case "$1" in
+		algorithm) echo """Nápověda pro algoritmy.. ToDo
+		"""
+		;;
+		bundle) echo """Nápověda pro volbu typu svazku.. ToDo
+		"""
+		;;
 		page) echo """volba [1m-p[0m ([1m--page[0m)
 
   Extrakce DjVu stránky ze svazku při akci [2mexport[22m
@@ -2087,7 +1957,7 @@ Použitelné parametry:
   Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
 """
 		;;
-		dsed) echo """volba [1m-d[0m ([1m--dsed[0m)
+		dsed) echo """Option [1m-d[0m ([1m--dsed[0m)
 
   Extrakce skryté textové vrstvy DjVu stránky ve formátu pro djvused.
   Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
@@ -2211,9 +2081,8 @@ Použitelné parametry:
   uveden parametr -f (--force)
 """
 		;;
-		dpi) echo"""
-[1mParametr[0m
-         --dpi  <[2mčíslo[22m> Hodnota DPI, která se má použít při zpracování obrázku.
+		dpi) echo """
+[1mOption:[0m --dpi  <[2mčíslo[22m> Hodnota DPI, která se má použít při zpracování obrázku.
                                při konverzi. Optimální je zjistit hodnotu přímo ze vstupního
                                obrázku. Před nastavením této hodnoty pro finální konverzi. lze vyzkoušet
                                optimální nastavení na některém ze souborů s využitím parametru
@@ -2240,9 +2109,9 @@ Použitelné parametry:
         --lossy        100 - ignorují se plochy
 """
 		;;
-		keywords-export) echo """akce [1mexport[0m
+		keywords-export) echo """KEYWORD: [1mexport[0m
 
-  Export z DjVu svazku. O tom co bude předmětem exportu rozhodují další 
+  Export pages , meta attributtes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
   volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
   se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
   při volbě [3m-p[23m.
@@ -2304,15 +2173,26 @@ Použitelné parametry:
   svazku jedinečné.
 """
 		;;
-		keywords-info) echo """akce [1minfo[0m
+		keywords-info) echo """
+  KEYWORD [1minfo[0m
 
-  [4mVýpis informací o DjVu souboru[24m.
+  Print informations about DjVu bundle. Without parameters return number of pages.
+  If is DjVu file 'single-page', return 'none'.
 
-  [1m${0##*/}[0m [volby] <file> info [<num>|<name>]
+  [1m${0##*/}[0m [volby] {DjVu file} info [SUBKEY [<num>|<name>]]
 
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         file - jméno DjVu souboru
+         num  - order number of page in DjVu bundle
+         name - name of page in DjVu bundle
+
+  SUBKEYS:
+         [3mexif[23m - return exif info about DjVu file
+         [3mmeta[23m - return meta attribute keys from DjVu file
+        [3mpages[23m - return ordered list pages from DjVu bundle with names
+
+[3mNotice:[23m
+  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
+  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
+  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
 """
 		;;
 		move) echo """akce [1mfore[0m a [1mback[0m
@@ -2339,7 +2219,10 @@ Použitelné parametry:
     přejmenování - za název se přidá podtržítko a pořadové číslo.
 """
 		;;
+# ODSTRANIT VVVV
 		keywords-list) echo """akce [1mlist[0m
+
+Zrušeno, nahrazeno akcí info
 
   [4mSeznam stránek v DjVu souboru[24m.
 
@@ -2407,7 +2290,10 @@ Použitelné parametry:
           nastaveno globální natočení pro všechny stránky dokumentu.
 """
 		;;
+# ODSTRANIT VVVV
 		keywords-set) echo """akce [1mset[0m
+
+Zrušeno - nahrazeno akcemi edit a import
 
   [4mNastavení meta atributů[24m DjVu stránky, resp. celého svazku
 
@@ -2432,7 +2318,10 @@ CreationDate - Čas vytvoření dokumentu
   Další viz akce [2mprint[22m, [2mexport[22m, [2mimport[22m, [2munset[22m a manuál k tomuto skriptu.
 """
 		;;
+# ODSTRANIT VVVV
 		keywords-unset) echo """akce [1munset[0m
+
+Zrušeno - nahrazeno akcí edit a import
 
   [4mOdstranění meta atributů[24m DjVu stránky, resp. celého svazku
 
@@ -2452,7 +2341,10 @@ CreationDate - Čas vytvoření dokumentu
   klíče lze nastavit přes akci [2mset[22m.
 """
 		;;
+# ODSTRANIT VVVV
 		keywords-outline) echo """akce [1moutline[0m
+
+Zrušeno, nahrazeno akcí edit a export
 
   Pomocná akce pro výpis a export obsahu (bookmarks,outline) Djvu svazku.
 
@@ -2476,7 +2368,10 @@ CreationDate - Čas vytvoření dokumentu
   jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
 		;;
+# ODSTRANIT VVVV
 		keywords-print) echo """akce [1mprint[0m
+
+Zrušeno nahrazeno akcí export a info
 
   [4mVýpis klíčů a jejich obsahu[24m z metainformací uložených v Djvu svazku.
 
@@ -2497,29 +2392,39 @@ CreationDate - Čas vytvoření dokumentu
 """
 		;;
 		keywords) echo """
-  [1m${0##*/}[0m [volby] {DjVu svazek} <keyword> [-h|...]
+KEYWORDS:
 
-  [1m      keyword - popis akce[0m
+    delete - remove page from bundle
+fore, back - move, or insert pages into DjVu bundle
+    rotate - change orientation page or all pages DjVu bundle
+    export - export from DjVu bundle
+    import - import (content, meta attributtes, outline) into DjVu bundle 
+      edit - edit meta attributtes or outline in DjVu bundle
+      info - view info about DjVu bundle or selected page
+    rename - rename pages in DjVu bundle by pattern
 
-         delete - odstraní stránku ze svazku
-         insert - vloží novou stránku do svazku
-     [2mfore, back[22m - přesune stránku v rámci svazku
-         rotate - mění orientaci vybrané stránky
-            [2mset[22m - nastavuje metainformace DjVu stránek a svazku
-          [2mprint[22m - vypisuje metainformace z DjVu stránek a svazku
-          [2munset[22m - odstraňuje metainformace DjVu stránek i svazku
-         export - exportuje djvu stránku, dsed nebo xml soubor s obsahem
-                  textové vrstvy, náhled stránky v png, atp.
-         import - importuje do DjVu stránky či svazku obsah skryté textové
-                  vrstvy z xml stránky
-         info - importuje do DjVu stránky či svazku obsah skryté textové
-                  vrstvy z xml stránky
-           list - vypisuje seznam stránek DjVu svazku
-        outline - vypisuje obsah (outline, bookmarks) DjVu svazku
-         [2mrename[22m - přejmenování stránek v DjVu souboru dle nastaveného vzoru
+[3mNotice:[23m
+   For more description about any action or option you set on command line as next parameter option -h (--help)
+"""
+		;;
+		meta) echo """
+Export meta atrributů
 
-[3mPoznámka:[23m
-          Pro podrobnější nápovědu použijte volbu -h za klíčovým slovem
+  [1m${0##*/}[0m <svazek> export meta [<num>|<name>|all|global]
+  
+  global - globální meta atributy DjVu svazku
+     all - kompletní výpis atributů ke svazku
+         - výpis atributů stránky identifikované pořadovým číslem nebo jménem
+
+Syntaxe meta souboru:
+
+ #<num> '<name>'
+ key1 <description>
+ key2 ...
+ .
+
+Při importu stránky má jméno stránky přednost před pořadovým číslem. To se použije pouze tehdy, pokud identifikační jméno stránky chybí
+Pokud stránka žádné meta atributy nemá, vypíše se pouze prázdná šablona
 """
 		;;
 		rename) echo """ volba [1m-r[0m, [1m--rename[0m
@@ -2568,31 +2473,33 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
      xcf, tiff, pdf 
 """
 			;;
-		options) echo """
-"""
+		ocr) echo "Nápověda k OCR - ToDo"
+		;;
+		options) echo """Options:
+    -a|--algorithm Algorithm for separating mask of image (fore or back)
+xx  -b|--bundle    Setting type of DjVu bundle
+    -d|--dsed      Export hiddent text layer in native code for DjVused
+       --dpi       DPI input image for import (actions fore or back)
+    -f|--force     Force action
+       --clean     Params for convert image to DjVu with separate layers
+       --lossy
+       --lossless
+       --level
+    -h|--help      Main options for help about option, or action
+    -i|--image     Export .png image of page for use with DjVuWebEd
+??  -m|--meta      Export meta attributes from DjVu file
+    -o|--ocr       Application OCR
+    -p|--page      Export single DjVu page from bundle
+    -r|--rename    Pattern for action rename 
+xx  -t|--thumb     Creating thumbnails in DjVu bundle
+    -v|--verbose   
+    -x|--xml       Export hiddent text layer (XML) for use with DjVuWebEd"""
 		;;
 		*) echo """
-DJVUTOOL - tool for manipulation with DjVu files & bundles
+DJVUTOOL - tool to work with DjVu files & bundles
 
-Using:
-
-  [1m${0##*/}[0m [options] <DjVu file> {ACTION} [...]
-
-Options:
- -h, --help    Main options for get help about using option, or action
- -b|--bundle   Výsledekm zpracování bude kompaktní svazek ( default)
- -d|--dsed    Při akci export ukládat obsah textové vrstvy do souboru .dsed
- -f|--force   Vynucená akce
- -i|--indirect Výsledekm zpracování bude volný svazek
- -m|--meta     Při akci export ukládat meta informace z DjVu stránky či svazku do soubor s příponou .meta
- -p|--page     Vytažení celé stránky z DjVu svazku
- -x|--xml      Při akci export ukládat obsah textové vrstvy do souboru .xml
- -t|--thumb    Vygenerování náhledů v DjVu svazku, resp. při akci export vytažení náhledu do souboru s příponou .thumb (obrazová vrstva, kódvaná v  IW44)
-
-For list of all actions use next command:
-
-  [1m${0##*/}[0m [options] <DjVu file> -h
-"""
+Use:  [1m${0##*/}[0m [options] { [-h|--help] | <file> {KEYWORDS} [...] }
+""" && help options && help keywords
 		;;
 	esac
 }
@@ -2745,6 +2652,8 @@ do local POS=$((POS+1))
 			local TEMP=${VSTUP:$POS}
 			case "$TEMP" in
 				-h*|--help*) help algorithm && exit 0
+				;;
+				*) echo "Seru na tebe? $TEMP"
 				;;
 			esac
 			local NEXT="${TEMP#* }"
@@ -2937,8 +2846,9 @@ do local POS=$((POS+1))
 			local POS=$((POS+1))
 			local TEMP=${VSTUP:$POS}
 			case "$TEMP" in
-				-h*|--help*) ${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
-				exit 0
+				-h*|--help*) help ocr
+					${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
+					exit 0
 				;;
 			esac
 			local NEXT="${TEMP#* }"
@@ -3050,7 +2960,7 @@ do local POS=$((POS+1))
 					local POS=0
 				;;
 			esac
-			log 1 "Nastavuji ukecaný výstup"
+#			log 1 "Nastavuji ukecaný výstup"
 		;;
 		-x|--xml) # Volba pro akci export
 			local POS=$((POS+1))
@@ -3091,9 +3001,9 @@ do local POS=$((POS+1))
 				local TEMP="${OREZ%${CHARSTRING}}"
 				local KEY="${TEMP%%+([[:blank:]])}"
 			fi
-			log 1 "KEY -${KEY}-"
-			log 1 "FILE -${FILE}-"
-			log 1 "CHARSTRING -${CHARSTRING}-"
+#			log 1 "KEY -${KEY}-"
+#			log 1 "FILE -${FILE}-"
+#			log 1 "CHARSTRING -${CHARSTRING}-"
 		break
 		;;
 	esac
@@ -3119,9 +3029,6 @@ done
 				#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
 				case "${KEY}" in
 					delete) deletepage "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					exif) ${EXIFTOOL} "${FILE}"
 						exit 0
 					;;
 					insert) # ToDo - zpracovat ${CHARSTRING}
@@ -3160,24 +3067,19 @@ done
 						fi
 						exit 0
 					;;
-					set) setmeta "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					print) printmeta ${FILE} "${CHARSTRING}"
-						exit 0
-					;;
-					unset) unsetmeta ${FILE} "${CHARSTRING}"
+					print) # Nahrazeno akcí export
+						printmeta ${FILE} "${CHARSTRING}"
 						exit 0
 					;;
 					fore) MOVE="fore"
-						move "${FILE}" "${CHARSTRING}"
+						djvumove "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
 					back) MOVE="back"
-						move "${FILE}" "${CHARSTRING}"
+						djvumove "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					rotate) rotatepage "${FILE}" "${CHARSTRING}"
+					rotate) djvurotate "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
 					edit) case "${CHARSTRING}" in
@@ -3188,40 +3090,43 @@ done
 								outlinetodsed "${TEMPFILE}" | encode > "${TARGET/.djvu/.outline}"
 								${DJVUSED}  "${FILE}" -e "set-outline ${TARGET/.djvu/.outline}; save"
 							;;
-							meta) local TARGET="${TEMPDIR}/${FILE##*/}"
-								local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+							meta) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
 								printmeta "${FILE}" all > "${TEMPFILE}"
 								edit "${TEMPFILE}"
-#								outlinetodsed "${TEMPFILE}" | encode > "${TARGET/.djvu/.outline}"
-#								${DJVUSED}  "${FILE}" -e "set-outline ${TARGET/.djvu/.outline}; save"
+								djvuimport "${FILE}" "${TEMPFILE}"
+							;;
+							*) echo "meta stránky.. ${CHARSTRING}"
+								local NAMEPAGE=$(identifyname "${FILE}" "${CHARSTRING#* }") 
+								if [ ! -z "${NAMEPAGE}" ] ; then
+									local TARGET="${TEMPDIR}/${FILE##*/}"
+									local IDPAGE=$(identifypage "${FILE}" "${PAGENAME}") 
+									printmeta "${FILE}" "${NAMEPAGE}" >  "${TARGET/.djvu/.meta}"
+									if [ ! -z "$(head -c 1 ${TEMPFILE})" ] ; then
+										edit "${TARGET/.djvu/.meta}"
+									else
+										echo "#${IDPAGE} '${NAMEPAGE}'" > "${TARGET/.djvu/.meta}"
+										echo -e "\n\n." >> "${TARGET/.djvu/.meta}"
+										edit "${TARGET/.djvu/.meta}"
+									fi
+									djvuimport "${FILE}" "${TARGET/.djvu/.meta}"
+								fi
 							;;
 						esac
 						exit 33
 					;;
-					export) export "${FILE}" "${CHARSTRING}"
+					export) djvuexport "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					import) import "${FILE}" "${CHARSTRING}"
+					import) djvuimport "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					info)	echo "procházím"
-						djvuinfo "${FILE}" "${CHARSTRING}"
+					info) djvuinfo "${FILE}" "${CHARSTRING}"
 						exit 0
 					;;
-					list) list "${FILE}"
-						#importoutline "${CHARSTRING}"
-						#parseoutline "${FILE}" #"${CHARSTRING}"
-						exit 0
-					;;
-# Nahradit funkcí template - která bude generovat šablony...
-#					outline) exportoutline "${FILE}" "${CHARSTRING}"
-#						exit 0
-#					;;
 					rename)   # ToDo - zpracovat ${CHARSTRING}
 						exit 1
 					;;
-					*) echo "Jsem tu -${KEY}-" >> /dev/stderr
-						help keywords && exit 0
+					*) help keywords && exit 0
 					;;
 				esac
 			;;
