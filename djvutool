@@ -1807,7 +1807,8 @@ function setmeta {
 	local FILE="${SOURCE##*/}"
 	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
 	local CHARSET="${2}"
-	if [ "${CHARSET%%\ *}" == "all" ] ; then
+	local RANGE="${CHARSET%%\ *}"
+	if [ "${RANGE}" == "all" ] ; then
 		local ITEM="${CHARSET#* }"
 		local KEY=(${ITEM})
 		if [ "${#KEY[@]}" -lt "2" ] ; then
@@ -1833,13 +1834,29 @@ EOF
 				${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
 			done 1>/dev/null
 		fi
+	elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
+		local ITEM="${CHARSET}"
+		printf "set meta: Set global meta attribute key %s into DjVu bundle %s\n" "${RANGE}" "${FILE}" >> ${LOG}
+		printmeta "${SOURCE}" global | grep -v '^[#.]\|^$' > ${TEMPFILE}
+		ed ${TEMPFILE} 2>/dev/null <<-EOF
+/${RANGE}
+d
+w
+q
+EOF
+		ed ${TEMPFILE} 2>/dev/null <<-EOF
+i
+${ITEM}
+.
+w
+q
+EOF
+		${DJVUSED} "${SOURCE}" -e "select; set-meta ${TEMPFILE}" -s
 	else
-		local RANGE=($(range "${CHARSET%%\ *}"))
+		local IDPAGES=($(range "${RANGE}"))
 		local ITEM="${CHARSET#* }"
 		local KEY=(${ITEM})
-		for i in ${RANGE[@]} ; do
-			# export meta pro stránku $i
-			# příkaz ed pro editaci..
+		for i in ${IDPAGES[@]} ; do
 			printf "set meta: Set meta attribute key %s into page %s in DjVu bundle %s\n" "${KEY[0]}" "$i" "${FILE}" >> ${LOG}
 			printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
 			ed ${TEMPFILE} 2>/dev/null <<-EOF
@@ -1867,7 +1884,8 @@ function unsetmeta {
 	local FILE="${SOURCE##*/}"
 	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
 	local CHARSET="${2}"
-	if [ "${CHARSET%%\ *}" == "all" ] ; then
+	local RANGE="${CHARSET%%\ *}"
+	if [ "${RANGE}" == "all" ] ; then
 		local ITEM="${CHARSET#* }"
 		local KEY=(${ITEM})
 		printf "unset meta: Remove attribute key %s from all pages DjVu bundle %s\n" "${KEY[0]}" "${FILE}" >> ${LOG}
@@ -1881,13 +1899,21 @@ q
 EOF
 			${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
 		done  1>/dev/null
+	elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
+		printf "unset meta: Remove global attribute key %s from DjVu bundle %s\n" "${RANGE}" "${FILE}" >> ${LOG}
+		printmeta "${SOURCE}" global | grep -v '^[#.]\|^$' > ${TEMPFILE}
+		ed ${TEMPFILE} 2>/dev/null <<-EOF
+/${RANGE}
+d
+w
+q
+EOF
+		${DJVUSED} "${SOURCE}" -e "select; set-meta ${TEMPFILE}" -s
 	else
-		local RANGE=($(range "${CHARSET%%\ *}"))
+		local IDPAGES=($(range "${RANGE}"))
 		local ITEM="${CHARSET#* }"
 		local KEY=(${ITEM})
-		for i in ${RANGE[@]} ; do
-			# export meta pro stránku $i
-			# příkaz ed pro editaci..
+		for i in ${IDPAGES[@]} ; do
 			printf "unset meta: Remove attribute key %s from page %s\n" "${KEY[0]}" "$i" >> ${LOG}
 			printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
 			ed ${TEMPFILE} 2>/dev/null <<-EOF
@@ -2192,7 +2218,7 @@ Použitelné parametry:
 		;;
 		keywords-export) echo """KEYWORD: [1mexport[0m
 
-  Export pages , meta attributtes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
+  Export pages , meta attributes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
   volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
   se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
   při volbě [3m-p[23m.
@@ -2370,31 +2396,39 @@ Options:
 		keywords-meta) echo """
   KEYWORD [1mset[0m or [1munset[0m
 
-  Keywords [2mset[22m or [2munset[22m work only with one meta attribute key.
-  For view meta attribute use keyword [2minfo[22m and [2mexport[22m for output in format which is usable to [2mimport[22m. You may attributs [2medit[22m rightly too.
+  Keywords [2mset[22m or [2munset[22m work only with meta attribute key.
+  For view meta attribute use keyword [2minfo[22m and [2mexport[22m for output in
+  format which is usable to [2mimport[22m. You may [2medit[22m attribute too.
 
-  [1m${0##*/}[0m <DjVu> unset meta {all|<RANGE>} <KEY>
+  [1m${0##*/}[0m <DjVu> unset meta [all|<RANGE>] <KEY>
+
+  [1m${0##*/}[0m <DjVu> set meta [all|<RANGE>] <KEY> <VALUE>
+
+          all - item is set as meta attribute for every
+                page in DjVu bundle
+        RANGE - range specified pages
+          KEY - key name of meta attribute
+        VALUE - value of meta attribute key
 
 [3mNotice:[23m
-  * If is not set any KEY, do it nothing.
+  * If is not given key word [3mall[23m or [3mRANGE[23m of pages, is item KEY accepted
+    as global meta attribute of DjVu bundle
+  * Range is specified by order of pages in DjVu bundle. Separated by comma.
+    Hyphen is for limits from-to.
 
-  [1m${0##*/}[0m <DjVu> set meta {all|<RANGE>} <KEY> <VALUE>
-
-    all - set some meta attribute into all pages in DjVu bundle
-  RANGE - Range use comma for separate numbers order positions of pages in DjVu bundle, and hyphen for limitation from-to page range.
-
-Example using RANGE:
+RANGE example:
 
     [1m${0##*/}[0m bundle.djvu set meta 1,3,7-12 Creator 'Thomas Jefferson'
 
-Commonly KEYS:
-                   [3mTitle[23m - Title of DjVu page
-                 [3mCreator[23m - Creator DjVu bundle, or DjVu page
-            [3mCreationDate[23m - Time of create DjVu page
-                [3mKeywords[23m - Keywords for indexation DjVu file
-                  [3mannote[23m - Annotation about origin page (in ex.)
+KEY most common attributes:
+        [3mTitle[23m - Title of DjVu page or bundle
+      [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
+ [3mCreationDate[23m - Creation date of DjVu bundle or page
+     [3mKeywords[23m - Keywords for indexation DjVu file
+       [3mannote[23m - Notes about origin of document & etc.
+
 [3mNotice:[23m
-  * KEY is single word without diacritical chars, and spaces
+  * KEY is single word without diacritical chars and spaces
   * VALUE is normal text string
 """
 		;;
@@ -2455,8 +2489,8 @@ KEYWORDS:
 fore, back - move, or insert pages into DjVu bundle
     rotate - change orientation page or all pages DjVu bundle
     export - export from DjVu bundle
-    import - import (content, meta attributtes, outline) into DjVu bundle 
-      edit - edit meta attributtes or outline in DjVu bundle
+    import - import (content, meta attributes, outline) into DjVu bundle 
+      edit - edit meta attributes or outline in DjVu bundle
       info - view info about DjVu bundle or selected page
     rename - rename pages in DjVu bundle by pattern
 
@@ -3070,10 +3104,9 @@ done
 		*-h|*--help|-h*|--help*) if [ -z "${KEY}" ] ; then
 				help
 			else
-				echo "keywords-${KEY}" >> /dev/stderr
 				help "keywords-${KEY}"
 			fi
-			exit 77
+			exit 0
 		;;
 	esac
 
