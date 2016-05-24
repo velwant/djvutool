@@ -51,6 +51,7 @@ XML="${XML=no}"
 DPI="${DPI=300}"
 DSED="${DSED=no}"
 PAGE="${PAGE=no}"
+META="${META=no}"
 IMG="${IMG=no}"
 INDIRECT="${INDIRECT=no}"
 FORCE="${FORCE=skip}"
@@ -414,6 +415,14 @@ function djvuexport {
 		help keywords-export
 		exit 0
 	fi
+
+echo "${PAGE} ${DSED} ${XML} ${IMG} ${META} ${FORCE} option" >> /dev/stderr
+
+	if [ "${PAGE}" == "no" ] && [ "${DSED}" == "no" ] && [ "${XML}" == "no" ] && [ "${IMG}" == "no" ] && [ "${META}" == "no" ] &&  [ "${FORCE}" == "skip" ] ; then
+		printf "export: For export from DjVu bundle we must use any option\n" >> /dev/stderr
+		exit 1
+	fi
+
 	local CHARCOUNT=$((${#CHARSTRING} + 1))
 	local CHARPOS=0
 	local STRPOS=0
@@ -511,11 +520,16 @@ function djvuexport {
 #	echo "export: NAMEPAGE ${NAMEPAGE}">> /dev/stderr
 #	echo "export: TARGETDIR ${TARGETDIR}">> /dev/stderr
 #	echo "export: FORCE ${FORCE}">> /dev/stderr
-	[ "${PAGE}" != "no" ] && exportdjvupage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export page in DjVu format we must use option -p" >> /dev/stderr
-	[ "${DSED}" != "no" ] && exportdsedpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export text content from DjVu page in dsed format we must use option -d" >> /dev/stderr
-	[ "${XML}" != "no" ] && exportxmlpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
-	[ "${IMG}" != "no" ] && exportimgpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
-	[ "${META}" != "no" ] && exportmetapage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}" || echo "export: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
+
+	exportdjvupage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	exportdsedpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	#echo "export: For export text content from DjVu page in dsed format we must use option -d" >> /dev/stderr
+	exportxmlpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	#echo "export: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
+	exportimgpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	#echo "export: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
+	exportmetapage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	# echo "export: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
 }
 
 function exportdjvuall {
