@@ -368,7 +368,7 @@ function djvuimport {
 				local FROMFILE="${FROM##*/}"
 				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
 				log 1 "import: Importuji data do stránky ${FROMFILE}"
-				local LIST=$(djvuindo "${SOURCE}" pages)
+				local LIST=$(djvuinfo "${SOURCE}" pages)
 				local IFS_BAK=$IFS
 				local IFS=$'\n'
 				for i in  ${LIST} ; do
