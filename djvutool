@@ -1096,6 +1096,32 @@ function comparedjvu {
 	potvrdit && return 0 || return 1
 }
 
+function convertimg {
+	# Function for splitting multilayer image format
+	# $1 Image in multilayer format (tiff, mng or xcf (gimp)
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	if [ "${2}" ] ; then 
+		#cíl bude jinde...
+		local TOPATH=$(${REALPATH} -m -P "${2}")
+	else
+		#cíl bude v adresáři kde jsem teď..
+		local TOPATH=$(pwd "${SOURCE}")
+	fi
+	if [ -d "${TOPATH}/${FILE%.*}" ] ; then
+		echo "convertimg: WARNING Dir ${TOPATH}/${FILE%.*} exists. Do rewrite files?" >> /dev/stderr
+		potvrdit || return 1
+	else
+		mkdir "${TOPATH}/${FILE%.*}"
+	fi
+	convert "${SOURCE}" "${TOPATH}/${FILE%.*}/${FILE%.*}.png"
+	pushd "${TOPATH}/${FILE%.*}"
+		for i in $(ls -cr -1 *.png) ; do
+			filetodjvu "${i}" "${i/.png/.djvu}"
+		done
+	popd
+}
+
 function identifyname {
 	# Function return NAME of DjVu page in DjVu bundle
 	# $1 DjVu Bundle
@@ -3257,8 +3283,16 @@ done
 				echo "ToDo"
 				exit 1
 			;;
-			xcf|tiff|mng) echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
-				exit 1
+			gimp|xcf|tiff|mng) exit 0
+				if [[ "${2}" == "-h" ] || [ "${2}" == "--help" ]] ; then
+					echo "Nápověda?"
+					exit 0
+				else
+					echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
+					exit 0
+					convertimg ${FILE} ${2}
+					exit 0
+				fi
 			;;
 			xml|XML) echo "má-li první soubor příponu xml"
 				echo "ToDo"
@@ -3267,7 +3301,12 @@ done
 			unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
 				exit 1
 			;;
-			*) echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
+			*) if [ ! "${2}" ] ; then
+					echo '''Není předaný jiný parametr, bude se zpracovávat soubor podle typu ''' >> /dev/stderr
+					echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
+				else
+					echo "Zpracování souborů jako je $2 zatím není implementováno" >> /dev/stderr
+				fi
 				echo '''Pokud následuje djvu soubor'''
 				echo '''Pokud následuje adresář'''
 				echo '''to je existující soubor typu bundle a:
@@ -3279,7 +3318,6 @@ done
 				- soubor typu dsed má se zpracovat
 				- jiný soubor - obrázek, který se má převést a vložit
 				'''
-				echo "Zpracování souborů jako je $2 zatím není implementováno"
 				exit 1
 			;;
 		esac
