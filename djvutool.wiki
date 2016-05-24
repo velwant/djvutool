@@ -90,11 +90,13 @@ Akce pro změnu výchozího natočení DjVu stránek
 	''identifybundle''
 	''identifypage''
 :* djvuinfo
+	''djvuexport''
 	''identifybundle''
+	''identifyname''
+	''identifypage''
 	''lastpage''
-	?''exportpage''
 ::* dsedtooutline
-:* export
+:* djvuexport
 	''targetdir''
 	''identifypage''
 	''identifyname''
@@ -200,7 +202,7 @@ Akce pro změnu výchozího natočení DjVu stránek
 	'''setmeta'''
 	'''printmeta'''
 	'''unsetmeta'''
-	''move''
+	''djvumove''
 		''identifypage''
 		''identifyname''
 		''exportdjvupage''
@@ -214,35 +216,34 @@ Akce pro změnu výchozího natočení DjVu stránek
 				''testfile''
 				''potvrdit''
 				''getocr''
-	''rotatepage''
+	''djvurotate''
 		''identifybundle''
 			''testfile''
 		''potvrdit''
 		''identifyname''
-	''export''
+	''djvuexport''
 		'':targetdir''
 		''identifyname''
 		''identifypage''
 		''exportdjvuall''
 			''exportoutline''
 				''help''
-	''import''
+	''djvuimport''
 		''list''
 		''importdsedpage''
 		''importxmlpage''
 		''importmetapage''
 		''importmetaall''
 		''importoutline''
-			''parseoutline''
-			''tabs''
 	''djvuinfo''
+		''djvuexport''
 		''identifybundle''
+		''identifyname''
+		''identifypage''
 		''lastpage''
-		?''exportpage''
-	''list''
 	''exportoutline''
 		''help''
-:* move
+:* djvumove
 	''identifypage''
 	''identifyname''
 	''exportdjvupage''
@@ -253,12 +254,11 @@ Akce pro změnu výchozího natočení DjVu stránek
 			''testfile''
 			''potvrdit''
 			''getocr''
-:::* parseoutline
 :::* popd
 ::* potvrdit
 # printmeta
 :::* pushd
-:* rotatepage
+:* djvurotate
 	''identifybundle''
 	''potvrdit''
 # setmeta
