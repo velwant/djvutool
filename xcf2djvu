@@ -1,6 +1,9 @@
 #!/bin/bash
 # Skript pro konverzi .xcf souborů (Gimp) do .djvu
 # Původní název souboru - convert.sh
+# Dočasná utilita do doby, než bude do nástroje djvutool implementováno vytvoření djvu souboru z obrázku
+# TODO:
+# - aktuálně se všechny pomocné soubory dělají v tmp
 
 function todjvu {
     RANDOMKEY=$[ 8000 + $[ RANDOM % 1000 ]]
