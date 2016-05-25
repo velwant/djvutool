@@ -3162,7 +3162,7 @@ done
 				case "${KEY}" in
 					delete) deletepage "${FILE}" "${CHARSTRING}"
 						case "$?" in
-							2) printf "You must identificate page for remove by order (num), or name page in bundle.\n" >> /dev/stderr
+							2) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
 							;;
 						esac
 						exit 0
