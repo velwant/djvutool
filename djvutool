@@ -1196,6 +1196,8 @@ function deletepage {
 		local PAGE=$(identifypage "${1}" "${2}")
 		if [ ! -z "${PAGE}" ] ; then
 			${DJVM} -d "${1}" "${PAGE}"
+		else
+			return 2
 		fi
 	fi
 }
@@ -3159,6 +3161,10 @@ done
 				#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
 				case "${KEY}" in
 					delete) deletepage "${FILE}" "${CHARSTRING}"
+						case "$?" in
+							2) printf "You must identificate page for remove by order (num), or name page in bundle.\n" >> /dev/stderr
+							;;
+						esac
 						exit 0
 					;;
 					insert) # ToDo - zpracovat ${CHARSTRING}
