@@ -757,7 +757,12 @@ function dsedtooutline {
 }
 
 function outlinetodsed {
+	# $1 - temporary .outline file with TAB syntax
+	# Output is txt stream
 	local TARGET="$1"
+	# Remove comment from .outline file
+	sed --in-place '/^#/d' "${TARGET}"
+	[ $(grep -c ^ "${TARGET}") -eq "0" ] && return 1
 	local LEVEL="1"
 	IFS=''
 	echo -n "(bookmarks "
@@ -784,7 +789,7 @@ function outlinetodsed {
 	echo -n "${CONTENT%-----*}"
 	local ZAV=$(seq  -f "%1.0f" -s '' ${TEST})
 	echo "${ZAV//[[:digit:]]/)}"
-#	exit 0
+	return 0
 }
 
 
@@ -3221,8 +3226,20 @@ done
 					edit) case "${CHARSTRING}" in
 							outline) local TARGET="${TEMPDIR}/${FILE##*/}"
 								local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-								dsedtooutline "${FILE}" > "${TEMPFILE}"
-								edit "${TEMPFILE}"
+								printf '# Pravidla pro obsah souboru .outline :\n' >> "${TEMPFILE}"
+								printf '#  * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
+								printf '#  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n' >> "${TEMPFILE}"
+								printf '#  * Identifikátor vždy začíná znakem #\n' >> "${TEMPFILE}"
+								printf '#  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n' >> "${TEMPFILE}"
+								printf '#  * Veškerý text na řádcích začínajícím znakem # je považován za komentář\n' >> "${TEMPFILE}"
+								printf '#  * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
+								printf '#  * Soubor nesmí končit prázným řádkem!\n' >> "${TEMPFILE}"
+								printf '#  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
+								printf '#\n' >> "${TEMPFILE}"
+								printf '#"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
+								printf '#      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
+								dsedtooutline "${FILE}" >> "${TEMPFILE}"
+								editor "${TEMPFILE}"
 								outlinetodsed "${TEMPFILE}" | encode > "${TARGET/.djvu/.outline}"
 								${DJVUSED}  "${FILE}" -e "set-outline ${TARGET/.djvu/.outline}; save"
 							;;
