@@ -2571,15 +2571,96 @@ Options:
   * Subkey [3m'pages'[23m with an identificator of page return only item for this.
 """
 		;;
-# ODSTRANIT VVVV
-		keywords-set) help keywords-meta
+		keywords-print) echo """
+   Action [1mprint[0m
+
+   Action [2mprint[22m meta attribute keys or outline into stdout
+
+  [1m${0##*/}[0m <DjVu> print outline
+
+  [1m${0##*/}[0m <svazek> print <attr>
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
+  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         attr - jméno atributu
+         all  - klíčové slovo (vypsat vše)
+
+[3mPoznámka:[23m
+  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
+  lze do DjVu stránky či svazku importovat z externího souboru při
+  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
+"""
 		;;
-# ODSTRANIT VVVV
-		keywords-unset) help keywords-meta
+		keywords-set) echo """
+  ACTION [1mset[0m set meta attribute key or outline item from command line
+
+  [1m${0##*/}[0m <DjVu> set outline {<num>:[+|-]} <ITEM> <TARGET>
+ 
+  [1m${0##*/}[0m <DjVu> set meta [all|<RANGE>|<name>] <KEY> <VALUE>
+
+Example for set outline item:
+
+  [1m${0##*/}[0m bundle.djvu set outline : 'To page 12' '#12'
+
+Example for set meta attribute:
+
+  [1m${0##*/}[0m bundle.djvu set meta 1,3,7-12 Creator 'Thomas Jefferson'
+
+[3mNotice:[23m
+    * If is value of [3mORDER[23m zero or empty, is append ITEM
+      to end outline
+    * Plus (or minus), separed by colon, signalize a nesting or emersion
+      of the item, compare with level of a previous item
+    * If is not page identificator, is [3mKEY[23m set as shared
+      into shared_anno.iff
+
+   ITEM - text value of bookmark item
+ TARGET - name or order page which is target of item with hash (#)
+    num - item order in outline (see action [2mprint[22m)
+    all - attributte is set as meta attribute for every page in DjVu bundle
+   name - attributte is set to page specified by name"""
+		help key
+		help value
+		help range
 		;;
-# ODSTRANIT VVVV
+		keywords-unset) echo """
+  ACTION [1munset[0m remove item from outline or meta attributes
+
+  [1m${0##*/}[0m <DjVu> unset {outline <num> | meta [all|<RANGE>|<name>] <KEY>}
+
+Example for remove bookmark item:
+
+    [1m${0##*/}[0m bundle.djvu unset outline 1,3,7-12
+
+Examle for remove meta attribute:
+
+    [1m${0##*/}[0m bundle.djvu unset meta 1,3,7-12 Creator
+
+    all - item is set as meta attribute for every page in DjVu bundle
+    num - item order in outline (see action [2mprint[22m)
+   name - name page in DjVu bundle"""
+		help range
+		help key
+		help value
+		;;
+		range) echo """  RANGE - parameter for selection range pages, specified by order of pages
+           in DjVu bundle. Separated by comma. Hyphen is for limits from-to.
+           Example range: 1,3,7-12"""
+		;;
+		key) echo """    KEY - name of meta attribute, single word without diacritical chars
+          and spaces. Example commonly used keys:
+                 [3mTitle[23m - Title of DjVu page or bundle
+               [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
+          [3mCreationDate[23m - Creation date of DjVu bundle or page
+              [3mKeywords[23m - Keywords for indexation DjVu file
+                [3mannote[23m - Notes about origin of document & etc."""
+		;;
+		value) echo """  VALUE - is normal text string in quotes"""
+		;;
 		keywords-meta) echo """
-  KEYWORD [1mset[0m or [1munset[0m
+  ACTION [1mset[0m or [1munset[0m
 
   Keywords [2mset[22m or [2munset[22m work only with meta attribute key.
   For view meta attribute use keyword [2minfo[22m and [2mexport[22m for output in
@@ -2598,8 +2679,7 @@ Options:
 [3mNotice:[23m
   * If is not given key word [3mall[23m or [3mRANGE[23m of pages, is item KEY accepted
     as global meta attribute of DjVu bundle
-  * Range is specified by order of pages in DjVu bundle. Separated by comma.
-    Hyphen is for limits from-to.
+  * Range is 
 
 RANGE example:
 
@@ -2647,28 +2727,6 @@ Zrušeno, nahrazeno akcí edit a export
 """
 		;;
 # ODSTRANIT VVVV
-		keywords-print) echo """akce [1mprint[0m
-
-Zrušeno nahrazeno akcí export a info
-
-  [4mVýpis klíčů a jejich obsahu[24m z metainformací uložených v Djvu svazku.
-
-  [1m${0##*/}[0m <svazek> print [all]
-  [1m${0##*/}[0m <svazek> print <attr>
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         attr - jméno atributu
-         all  - klíčové slovo (vypsat vše)
-
-[3mPoznámka:[23m
-  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
-  lze do DjVu stránky či svazku importovat z externího souboru při
-  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
-"""
-		;;
 		meta) echo """
 Export meta atributů
 
@@ -3356,10 +3414,6 @@ done
 						fi
 						exit 0
 					;;
-					print) # Nahrazeno akcí export
-						printmeta ${FILE} "${CHARSTRING}"
-						exit 0
-					;;
 					fore) MOVE="fore"
 						djvumove "${FILE}" "${CHARSTRING}"
 						exit 0
@@ -3435,6 +3489,16 @@ done
 						exit 0
 					;;
 					info) djvuinfo "${FILE}" "${CHARSTRING}"
+						exit 0
+					;;
+					print)  case "${CHARSTRING%% *}" in
+							meta) printmeta "${FILE}" "${CHARSTRING#* }"
+							;;
+							outline) dsedtooutline "${FILE}"
+							;;
+							*) help keyword-print
+							;;
+						esac
 						exit 0
 					;;
 					rename)   # ToDo - zpracovat ${CHARSTRING}
