@@ -251,7 +251,7 @@ function printmeta {
 			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
 			if [ ! -z "${META}" ] ; then
 				echo "#"
-				echo -e "${META}"
+				echo -e "${META}" | tr '\000' '\\'
 				echo -e "\n."
 			fi
 			for i in $(seq $(lastpage ${SOURCE})) ; do
@@ -259,7 +259,7 @@ function printmeta {
 				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
 				if [ ! -z "${META}" ] ; then
 					echo "#$i '${PAGENAME}'"
-					echo -e "${META}"
+					echo -e "${META}" | tr '\000' '\\'
 					echo -e "\n."
 				fi
 			done
@@ -268,7 +268,7 @@ function printmeta {
 			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
 			if [ ! -z "${META}" ] ; then
 				echo "#"
-				echo -e "${META}"
+				echo -e "${META}" | tr '\000' '\\'
 				echo -e "\n."
 			fi
 		;;
@@ -279,7 +279,7 @@ function printmeta {
 				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
 				if [ ! -z "${META}" ] ; then
 					echo "#${IDPAGE} '${PAGENAME}'"
-					echo -e "${META}"
+					echo -e "${META}" | tr '\000' '\\'
 					echo -e "\n."
 				fi
 			fi
