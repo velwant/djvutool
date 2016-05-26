@@ -1913,6 +1913,35 @@ function range {
 	esac
 }
 
+function changemeta {
+	# Funkce, která provede modifikaci (případně založení) následujících argumentů..
+	# Na vstupu je soubor...
+	# Author
+	[ "$(grep -c ^Author ${1})" == "0" ] && printf '#Author "unknown"\n# - autor, původního dokumentu, je-li znám\n' >> "${1}"
+	[ "$(grep -c ^Title $1)" == "0" ] && printf '#Title "Název"\n# - zpracovávaného dokumentu\n' >> "${1}"
+	[ "$(grep -c ^Subject $1)" == "0" ] && printf '#Subject " "\n# - stručné info o čem to je\n' >> "${1}"
+	[ "$(grep -c ^Keywords $1)" == "0" ] && printf '#Keywords " "\n# Klíčová slova, která se vztahují k dokumentu, oddělena čárkou\n' >> "${1}"
+	[ "$(grep -c ^CreationDate $1)" == "0" ] && printf "CreationDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> "${1}"
+	if [ "$(grep -c ^Producer $1)" == "1" ] ; then
+		sed --in-place '/^Producer/,/$/d' "${1}"
+		printf 'Producer "djvutool 0.1 alpha (http://www.thewoodcraft.org)"\n' >> "${1}"
+	elif  [ "$(grep -c ^Producer $1)" == "0" ] ; then
+		printf 'Producer "djvutool 0.1 alpha (http://www.thewoodcraft.org)"\n' >> "${1}"
+	fi
+	if [ "$(grep -c ^ModDate $1)" == "1" ] ; then
+		sed --in-place '/^ModDate/,/$/d' "${1}"
+		printf "ModDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> "${1}"
+	elif  [ "$(grep -c ^ModDate $1)" == "0" ] ; then
+		printf "ModDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> "${1}"
+	fi
+	[ "$(grep -c ^Creator $1)" == "0" ] && printf '# Pokud nejde o zpracování původního bitmapového skenu, uveďte název aplikace kterou byl vytvořen původní dokument. Např.:\n#Creator "PDF Creator"\n' >> "${1}"
+	[ "$(grep -c ^note $1)" == "0" ] && printf '#note " "\n# - poznámka ke stránce\n' >> "${1}"
+	[ "$(grep -c ^annote $1)" == "0" ] && printf '#annote " "\n# - stručná anotace obsahu\n' >> "${1}"
+	[ "$(grep -c ^url $1)" == "0" ] && printf '#url "http://example.org"\n# - URL vašeho webu\n' >> "${1}"
+	[ "$(grep -c ^Trapped $1)" == "0" ] && printf '#Trapped "FALSE"\n# - indikační klíč, který oznamuje zda-li je úprava stránky tímto dokončena (TRUE), nebo ne (FALSE)\n' >> "${1}"
+	return 0
+}
+
 function setmeta {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
@@ -3337,6 +3366,8 @@ done
 								printmeta "${FILE}" all > "${TEMPFILE}"
 								# Doplnit vzor meta stránky pro případ, že zatím žádný obsah neexistuje
 								editor "${TEMPFILE}"
+#								sed --in-place '/^#/d' "${TEMPFILE}"
+								[ $(grep -c ^ "${TARGET}") -eq "0" ] && return 1
 								djvuimport "${FILE}" "${TEMPFILE}"
 							;;
 							*) echo "meta stránky.. ${CHARSTRING}"
@@ -3345,13 +3376,22 @@ done
 									local TARGET="${TEMPDIR}/${FILE##*/}"
 									local IDPAGE=$(identifypage "${FILE}" "${PAGENAME}") 
 									printmeta "${FILE}" "${NAMEPAGE}" >  "${TARGET/.djvu/.meta}"
-									if [ ! -z "$(head -c 1 ${TEMPFILE})" ] ; then
-										editor "${TARGET/.djvu/.meta}"
-									else
-										echo "#${IDPAGE} '${NAMEPAGE}'" > "${TARGET/.djvu/.meta}"
-										echo -e "\n\n." >> "${TARGET/.djvu/.meta}"
-										editor "${TARGET/.djvu/.meta}"
+#									if [ ! -z "$(head -c 1 ${TEMPFILE})" ] ; then
+									local METAHEAD=$(head -1 ${TARGET/.djvu/.meta})
+									if [ -z "${METAHEAD}" ] ; then
+										METAHEAD="#${IDPAGE} '${NAMEPAGE}'"
 									fi
+									local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+									grep -v '^$' "${TARGET/.djvu/.meta}" > "${TEMPFILE}"
+									sed --in-place '/^#/d' "${TEMPFILE}"
+									sed --in-place '/^\./d' "${TEMPFILE}"
+									echo "$METAHEAD" >> "${TEMPFILE}"
+									changemeta "${TEMPFILE}"
+									editor "${TEMPFILE}"
+									sed --in-place '/^#/d' "${TEMPFILE}"
+									printf "$METAHEAD\n" > "${TARGET/.djvu/.meta}"
+									cat "${TEMPFILE}" >> "${TARGET/.djvu/.meta}"
+									printf "\n\n.\n." >> "${TARGET/.djvu/.meta}"
 									djvuimport "${FILE}" "${TARGET/.djvu/.meta}"
 								else
 									printf "You must add valid parameter. Use -h for more info.\n" >> /dev/stderr
