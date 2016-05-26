@@ -2356,55 +2356,35 @@ Použitelné parametry:
         --lossy        100 - ignorují se plochy
 """
 		;;
-		keywords-export) echo """KEYWORD: [1mexport[0m
+		keywords) echo """
+Help for actions:
 
-  Export pages , meta attributes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
-  volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
-  se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
-  při volbě [3m-p[23m.
+  [1m${0##*/}[0m <DjVu file> {ACTIONS} -h
 
-  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all|outline|meta [<num>|<name>|all]}  [<dir>]
+ACTIONS:
 
-      num - pořadové číslo stránky v DjVu svazku
-     name - jméno stránky v DjVu svazku
-      dir - adresář do kterého má být výstup uložen
-      all - předmětem exportu bude obsah celého DjVu svazku
-  outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
-     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+    delete - remove page from bundle
+fore, back - move, or insert pages into DjVu bundle
+    rotate - change orientation page or all pages DjVu bundle
+    export - export from DjVu bundle
+    import - import (content, meta attributes, outline) into DjVu bundle 
+      edit - edit meta attributes or outline in DjVu bundle
+      info - view info about DjVu bundle or selected page
+    rename - rename pages in DjVu bundle by pattern
 
-[4mPoznámky:[24m
-  * Pro zpracování single-page DjVu stránek je parametr [3mall[23m doporučený
-  * Není-li uveden cílový adresář, budou soubory exporované do adresáře,
-    kde byl [1m${0##*/}[0m spuštěn.
-  * Přepsání již existujících souborů si lze vynutit volbou [3m--force yes[23m
-    Výchozí chování je - [3mskip[23m (existující soubory se znovu neexportují)
+OBSOLETE ACTIONS:
+    insert - vložení čehokoliv do DjVu (nahrazuje import)
+     print - výpis meta atributů na konzoli (nahrazuje export)
+       set - nastavení meta atributu (nahrazuje edit)
+     unset - zrušení meta atributu (nahrazuje edit)
+      view - otevření DjVu souboru v djview4
+
+[3mNotice:[23m
+   For more description about any action or option you set on command line as next parameter option -h (--help)
 """
 		;;
-		keywords-import) echo """akce [1mimport[0m
-  [4mImport obsahu textové vrstvy[24m do DjVu souboru
-
-  [1m${0##*/}[0m [volby] <svazek> import [<file>|<dir>]
-
-         file - soubor s obsahem skryté textové vrstvy
-         dir  - adresář se soubory s obsahem skryté textové vrstvy
-
-[3mPoznámky:[23m
-  * Parametrem akce [2mimport[22m může být buď adresář se soubory, nebo soubor s
-    daty k importu
-  * Název souboru musí odpovídat názvu svazku (pro gobální metadata), nebo
-    názvu stránky, kterou obsahuje, s tím rozdílem, že jeho přípona odpovídá
-    typu dat které obsahuje:
-          [3m.meta[23m - meta atributy
-           [3m.xml[23m - skrytý text obsahu
-          [3m.dsed[23m - poznámky, meta atributy a skrytý text obsahu
-       [3m.outline[23m - obsah svazku; Pozor! Obsah je součást celého svazku, nemá
-                  tedy smysl ho vkládat do single-page DjVu dokumentu.
-    K formátu těchto souborů více viz manuál
-  * Není-li uveden žádný adresář, ani soubor, tak se předpokládá že se budou
-    zpracovávat soubory z aktuálního adresáře
-"""
-		;;
-		keywords-delete) echo """akce [1mdelete[0m
+		keywords-delete) echo """
+  ACTION: [1mdelete[0m
 
   [4mOdstranění stránky[24m identifikované jménem, nebo pozicí v DjVu svazku
 
@@ -2420,55 +2400,10 @@ Použitelné parametry:
   svazku jedinečné.
 """
 		;;
-		keywords-info) echo """
-  KEYWORD [1minfo[0m
-
-  Print informations about DjVu bundle. Without parameters return number of pages.
-  If is DjVu file 'single-page', return 'none'.
-
-  [1m${0##*/}[0m <DjVu> info [SUBKEY [<num>|<name>]]
-
-         num  - order number of page in DjVu bundle
-         name - name of page in DjVu bundle
-
-  SUBKEYS:
-         [3mexif[23m - return exif info about DjVu file
-         [3mmeta[23m - return meta attribute keys from DjVu file
-        [3mpages[23m - return ordered list pages from DjVu bundle with names
-
-[3mNotice:[23m
-  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
-  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
-  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
-"""
-		;;
-		move) echo """akce [1mfore[0m a [1mback[0m
-  [4mUmožňují přesunout stránku v rámci DjVu svazku [24m na jinou pozici, či
-  [4mvložit[24m na tuto pozici  [4mstránku novou [24m, je-li prvním parametrem akce
-  místo identifikátoru stránky v DjVu svazku soubor.
-
-  [1m${0##*/}[0m [volby] <svazek> {fore|back} {<num>|<name>|<file>} [<num>|<name>]
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         file - jméno DjVu souboru, nebo skenu
-
-[3mPoznámka:[23m
-  * Je-li souborem nekonvertovaný bitmapový obrázek, určí co vše bude
-    obnášet konverze předané volby.
-  * Není-li určena indentifikátorem cílová pozice, bude stránka přesunuta
-    při akci [2mfore[22m o pozici vpřed, nebo vzad - při akci [2mback[22m.
-  * Je-li při akci [2mfore[22m vložena ze souboru nová stránka a není uveden
-    identifikátor cílové pozice, bude stránka vložena na první pozici
-    DjVu svazku. Při akci [2mback[22m) se připojí na konec.
-  * Pokud se již v DjVu svazku nalézá stránka se stejným názvem jako má
-    vkládaný soubor, vyskytuje, dojde při jeho vložení automaticky k
-    přejmenování - za název se přidá podtržítko a pořadové číslo.
-"""
-		;;
 		keywords-fore) help move
 		;;
-		keywords-fore1) echo """akce [1mfore[0m
+		keywords-fore1) echo """
+  ACTION [1mfore[0m
 
   Umístění nové stránky, nebo stránky v rámci DjVu svazku již existující před stránku identifikovanou jménem, nebo aktuální pozicí. o pozici vpřed. [4mPřed stránku, která[24m
   [4mji má následovat[24m. V případě, už přesouvaná stránka je na první pozici,
@@ -2486,7 +2421,8 @@ Použitelné parametry:
   svazku jedinečné.
 """
 		;;
-		keywords-back) echo """akce [1mback[0m
+		keywords-back) echo """
+  ACTION [1mback[0m
 
   Přesun stránky v rámci DjVu svazku o pozici zpět. [4mZa stránku, která[24m
   [4mji má následovat[24m. V případě, už je přesouvaná stránka na poslední pozici,
@@ -2504,7 +2440,7 @@ Použitelné parametry:
 """
 		;;
 		keywords-rotate) echo """
-  KEYWORD [1mrotate[0m
+  ACTION [1mrotate[0m
 
   For change of default orientation page in DjVu file.
 
@@ -2529,10 +2465,110 @@ Options:
   * If is not any identificator of page, do set global orientation for all DjVu bundle.
 """
 		;;
+		keywords-export) echo """
+  ACTION: [1mexport[0m
+
+  Export pages , meta attributes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
+  volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
+  se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
+  při volbě [3m-p[23m.
+
+  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all|outline|meta [<num>|<name>|all]}  [<dir>]
+
+      num - pořadové číslo stránky v DjVu svazku
+     name - jméno stránky v DjVu svazku
+      dir - adresář do kterého má být výstup uložen
+      all - předmětem exportu bude obsah celého DjVu svazku
+  outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
+     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+
+[4mPoznámky:[24m
+  * Pro zpracování single-page DjVu stránek je parametr [3mall[23m doporučený
+  * Není-li uveden cílový adresář, budou soubory exporované do adresáře,
+    kde byl [1m${0##*/}[0m spuštěn.
+  * Přepsání již existujících souborů si lze vynutit volbou [3m--force yes[23m
+    Výchozí chování je - [3mskip[23m (existující soubory se znovu neexportují)
+"""
+		;;
+		keywords-import) echo """
+   ACTION: [1mimport[0m
+  [4mImport obsahu textové vrstvy[24m do DjVu souboru
+
+  [1m${0##*/}[0m [volby] <svazek> import [<file>|<dir>]
+
+         file - soubor s obsahem skryté textové vrstvy
+         dir  - adresář se soubory s obsahem skryté textové vrstvy
+
+[3mPoznámky:[23m
+  * Parametrem akce [2mimport[22m může být buď adresář se soubory, nebo soubor s
+    daty k importu
+  * Název souboru musí odpovídat názvu svazku (pro gobální metadata), nebo
+    názvu stránky, kterou obsahuje, s tím rozdílem, že jeho přípona odpovídá
+    typu dat které obsahuje:
+          [3m.meta[23m - meta atributy
+           [3m.xml[23m - skrytý text obsahu
+          [3m.dsed[23m - poznámky, meta atributy a skrytý text obsahu
+       [3m.outline[23m - obsah svazku; Pozor! Obsah je součást celého svazku, nemá
+                  tedy smysl ho vkládat do single-page DjVu dokumentu.
+    K formátu těchto souborů více viz manuál
+  * Není-li uveden žádný adresář, ani soubor, tak se předpokládá že se budou
+    zpracovávat soubory z aktuálního adresáře
+"""
+		;;
+		keywords-edit) echo """
+  ACTION [1medit[0m
+
+  Editace textový informací DjVu svazku - meta informace, bookmarks,outline
+
+  [1m${0##*/}[0m <DjVu> edit {outline|meta [<num>|<name>]}
+
+         outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
+         meta  - vygenerování šablony pro .outline formát s adresováním
+                 stránek podle jejich názvů
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+
+[3mPoznámka:[23m
+  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
+  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
+  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
+                   1 úroveň = 1 tabulátor = 8 mezer
+  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
+  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
+[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
+  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
+"""
+		;;
+		keywords-info) echo """
+  ACTION [1minfo[0m
+
+  Print informations about DjVu bundle. Without parameters return number of pages.
+  If is DjVu file 'single-page', return 'none'.
+
+  [1m${0##*/}[0m <DjVu> info [SUBKEY [<num>|<name>]]
+
+         num  - order number of page in DjVu bundle
+         name - name of page in DjVu bundle
+
+  SUBKEYS:
+         [3mexif[23m - return exif info about DjVu file
+         [3mmeta[23m - return meta attribute keys from DjVu file
+        [3mpages[23m - return ordered list pages from DjVu bundle with names
+
+[3mNotice:[23m
+  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
+  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
+  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
+"""
+		;;
+# ODSTRANIT VVVV
 		keywords-set) help keywords-meta
 		;;
+# ODSTRANIT VVVV
 		keywords-unset) help keywords-meta
 		;;
+# ODSTRANIT VVVV
 		keywords-meta) echo """
   KEYWORD [1mset[0m or [1munset[0m
 
@@ -2570,30 +2606,6 @@ KEY most common attributes:
 [3mNotice:[23m
   * KEY is single word without diacritical chars and spaces
   * VALUE is normal text string
-"""
-		;;
-		keywords-edit) echo """akce [1medit[0m
-
-  Editace textový informací DjVu svazku - meta informace, bookmarks,outline
-
-  [1m${0##*/}[0m <svazek> edit {outline|meta [<num>|<name>]}
-
-         outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
-         meta  - vygenerování šablony pro .outline formát s adresováním
-                 stránek podle jejich názvů
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-
-[3mPoznámka:[23m
-  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
-  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
-  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
-                   1 úroveň = 1 tabulátor = 8 mezer
-  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
-  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
-[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
-  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
 		;;
 # ODSTRANIT VVVV
@@ -2648,24 +2660,8 @@ Zrušeno nahrazeno akcí export a info
   akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
 """
 		;;
-		keywords) echo """
-KEYWORDS:
-
-    delete - remove page from bundle
-fore, back - move, or insert pages into DjVu bundle
-    rotate - change orientation page or all pages DjVu bundle
-    export - export from DjVu bundle
-    import - import (content, meta attributes, outline) into DjVu bundle 
-      edit - edit meta attributes or outline in DjVu bundle
-      info - view info about DjVu bundle or selected page
-    rename - rename pages in DjVu bundle by pattern
-
-[3mNotice:[23m
-   For more description about any action or option you set on command line as next parameter option -h (--help)
-"""
-		;;
 		meta) echo """
-Export meta atrributů
+Export meta atributů
 
   [1m${0##*/}[0m <svazek> export meta [<num>|<name>|all|global]
   
@@ -2682,6 +2678,30 @@ Syntaxe meta souboru:
 
 Při importu stránky má jméno stránky přednost před pořadovým číslem. To se použije pouze tehdy, pokud identifikační jméno stránky chybí
 Pokud stránka žádné meta atributy nemá, vypíše se pouze prázdná šablona
+"""
+		;;
+		move) echo """akce [1mfore[0m a [1mback[0m
+  [4mUmožňují přesunout stránku v rámci DjVu svazku [24m na jinou pozici, či
+  [4mvložit[24m na tuto pozici  [4mstránku novou [24m, je-li prvním parametrem akce
+  místo identifikátoru stránky v DjVu svazku soubor.
+
+  [1m${0##*/}[0m [volby] <svazek> {fore|back} {<num>|<name>|<file>} [<num>|<name>]
+
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
+         file - jméno DjVu souboru, nebo skenu
+
+[3mPoznámka:[23m
+  * Je-li souborem nekonvertovaný bitmapový obrázek, určí co vše bude
+    obnášet konverze předané volby.
+  * Není-li určena indentifikátorem cílová pozice, bude stránka přesunuta
+    při akci [2mfore[22m o pozici vpřed, nebo vzad - při akci [2mback[22m.
+  * Je-li při akci [2mfore[22m vložena ze souboru nová stránka a není uveden
+    identifikátor cílové pozice, bude stránka vložena na první pozici
+    DjVu svazku. Při akci [2mback[22m) se připojí na konec.
+  * Pokud se již v DjVu svazku nalézá stránka se stejným názvem jako má
+    vkládaný soubor, vyskytuje, dojde při jeho vložení automaticky k
+    přejmenování - za název se přidá podtržítko a pořadové číslo.
 """
 		;;
 		rename) echo """ volba [1m-r[0m, [1m--rename[0m
