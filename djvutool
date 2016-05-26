@@ -183,6 +183,16 @@ fi
 #=== konec testu závislostí ===
 
 ## Pomocné funkce...
+function xtabs {
+	# $1 - count of tabs
+	# return string of tabs
+	local TAB=$1
+	while [ ! $TAB -eq 0 ] ; do
+		printf '\t'
+		TAB=$(( $TAB - 1 ))
+	done 
+}
+
 function tabs {
 	# $1 - file with tabs
 	local TAB=$(printf '%.0s\ ' {0..${TABS}})
@@ -817,6 +827,134 @@ function dsedtooutline {
 			;;
 		esac
 	done
+}
+
+function outlineunset {
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+	local CHARSET="$(( $2 + 1 ))"
+	dsedtooutline "${SOURCE}" >> "${TEMPFILE}"
+	if [ "${CHARSET//+([[:digit:]])}" == "" ] ; then
+		ed ${TEMPFILE} 2>/dev/null <<-EOF
+${CHARSET}d
+w
+q
+EOF
+		outlinetodsed "${TEMPFILE}" | encode > "${TEMPFILE/.outline/.temp}"
+		${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE/.outline/.temp}; save"
+	fi
+}
+
+function outlineset {
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+	local CHARSET="${2}"
+	dsedtooutline "${SOURCE}" >> "${TEMPFILE}"
+	local ORDER="${CHARSET%% *}"
+	local BOOKMARKTARGET="${CHARSET##* }"
+	local TEMP="${CHARSET#${ORDER} *}"
+	local BOOKMARKITEM="${TEMP%* ${BOOKMARKTARGET}}"
+	case ${ORDER:$((${#ORDER}-1))} in
+		+) if [ -z ${ORDER%:+} ] ; then
+				local TEMP=$(tail -1 ${TEMPFILE})
+				local TABS="${TEMP%%\"*}"
+				local ITEM="$(xtabs $((${#TABS} + 1)))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+a
+${ITEM}
+.
+w
+q
+EOF
+			else
+				local TEMP=$(head -$((${ORDER%:+*}+1)) ${TEMPFILE} | tail -1)
+				local TABS="${TEMP%%\"*}"
+				local ITEM="$(xtabs $((${#TABS} + 1)))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+${ORDER%:+}a
+${ITEM}
+.
+w
+q
+EOF
+			fi
+			;;
+		-) if [ -z ${ORDER%:-*} ] ; then
+				local TEMP=$(tail -1 ${TEMPFILE})
+				local TABS="${TEMP%%\"*}"
+				local MINUS="${ORDER#:}"
+				if [ ${#TABS} -ge ${#MINUS} ] ; then
+					local ITEM="$(xtabs $((${#TABS} - ${#MINUS})))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				else
+					local ITEM="\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				fi
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+a
+${ITEM}
+.
+w
+q
+EOF
+			else
+				local TEMP=$(head -$((${ORDER%:-*}+1)) ${TEMPFILE} | tail -1)
+				local TABS="${TEMP%%\"*}"
+				local MINUS="${ORDER#*:}"
+				if [ ${#TABS} -ge ${#MINUS} ] ; then
+					local ITEM="$(xtabs $((${#TABS} - ${#MINUS})))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				else
+					local ITEM="\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				fi
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+${ORDER%:-*}a
+${ITEM}
+.
+w
+q
+EOF
+			fi
+			;;
+		:) if [ -z ${ORDER%:} ] ; then
+				local TEMP=$(tail -1 ${TEMPFILE})
+				local TABS="${TEMP%%\"*}"
+				local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+a
+${ITEM}
+.
+w
+q
+EOF
+			else
+				local TEMP=$(head -$((${ORDER%:}+1)) ${TEMPFILE} | tail -1)
+				local TABS="${TEMP%%\"*}"
+				local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+${ORDER%:}a
+${ITEM}
+.
+w
+q
+EOF
+			fi
+			;;
+		[[:digit:]]) local TEMP=$(head -$((${ORDER}+1)) ${TEMPFILE} | tail -1)
+			local TABS="${TEMP%%\"*}"
+			local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
+				ed ${TEMPFILE} 2>/dev/null <<-EOF
+${ORDER}a
+${ITEM}
+.
+w
+q
+EOF
+			;;
+		*) echo "outlineset: Sem bys nikdy neměl dojít" && exit 1
+			;;
+	esac
+	outlinetodsed "${TEMPFILE}" | encode > "${TEMPFILE/.outline/.temp}"
+	${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE/.outline/.temp}; save"
 }
 
 function outlinetodsed {
@@ -2578,6 +2716,8 @@ Options:
 
   [1m${0##*/}[0m <DjVu> print outline
 
+  [1m${0##*/}[0m <DjVu> print meta
+
   [1m${0##*/}[0m <svazek> print <attr>
   [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
   [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
@@ -2596,7 +2736,7 @@ Options:
 		keywords-set) echo """
   ACTION [1mset[0m set meta attribute key or outline item from command line
 
-  [1m${0##*/}[0m <DjVu> set outline {<num>:[+|-]} <ITEM> <TARGET>
+  [1m${0##*/}[0m <DjVu> set outline {<num>[:[+|-]]} <ITEM> <TARGET>
  
   [1m${0##*/}[0m <DjVu> set meta [all|<RANGE>|<name>] <KEY> <VALUE>
 
@@ -2611,8 +2751,11 @@ Example for set meta attribute:
 [3mNotice:[23m
     * If is value of [3mORDER[23m zero or empty, is append ITEM
       to end outline
-    * Plus (or minus), separed by colon, signalize a nesting or emersion
-      of the item, compare with level of a previous item
+    * Plus, separed by colon from order num, signalize next level for
+      nesting of the item compare to level of a previous item
+    * Count of minus, separed by colon, signalize level for emersion of
+      the outline item compare to level of a previous item.
+    * First item outline can not be nested.
     * If is not page identificator, is [3mKEY[23m set as shared
       into shared_anno.iff
 
@@ -2628,11 +2771,13 @@ Example for set meta attribute:
 		keywords-unset) echo """
   ACTION [1munset[0m remove item from outline or meta attributes
 
-  [1m${0##*/}[0m <DjVu> unset {outline <num> | meta [all|<RANGE>|<name>] <KEY>}
+  [1m${0##*/}[0m <DjVu> unset outline <num>
+
+  [1m${0##*/}[0m <DjVu> unset meta [all|<RANGE>|<name>] <KEY>
 
 Example for remove bookmark item:
 
-    [1m${0##*/}[0m bundle.djvu unset outline 1,3,7-12
+    [1m${0##*/}[0m bundle.djvu unset outline 3
 
 Examle for remove meta attribute:
 
@@ -3494,7 +3639,7 @@ done
 					print)  case "${CHARSTRING%% *}" in
 							meta) printmeta "${FILE}" "${CHARSTRING#* }"
 							;;
-							outline) dsedtooutline "${FILE}"
+							outline) dsedtooutline "${FILE}" | awk '{print i++ "\t|" $0}'
 							;;
 							*) help keyword-print
 							;;
@@ -3507,6 +3652,8 @@ done
 					set) case "${CHARSTRING%% *}" in
 							meta) setmeta "${FILE}" "${CHARSTRING#* }"
 							;;
+							outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
+							;;
 							*) help keyword-meta
 							;;
 						esac
@@ -3514,6 +3661,8 @@ done
 					;;
 					unset) case "${CHARSTRING%% *}" in
 							meta) unsetmeta "${FILE}" "${CHARSTRING#* }"
+							;;
+							outline) outlineunset "${FILE}" "${CHARSTRING#outline *}"
 							;;
 							*) help keyword-meta
 							;;
