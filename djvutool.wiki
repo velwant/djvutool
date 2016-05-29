@@ -1,6 +1,8 @@
 = DjVutool =
 
-'''DjVutool''' je shellový skript určený pro práci s DjVu soubory v prostředí GNU/Linux, který využívá standardních nástrojů pro práci s textem<ref>awk, sed, vim</ref> a zastřešuje další open source nástroje:
+'''DjVutool''' je shellový skript určený konverzi bitmapových skenů do DjVu souborů a k práci s nimi v prostředí GNU/Linux. 
+
+Pro práci s textem využívá standardních nástrojů<ref>awk, sed, vim</ref> ale využívá i další open source nástroje:
 
 * utility z '''DjVuLibre'''<ref>[http://sourceforge.net/projects/djvu DjVuLibre]</ref>
 * enkódovací utilitu didjvu<ref>[http://jwilk.net/software/didjvu didjvu] - autor Jakub Wilk</ref>
@@ -10,23 +12,54 @@
 
 S jeho pomocí lze:
 
+* Generovat DjVu soubory z bitmapových skenů uložených do různých formátů
 * Přidávat nové stránky do DjVu svazků
 * Přesouvat stránky v rámci DjVu svazku
 * Odstraňovat stránky z DjVu svazku
 * Exportovat a importovat data skryté textové vrstvy i celé DjVu stránky z DjVu svazků
 * Editovat obsah (''outline'') a meta atributy DjVu souborů
 
-Po vyexportování obsahu skryté textové vrstvy lze použít pro další zpracování obsahu použít javascriptový editor '''WebDjVuTextEd'''<ref>[http://sourceforge.net/projects/webdjvutexted WebDjVuTextEd] autor Ferenc Veres</ref>, a upravené soubory pomocí [[DjVuTool]] naimportovat zpět.
+Po vyexportování obsahu skryté textové vrstvy lze použít pro další zpracování obsahu použít javascriptový editor '''WebDjVuTextEd'''<ref>[http://sourceforge.net/projects/webdjvutexted WebDjVuTextEd] autor Ferenc Veres</ref>, a upravené XML soubory importovat zpět.
 
 Pro vytvoření hyperlinků je vhodným nástrojem  '''djvusmooth'''<ref>[http://jwilk.net/software/djvusmooth djvusmooth] - autor Jakub Wilk</ref>.
 
 == Použití ==
+Při konverzi bitmapového souboru do DjVu:
+
+ djvutool [volby] <bitmapový sken> [ /cesta ]
+
+Při práci s DjVu soubory:
 
  djvutool [volby] <DjVu soubor> {akce} [ ... ]
 
 === Jak předávat data ===
-
 Vzhledem k tomu, že se v djvu souborech mohou vyskytovat i stránky s opakovanými mezerami, je třeba na to pamatovat při práci na příkazové řádce a v takovém případě použít znak '\' (''backslash'')
+
+== Konverze bitmapových souborů ==
+Konverze bitmapových skenů probíhá tak, že se nejprve vyexportují jednotlivé vrstvy jako samostatné stránky ve formátu PNG do adresáře s názvem souboru bez přípony, a ty se postupně konvertují podle nastavených voleb do DjVu formátu.
+
+Tímto způsobem lze zkonvertovat vícevrstvé soubory do formy, která umožňuje jejich sestavení do DjVu svazku.
+
+== Vytvoření DjVu svazku z konvertovaných souborů ==
+Příklad:
+
+ djvutool soubor.xcf
+
+Nejprve se založí adresář s názvem soubor, do kterého vysype jednotlivé vrstvy ze souboru soubor.xcf jako bitmapové soubory ve formátu PNG
+
+ soubor/-soubor-000.png
+       |-soubor-001.png
+       ....
+
+A tyto soubory následně na základě předaných voleb zpracuje do DjVu..
+
+ soubor/-soubor-000.png
+       |-soubor-000.djvu
+       |-soubor-001.png
+       |-soubor-001.djvu
+       ....
+
+
 
 == Volby ==
 Pomocí voleb lze nastavit, co vše má být předmětem zpracování během akce
@@ -63,10 +96,15 @@ Nastavení vzoru pro pojmenování stránek při akcích '''rename''', '''fore''
 == Akce ==
 
 === delete ===
-Akce pro odstraňování DjVu stránek
+Akce je určena pro odstraňování DjVu stránek z DjVu svazku
+
+=== edit ===
+Akce určena pro přímou editaci obsahu meta atributů a záložek v rámci DjVu svazku.
+
+Pro nepřímou editaci (formou úpravy vyexportovaných souborů) jsou určeny akce export a import
 
 === export, import ===
-Akce pro export a import DjVu stránek, meta atributů, obsahu a obsahu skryté textové vrstvy.
+Akce pro export a import je určena pro extrakci stránek, jejich náhledů, meta informací a obsahu skryté textové vrstvy DjVu svazku.
 
 === fore, back ===
 Akce pro přesun a import DjVu stránek
@@ -84,23 +122,32 @@ Akce pro přejmenování stránek DjVu svazku podle zvoleného vzoru
 Akce pro změnu výchozího natočení DjVu stránek
 
 == Funkce v DjVuTool ==
+:* changemeta
 :* comparedjvu
 	''potvrdit''
+#+ convertimg
 :* deletepage
 	''identifybundle''
 	''identifypage''
+:* djvuexport
+	''targetdir''
+	''identifypage''
+	''identifyname''
+	''dsedtooutline''
+#+ djvuimport
 :* djvuinfo
 	''djvuexport''
 	''identifybundle''
 	''identifyname''
 	''identifypage''
 	''lastpage''
+#+ djvumove
+:* djvurotate
+	''identifybundle''
+	''potvrdit''
 ::* dsedtooutline
-:* djvuexport
-	''targetdir''
-	''identifypage''
-	''identifyname''
-	''dsedtooutline''
+::* encode
+::* escape_path
 ::* exportdjvuall
 	''exportdjvupage''
 		''pushd''
@@ -148,10 +195,10 @@ Akce pro změnu výchozího natočení DjVu stránek
 	''popd''
 	''identifypage''
 	''potvrdit''
-# exportmetabundle
-# exportmetapage
-:* exportoutline
-	''help''
+#+ exportmetabundle
+#+ exportmetapage
+#-:* exportoutline
+#-	''help''
 :::* exportxmlbundle
 	''pushd''
 	''popd''
@@ -199,9 +246,6 @@ Akce pro změnu výchozího natočení DjVu stránek
 		''identifypage''
 	'''todjvu'''
 	'''insertpage'''
-	'''setmeta'''
-	'''printmeta'''
-	'''unsetmeta'''
 	''djvumove''
 		''identifypage''
 		''identifyname''
@@ -241,8 +285,32 @@ Akce pro změnu výchozího natočení DjVu stránek
 		''identifyname''
 		''identifypage''
 		''lastpage''
-	''exportoutline''
-		''help''
+	''printmeta''
+		''lastpage''
+		''identifyname''
+		''identifypage''
+	''printoutline''
+		''dsedtooutline''
+	''setmeta''
+		''lastpage''
+		''printmeta''
+			''lastpage''
+			''identifyname''
+			''identifypage''
+	''outlineset''
+		''xtabs''
+		''outlinetodsed''
+		''encode''
+	''unsetmeta''
+		''lastpage''
+		''printmeta''
+			''lastpage''
+			''identifyname''
+			''identifypage''
+	'''outlinetodsed'''
+	''changemeta''
+#	''exportoutline''
+#		''help''
 :* djvumove
 	''identifypage''
 	''identifyname''
@@ -254,14 +322,22 @@ Akce pro změnu výchozího natočení DjVu stránek
 			''testfile''
 			''potvrdit''
 			''getocr''
+:* outlineset
+	''xtabs''
+	''outlinetodsed''
+	''encode''
 :::* popd
 ::* potvrdit
-# printmeta
+:* printmeta
+	''lastpage''
+	''identifyname''
+	''identifypage''
+:* printoutline
+	''dsedtooutline''
 :::* pushd
-:* djvurotate
-	''identifybundle''
-	''potvrdit''
-# setmeta
+:* setmeta
+	''lastpage''
+	''printmeta''
 ::* tabs
 ::* targetdir
 :* testfile
@@ -272,7 +348,13 @@ Akce pro změnu výchozího natočení DjVu stránek
 # todjvuclassic
 # todotest
 # todoview
-# unsetmeta
+:* unsetmeta
+	''lastpage''
+	''printmeta''
+		''lastpage''
+		''identifyname''
+		''identifypage''
+::* xtabs
 
 = INFO =
 
@@ -509,3 +591,19 @@ s indexovým souborem novysoubor.djvu.
 Pokud je uveden parametr -n, budou dílčí dokumenty přejmenovány tak, aby
 odpovídaly názvu svazku: novysoubor-001.djvu, novysoubor-002.djvu, ...
 
+= FAQ =
+
+== meta ==
+Funkce zpracovávají obsah elementu (metadata ... ) v poznámkách (ant)
+
+== ostatní data
+maparea
+	url "" ""
+	"xxxxxx"
+	rect
+		<čtyři souřadnice>
+	border
+		<barva v RGB>
+	border_avis
+	hilite
+		<barva v RGB>
