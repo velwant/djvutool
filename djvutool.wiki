@@ -122,6 +122,13 @@ Akce pro přejmenování stránek DjVu svazku podle zvoleného vzoru
 Akce pro změnu výchozího natočení DjVu stránek
 
 == Funkce v DjVuTool ==
+Konvence:
+	export - funkce které provádí extrakci
+	print  - funkce které vypisují na konzoli
+	import - funkce které vkládají do souboru
+
+
+
 :* changemeta
 :* comparedjvu
 	''potvrdit''
@@ -328,7 +335,13 @@ Akce pro změnu výchozího natočení DjVu stránek
 	''encode''
 :::* popd
 ::* potvrdit
-:* printmeta
+:* printant
+	''identifybundle''
+	''formatdsed''
+	''identifyname''
+		''identifybundle''
+	''range''
+:* printmeta - nahrazeno printant
 	''lastpage''
 	''identifyname''
 	''identifypage''

@@ -24,17 +24,16 @@ shopt -s extglob
 # - upraveny funkce pro export náhledů a souborů textové vrstvy
 # - akce 'delete' odstraňuje stránky
 # - akce 'fore' a 'back' přesouvají stránky podle udaných parametrů
-# - akce 'print outline' vrací na příkazovou řádku soubor outline s očíslovanými řádky
 # - akce 'unset outline' umožňuje odstraňovat záložky na základě čísla řádky
 # - akce 'set outline' dovoluje vložit záložku z příkazové řádky
 # - do akce 'export' byla přidána možnost interaktivní volby
+# - akce 'print outline', 'edit outline', 'export outline', 'convert outline', 'convert bookmarks'
 
 # Otestovat
 # - export ze single-page dokumentu
 #
 
 # ToDo
-# Přepracovat použití djvudump (ve funkci identifybundle) na djvm -l (je rychlejší..)
 # Doplnit nové funkce do wiki souboru
 # Opravit akci edit meta - dočasný soubor je někde v pytli - binec dělá asi realpath nebo co..
 # implementovat kontrolu do funkce todjvu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
@@ -123,8 +122,6 @@ DJVUTOXML=$(which djvutoxml)
 [ ! ${DJVUTOXML} ] && exit 20
 DJVUXMLPARSER=$(which djvuxmlparser)
 [ ! ${DJVUXMLPARSER} ] && exit 20
-DJVUDUMP=$(which djvudump)
-[ ! ${DJVUDUMP} ] && exit 20
 DJVMCVT=$(which djvmcvt)
 [ ! ${DJVMCVT} ] && exit 20
 DJVM=$(which djvm)
@@ -257,12 +254,6 @@ function escape_path {
   -e 's/\ /\\\ /g'
 }
 
-function extractmeta {
-	# Pokud najdu v souboru metadata zaznamenám číslo START řádku
-	# Pokud narazím na řádek začínající závorkou, nebo zcela prázdný zaznamenám END řádku
-	echo nic
-}
-
 function extractmaparea {
 	if [ $1 == "(maparea" ] ; then
 		if [ $2 == "(url" ] ; then
@@ -346,72 +337,131 @@ function anttodsed {
 	fi
 }
 
-function exportant {
-	export DSED="ant"
+function important {
+	# $1 - DjVu
+	# $2 - .ant file
+	# $3 - select parameters
+	echo ${1} >> /dev/stderr
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	if [ ! -z "${SOURCE}" ] ; then
+		local ANT=$(${REALPATH} -m -P "${2}")
+		if [ "$(head -1 -c1 ${ANT})" == "#" ] ; then
+			# jdu importovat položky...
+			local OBSAH=($(wc -l ${ANT}))
+			local ITEMS=($(grep -n '^#' ${ANT} | awk -F\: '{print $1}'))
+			local index=0
+			for i in ${ITEMS[@]} ; do
+				index=$(( $index + 1 ))
+				# soubor...
+				local SOUBOR=($(sed -n "${i}p" ${ANT}))
+				local TEMPFILE="${TEMPDIR}/${SOUBOR['1']%.*}.bak"
+				if [ "${SOUBOR['1']%.*}" == "shared_anno" ] ; then
+					printf "create-shared-ant; select '%s'\nset-ant\n" "${SOUBOR['1']%.*}.iff" >> ${TEMPFILE//.bak/.dsed}
+				else
+					printf "select '%s'\nset-ant\n" "${SOUBOR['1']%.*}.djvu" >>  ${TEMPFILE//.bak/.dsed}
+				fi
+				if [ -z ${ITEMS["$index"]} ] ; then
+					sed -n "${i},${OBSAH['0']}p" ${ANT} >> ${TEMPFILE}
+					#createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
+				else
+					sed -n "${i},$((${ITEMS["$index"]} - 1))p" ${ANT} >> ${TEMPFILE}
+					#createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
+				fi
+				printf "\n\n.\n" >> ${TEMPFILE//.bak/.dsed}
+				if [ "${FORCE}" == "skip" ] ; then
+					printf "Při importu budou stávající hyperlinky i meta atributy stránky ${SOUBOR['1']} v souboru '%s' přepsány. Mám pokračovat?\n" "${SOURCE}" >> /dev/stderr
+					potvrdit
+					echo "${FORCE}" >> /dev/stderr
+				else
+					echo "${FORCE}" >> /dev/stderr
+				fi
+			done
+		else
+			printf "File ${ANT} isn't not in .ant format!" >> /dev/stderr
+			exit 1
+		fi
+	fi
+}
+
+function formatdsed {
+	# .dsed to .ant
+	sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
+	sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g' | \
+	while read line ; do
+		case ${line} in
+			\(metadata) local TAB=""
+				;;
+			\(maparea) echo -e "\n"
+				local TAB="\t"
+			 ;;
+			\"*) echo -e "NOTE ${line}"
+			;;
+			*) if [ "${TAB}" == "\t" ] ; then
+					case "${line:0:2}" in
+						"(u") echo -e "URL (${line#(url }"
+						;;
+						*) echo -e "${TAB}${line}"
+						;;
+					esac
+				else
+					echo -e "${line//[)(]/}"
+				fi
+			;;
+		esac
+	done  | sed 's/) )/)/ ; /^$/d '
+}
+
+function printant {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	TEMPFILE=$(tempfile -d ${TEMPDIR} -s .txt)
 	local CHARSET="${2}"
 	local RANGE="${CHARSET%%\ *}"
-	if [ "${RANGE}" == "all" ] ; then
-		local PAGENAME="shared_anno.iff"
-		exportdsedpage "${SOURCE}" ${PAGENAME} "${TEMPDIR}"
-		for i in $(seq $(lastpage "${SOURCE}")) ; do
-			printf "exportant: Set meta attribute key %s into all pages in DjVu bundle %s\n" "${KEY[0]}" "${FILE}" >> ${LOG}
-			local PAGENAME=$(identifyname "${SOURCE}" "${i}")
-			exportdsedpage "${SOURCE}" ${PAGENAME} "${TEMPDIR}"
-		done 1>/dev/null
-	elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
-		local ITEM="${CHARSET}"
-		printf "exportant: Set global meta attribute key %s into DjVu bundle %s\n" "${RANGE}" "${FILE}" >> ${LOG}
-		local PAGENAME="shared_anno.iff"
-		exportdsedpage "${SOURCE}" ${PAGENAME} "${TEMPDIR}"
-	else
-		local IDPAGES=($(range "${RANGE}"))
-		local ITEM="${CHARSET#* }"
-		local KEY=(${ITEM})
-		for i in ${IDPAGES[@]} ; do
-			printf "exportant: Save ant selected by key %s into page %s from DjVu bundle %s into %s\n" "${KEY[0]}" "$i" "${SOURCE}" "${TEMPDIR}" >> ${LOG}
-			local PAGENAME=$(identifyname "${SOURCE}" "${i}")
-			if [ -z "${PAGENAME}" ] ; then
-				exit 38
-			else
-				exportdsedpage "${SOURCE}" ${PAGENAME} "${TEMPDIR}"
+	if identifybundle ${SOURCE} ; then
+		if [ "${RANGE}" == "all" ] ; then
+			if ${DJVM} -l ${SOURCE} 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+				printf "# 'shared_anno.iff'\n"
+				${DJVUSED} ${SOURCE} -e "select 'shared_anno.iff'; print-ant" | formatdsed
 			fi
-		done 1>/dev/null
-	fi
-	pushd "${TEMPDIR}"
-	for i in $(ls -1 -tr *[is][fe][fd]) ; do
-#		printf "# %s\n" "$i" >> "${TEMPFILE/.ant/.targets}"
-#		printf "# %s\n" "$i" >> "${i#.*}.ant"
-		if [ "${i}" == "shared_anno.iff" ] ; then
-			printf "# %s\n" "$i" >> ${i/.iff/.ant}
-			sed '/^(maparea/,/)$/d ; /^(phead/,/)$/d; /^(pfoot/,/)$/d ; s/^(metadata (/\t/ ; s/) (/\n\t/g' $i | grep -v '^set-ant\|^\.\|^$\|^(metadata' | sed 's/)$// ; s/\t// ; s/^(// ; s/)\ $//' >> ${i/.iff/.ant}
-			#sed '/^(maparea/,/)$/d' $i | sed '/^(phead/,/)$/d' | sed '/^(pfoot/,/)$/d' | sed 's/^(metadata (/\t(/' | grep -v  '^set-ant\|^\.\|^$\'  >> ${i/.iff/.meta}
-			grep '^(maparea' $i | sed 's/\\/\\\\0/g' | while read line ; do
-				extractmaparea $line
-			done >> ${i/.iff/.ant}
+			for i in $(${DJVM} -l ${SOURCE} | grep PAGE\ # | awk '{print $4}') ; do
+				printf "# '%s'\n" "$i"
+				${DJVUSED} ${SOURCE} -e "select '$i'; print-ant" | formatdsed
+			done
+		elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
+			if ${DJVM} -l ${SOURCE} 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+				printf "# 'shared_anno.iff'\n"
+				${DJVUSED} ${SOURCE} -e "select 'shared_anno.iff'; print-ant" | formatdsed
+			fi
+		elif [ "${RANGE}" != "${RANGE/[a-Z]/}" ] ; then
+			# zkontrolovat jestli range není seznam stránek
+			# tj. obsahuje písmena
+			for i in ${RANGE//,/ } ; do
+				local PAGE=$(identifyname ${SOURCE} ${i})
+				if  [ ! -z "${PAGE}" ] ; then
+					printf "# '%s'\n" "${PAGE#*:}"
+					${DJVUSED} ${SOURCE} -e "select '${PAGE#*:}'; print-ant" 2>/dev/null | formatdsed
+				fi
+			done
 		else
-			echo "# $i" >> ${i/.dsed/.ant}
-			grep -v '^(maparea' $i | sed 's/^(metadata (/\t/ ; s/) (/\n\t/g' | grep -v '^set-ant\|^\.\|^$\|^(metadata' | sed 's/)$// ; s/\t// ; s/^(// ; s/)\ $//' >> ${i/.dsed/.ant}
-			#sed '/^(maparea/,/)$/d' $i | sed 's/^(metadata (/\t(/' | grep -v  '^set-ant\|^\.\|^$\' | >> ${i/.dsed/.meta}
-			grep '^(maparea' $i | sed 's/\\/\\\\0/g' | while read line ; do
-				extractmaparea $line
-			done >> ${i/.dsed/.ant}
+			local IDPAGES=($(range "${RANGE}" | sort -n))
+			local PAGES=($(${DJVM} -l ${SOURCE} | grep PAGE\ # | awk '{print $4}'))
+			local ITEM="${CHARSET#* }"
+			local KEY=(${ITEM})
+			for i in ${IDPAGES[@]} ; do
+				local PAGE="${PAGES[$((${i} -1))]}"
+				if [ ! -z "${PAGE}" ] ; then
+					printf "# '%s'\n" "${PAGE}"
+					${DJVUSED} ${SOURCE} -e "select '${PAGE}'; print-ant" | formatdsed
+				fi
+			done
 		fi
-	done
-	popd
-	return 0
-}
-
-function printant {
-	# Funkce závisí na funkci exportant!!
-	pushd "${TEMPDIR}"
-		for i in $(ls -1 -tr *.ant) ; do
-#			printf "# %s\n" "$i" >> "${TEMPFILE}"
-			cat $i >> "${TEMPFILE}"
-		done
-	popd
+	else
+		# Single page
+		local PAGE=$(identifyname 1)
+		printf "# '%s'\n" "${PAGE}"
+		${DJVUSED} ${SOURCE} -e "select 1; print-ant" | formatdsed
+	fi
 }
 
 function printmeta {
@@ -1485,7 +1535,6 @@ function targetdir {
 function identifybundle {
 	# Function testing DjVu file if is (0) or not (1) bundle
 	# $1 - DjVu file
-	# WARNING: Use ${DJVUDUMP} is necessary!
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	if [ -z "${SOURCE}" ] ; then
@@ -1494,14 +1543,6 @@ function identifybundle {
 	else
 		if [ $(testfile "${SOURCE}") == "djvu" ] ; then
 			${DJVM} -l "${SOURCE}" &>/dev/null && [ $? ] && return 0 || return 1
-#			local TEST=$(${DJVUDUMP} "${SOURCE}" | grep '^\([[:blank:]]*\)DIRM')
-#			if [ "${TEST}" == "" ] ; then
-#				log 1 "identifybundle: ${FILE} is DjVu file"
-#				return 0
-#			else
-#				log 1 "identifybundle: ${FILE} is DjVu bundle"
-#				return 1
-#			fi
 		else
 			log 1 "identifybundle: File ${FILE} is NOT DjVu file."
 			exit 1
@@ -1591,31 +1632,24 @@ function identifyname {
 	local FILE="${SOURCE##*/}"
 	local IDENTIFICATOR="${2##+([[:blank:]])}"
 	identifybundle "${SOURCE}" 
-	echo $? >> /dev/stderr
 	if identifybundle "${SOURCE}" ; then
 		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-			log 1 "identifyname: What is name of page on position ${IDENTIFICATOR} in DjVu file ${FILE}?"
-			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep PAGE\ #${IDENTIFICATOR}\  | awk '{print "[P"$3"]:"$4}' | sed 's/P#/P/')
+			${DJVM} -l "${SOURCE}" | grep PAGE\ #${IDENTIFICATOR}\  | awk '{print $4}'
 		else
-			log 1 "identifyname: Is page with name ${IDENTIFICATOR} in DjVu file ${FILE}?"
-			local OUTPUT=$(${DJVM} -l "${SOURCE}" | grep PAGE\ # | grep ${IDENTIFICATOR}$ | awk '{print "[P"$3"]:"$4}' | sed 's/P#/P/')
+			${DJVM} -l "${SOURCE}" | grep PAGE\ # | grep ${IDENTIFICATOR}$ | awk '{print $4}'
 		fi
 	else
 		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-#			log 1 "identifyname: What is name of page on position ${IDENTIFICATOR} in DjVu file ${FILE}?"
 			local SEARCH="\[P${IDENTIFICATOR}\]"
 		else
-#			log 1 "identifyname: Is page with name ${IDENTIFICATOR} in DjVu file ${FILE}?"
 			local SEARCH="\{${IDENTIFICATOR}\}"
 		fi
 		local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $2}')
-	fi
-	if [ -z "${OUTPUT}" ] ; then
-		printf "identifyname: FAIL - for DjVu bundle %s identificator %s is NOT VALID.\n" "${FILE}" "${IDENTIFICATOR}" >> ${LOG}
-		return 0
-	else
-		printf "identifyname: OK - name page is %s\n" "${OUTPUT}" >> ${LOG}
-		echo -n "${OUTPUT}"
+		if [ -z "${OUTPUT}" ] ; then
+			return 0
+		else
+			echo -n "${OUTPUT}"
+		fi
 	fi
 }
 
@@ -2942,7 +2976,9 @@ Options:
 
   Editace textový informací DjVu svazku - meta informace, bookmarks,outline
 
-  [1m${0##*/}[0m <DjVu> edit {outline|meta [<num>|<name>]}
+  [1m${0##*/}[0m <DjVu> edit outline
+
+  [1m${0##*/}[0m <DjVu> edit ant [<num>|<name>|<RANGE>]
 
          outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
          meta  - vygenerování šablony pro .outline formát s adresováním
@@ -2961,6 +2997,7 @@ Options:
 [1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
   jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
+		help range
 		;;
 		keywords-info) echo """
   ACTION [1minfo[0m
@@ -3509,7 +3546,7 @@ do local POS=$((POS+1))
 				log 1 "main: Aplikuji pro FORCE parametr - ${FORCE}"
 				;;
 				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
-				FORCE="skip"
+				FORCE="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
 				local COUNT=${#VSTUP}
@@ -3846,7 +3883,7 @@ done
 						exit 0
 					;;
 					export) case "${CHARSTRING%% *}" in
-						ant) # Exportuje hyperlinky a meta atributy ve vormátu .ant
+						ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
 							#anttodsed "${CHARSTRING#* }"
 							echo nil
 							;;
@@ -3896,8 +3933,15 @@ done
 					;;
 					import) case "${CHARSTRING%% *}" in
 						ant) # Importuje obsah předhozeného .ant souboru
-							echo "import from ant file to ${FILE}" >> /dev/stderr
-							anttodsed "${CHARSTRING#* }"
+							local ANT=${CHARSTRING#* }
+							if [ -f "${ANT%% *}" ] ; then
+								echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
+								#anttodsed "${CHARSTRING#* }"
+								important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
+							else
+								echo "ERROR: ${ANT%% *} isn't .ant file!"
+								exit 1
+							fi
 							;;
 						meta) echo "import from meta file to ${FILE}"
 							;;
@@ -3918,15 +3962,11 @@ done
 						exit 0
 					;;
 					print) case "${CHARSTRING%% *}" in
-						ant) #echo "1. ${TEMPFILE}" >> /dev/stderr
-							exportant "${FILE}" "${CHARSTRING#* }"
-							printant
-							#echo "2. ${TEMPFILE}" >> /dev/stderr
-							cat ${TEMPFILE}
-							;;
-						meta) printmeta "${FILE}" "${CHARSTRING#* }"
+						ant) printant "${FILE}" "${CHARSTRING#* }"
 							;;
 						outline) printoutline "${FILE}"
+							;;
+						test) compgen -A "${CHARSTRING#* }"
 							;;
 						*) help keyword-print
 							;;
@@ -3958,8 +3998,7 @@ done
 					;;
 					edit) case "${CHARSTRING}" in
 							ant) # export všech ant 
-								exportant "${FILE}" "${CHARSTRING#* }"
-								printant
+								printant "${FILE}" "${CHARSTRING#* }"
 								editor "${TEMPFILE}"
 								echo "chybí funkce pro vložení.. set.."
 							;;
@@ -3989,27 +4028,27 @@ done
 #								[ $(grep -c ^ "${TARGET}") -eq "0" ] && return 1
 #								djvuimport "${FILE}" "${TEMPFILE}"
 							;;
-							*) echo "meta stránky.. ${CHARSTRING}"
-								local NAMEPAGE=$(identifyname "${FILE}" "${CHARSTRING#* }")
-								if [ ! -z "${NAMEPAGE}" ] ; then
-									local TARGET="${TEMPDIR}/${FILE##*/}"
-									local IDPAGE=$(identifypage "${FILE}" "${PAGENAME}") 
-									local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
-									printmeta "${FILE}" "${NAMEPAGE}" | grep -v '^$' | grep -v '^\.$' >  "${TEMPFILE}"
-									local METAHEAD=$(head -1 ${TEMPFILE})
-									if [ -z "${METAHEAD}" ] ; then
-										METAHEAD="#${IDPAGE} '${NAMEPAGE}'"
-									fi
-									changemeta "${TEMPFILE}"
-									editor "${TEMPFILE}"
-									printf "$METAHEAD\n" > "${TARGET/.djvu/.meta}"
-									sed '/^#/d' "${TEMPFILE}" | sort >> "${TARGET/.djvu/.meta}"
-									printf "\n\n.\n" >> "${TARGET/.djvu/.meta}"
-									djvuimport "${FILE}" "${TARGET/.djvu/.meta}"
-								else
-									printf "You must add valid parameter. Use -h for more info.\n" >> /dev/stderr
-									exit 1
-								fi
+							*) help keywords-edit
+#								local NAMEPAGE=$(identifyname "${FILE}" "${CHARSTRING#* }")
+#								if [ ! -z "${NAMEPAGE}" ] ; then
+#									local TARGET="${TEMPDIR}/${FILE##*/}"
+#									local IDPAGE=$(identifypage "${FILE}" "${PAGENAME}") 
+#									local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
+#									printmeta "${FILE}" "${NAMEPAGE}" | grep -v '^$' | grep -v '^\.$' >  "${TEMPFILE}"
+#									local METAHEAD=$(head -1 ${TEMPFILE})
+#									if [ -z "${METAHEAD}" ] ; then
+#										METAHEAD="#${IDPAGE} '${NAMEPAGE}'"
+#									fi
+#									changemeta "${TEMPFILE}"
+#									editor "${TEMPFILE}"
+#									printf "$METAHEAD\n" > "${TARGET/.djvu/.meta}"
+#									sed '/^#/d' "${TEMPFILE}" | sort >> "${TARGET/.djvu/.meta}"
+#									printf "\n\n.\n" >> "${TARGET/.djvu/.meta}"
+#									djvuimport "${FILE}" "${TARGET/.djvu/.meta}"
+#								else
+#									printf "You must add valid parameter. Use -h for more info.\n" >> /dev/stderr
+#									exit 1
+#								fi
 							;;
 						esac
 						exit 33
