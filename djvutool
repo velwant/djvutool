@@ -47,6 +47,7 @@ shopt -s extglob
 NAME="djvutool"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
 
+DEBUG="-d0"
 LOG="${LOG=/dev/null}"
 XML="${XML=no}"
 DPI="${DPI=300}"
@@ -211,21 +212,131 @@ function tabs {
 	sed "s/\t/${TAB}/g" "${1}"
 }
 
-function log {
-	# $1 - závažnost hlášky
-	# $2 - textový řetězec..
-	# $DEBUG úroveň logování
-	# $LOG - výstup (default - /dev/null
-	case "${1}" in
-		1) # Hlášky upřesňující místo ve skriptu
-		echo "${@:2}" >> ${LOG}
-		;;
-		0) # Běžné hlášky
-		echo "${1}" >> ${LOG}
-		;;
-		*)
-		;;
-	esac
+# ### <span id="log">log()</span> ([top](#FUNCTIONS))
+# Je-li použita volba `-d` nebo `--debug`, nastaví funkce [main](#main)
+# do globální proměnné [$DEBUG](#$DEBUG) řetězcovou hodnotu, která určuje
+# kam se budou zprávy předané této funkci posílat. Ta je tvořená řetězcem
+# `-d` a číslem. Jakž bude mít toto číslo efekt viz
+# [Parametry pro debug](#debug-levels).
+#
+# První položka, předaná této funkci jako parametr __$1__, určuje
+# závažnost zprávy. Ostatní předané položky pak jsou již součástí
+# vypisované zprávy.
+#
+#     log info "Zpráva s informativní hodnotou"
+# Informační zprávy obsahují kontrolní výpisy, které informují o průběhu
+# zpracování akce skriptem
+#
+#     log warn "Zpráva, co upozorňuje že by něco nemuselo klapnout"
+# Upozorňující zprávy se používají při operacích, které mohou představovat
+# problém. Kupř. když skript realizuje nevratný krok. Modelovým příkladem
+# takové situace je zpracování příkazu [___delete___](#delete-command-config)
+# při akci [__config__](#config), při kterém se odstraňují všechny
+# konfigurační soubory pro VM, ze všech hostitelů.
+#
+#     log err "Zpráva, která oznamuje chybu"
+# Chybové zprávy popisují stavy, které mají návratový kód __1__
+#
+# #### <span id="debug-levels">Parametry pro debug</span>
+# Výchozí hodnota pro [$DEBUG](#$DEBUG) je __0__ při které se nevypisuje
+# nic. Doporučená úroveň pro ladění skriptu je __7__. A pro normální
+# použití, v případě že je skript spravován kupř. přes `cron` __5__.
+#
+# 1. Vypisuje pouze chybové (ERR) zprávy pouze na standardní chybový výstup
+# 2. Zapisuje pouze do logu a pouze chybové (ERR) zprávy
+# 3. Vypisuje chybové (ERR) zprávy na standardní výstup a zároveň je
+#    zapisuje do logu
+# 4. Vypisuje chybové (ERR) a varovné (WARN) zprávy pouze na standardní
+#    chybový výstup
+# 5. Zapisuje chybové (ERR) a varovné (WARN) zprávy pouze do logu
+# 6. Zapisuje chybové (ERR) a varovné (WARN) zprávy na standardní výstup
+#    a zároveň je zapisuje do logu
+# 7. Vypisuje všechny zprávy pouze na standardní chybový výstup
+# 8. Zapisuje všechny zprávy pouze do logu
+# 9. Vypisuje všechny zprávy na standardní výstup a zároveň je zapisuje do logu
+#
+# #### Kde se rozhodně nesmí použít parametr $DEBUG
+# Parametr $DEBUG rozhodně nepoužívejte tam, kde se musí zavolat akce na
+# vzdáleném stroji přes $SSH a navrácený výstup se má dále zpracovávat.
+# Problém spočívá v tom, že SSH s parametrem -t, které se používá pro
+# interaktivní práci, přetočí chybový výstup na standardní výstup a tím
+# pádem se může vrátit neplatný výsledek.
+#
+# Typickým příkladem budiž volání akce master. Je-li zavoláno s parametrem
+# DEBUG, je výsledek pro další zpracování nepoužitelný!
+#
+#      local MASTER=$($0 ${DEBUG} master ${PROCESS})
+#
+# Správně:
+#
+#      local MASTER=$($0 master ${PROCESS})
+#
+log() {
+    local TIMESTAMP="$(date +%T.%N) $(hostname)"
+    local LOG="${LOGDIR}/messages"
+    if [ -n "${DEBUG}" ] ; then
+        case ${DEBUG} in
+            -d0) ;;
+            -d1) [ "${1^^}" == "ERR" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+                ;;
+            -d2) [ "${1^^}" == "ERR" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+                ;;
+            -d3) [ "${1^^}" == "ERR" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+                tee ${LOG} >> /dev/stderr
+                ;;
+            -d4) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+                ;;
+            -d5) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+                ;;
+            -d6) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+                tee ${LOG} >> /dev/stderr
+                ;;
+            -d7) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+                ;;
+            -d8) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+                ;;
+            -d9) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+                tee ${LOG} >> /dev/stderr
+                ;;
+            *) help_debug && exit 1
+                ;;
+        esac
+    fi
+}
+# <span id="help_debug" /> ([top](#FUNCTIONS))
+help_debug() {
+    echo """Chybné nastavení pro debug –> $1
+
+Pro debug lze použít pouze čísla od 1 do 9. Nastavení lze provést těmito způsoby:
+
+    … -d2 …
+    … -d 2 …
+    … -d=2 …
+    … --debug 2 …
+    … --debug=2 …
+
+  0 Je výchozí stav, při kterém se logovací zprávy nevypisují nikam.
+  1 Vypisuje pouze chybové (ERR) zprávy pouze na standardní chybový
+    výstup.
+  2 Zapisuje pouze do logu a pouze chybové (ERR) zprávy.
+  3 Vypisuje chybové (ERR) zprávy na standardní výstup a zároveň je
+    zapisuje do logu.
+  4 Vypisuje chybové (ERR) a varovné (WARN) zprávy pouze na standardní
+    chybový výstup.
+  5 Zapisuje chybové (ERR) a varovné (WARN) zprávy pouze do logu.
+  6 Zapisuje chybové (ERR) a varovné (WARN) zprávy na standardní výstup
+    a zároveň je zapisuje do logu.
+  7 Vypisuje všechny zprávy pouze na standardní chybový výstup.
+  8 Zapisuje všechny zprávy pouze do logu.
+  9 Vypisuje všechny zprávy na standardní výstup a zároveň je zapisuje
+    do logu.
+"""
 }
 
 function pushd {
@@ -569,7 +680,7 @@ function djvuimport {
 		for i in  ${LIST} ; do
 
 			local PAGENAME="${i##*:}"
-			log 1 "import: Hledám soubory pro import dat do stránky ${PAGENAME} v souboru ${FILE}"
+			log info "djvuimport() Hledám soubory pro import dat do stránky ${PAGENAME} v souboru ${FILE}"
 			if [ -f "${FROM}/${PAGENAME/.djvu/.dsed}" ] ; then
 				importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}/${PAGENAME/.djvu/.dsed}"
 			fi
@@ -582,7 +693,7 @@ function djvuimport {
 
 		done
 		local IFS=$IFS_BAK
-		log 1 "import: Importuji meta atributy a obsah pro celý soubor ${FILE}"
+		log info "djvuimport() Importuji meta atributy a obsah pro celý soubor ${FILE}"
 		# Import obsahu souboru..
 		if [ -f "${FROM}/${FILE/.djvu/.meta}" ] ; then
 			importmetaall "${SOURCE}" "${FROM}/${FILE/.djvu/.meta}"
@@ -622,7 +733,7 @@ function djvuimport {
 				echo "může jít i o seznam stránek k importu do souboru.." >> /dev/stderr
 				local FROMFILE="${FROM##*/}"
 				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
-				log 1 "import: Importuji data do stránky ${FROMFILE}"
+				log info "djvuimport() Importuji data do stránky ${FROMFILE}"
 				local LIST=$(djvuinfo "${SOURCE}" pages)
 				local IFS_BAK=$IFS
 				local IFS=$'\n'
@@ -750,12 +861,12 @@ function djvuexport {
 
 	if [  -z "${CHARSTRING}" ] ; then
 		if [ -z "${PAGENAME}" ] ; then
-			log 1 "export: Export all pages from ${FILE} into aktual directory - do set TARGETDIR"
+			log info "djvuexport() Export all pages from ${FILE} into aktual directory - do set TARGETDIR"
 			local TARGETDIR=$(targetdir $(pwd))
 			exportdjvuall "${SOURCE}" "${TARGETDIR}"
 			return 0
 		else
-			log 1 "export: Export page identificated by ${PAGENAME} from ${FILE} into aktual directory - do set TARGETDIR"
+			log info "djvuexport() Export page identificated by ${PAGENAME} from ${FILE} into aktual directory - do set TARGETDIR"
 			local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
 			if [ -z "${IDPAGE}" ] ; then
 				case "${PAGENAME%%\ *}" in
@@ -779,12 +890,12 @@ function djvuexport {
 			# Tady může být nějaký jiný parametr, než pořadové číslo, a také TARGETDIR může být prázdný.
 			case "${IDPAGE}" in
 				all) if [ -z "${TARGETDIR}" ] ; then
-						log 1 "export: Export all pages from ${FILE} into actual directory - do set TARGETDIR"
+						log info "djvuexport() Export all pages from ${FILE} into actual directory - do set TARGETDIR"
 						local TARGETDIR=$(targetdir $(pwd))
 						exportdjvuall "${SOURCE}" "${TARGETDIR}"
 						return 0
 					else
-						log 1 "export: Export all pages from ${FILE} into ${TARGETDIR}"
+						log info "djvuexport() Export all pages from ${FILE} into ${TARGETDIR}"
 						local TARGETDIR=$(targetdir "${TARGETDIR}")
 						exportdjvuall "${SOURCE}" "${TARGETDIR}"
 						return 0
@@ -796,7 +907,7 @@ function djvuexport {
 				outline) bookmarktooutline "${SOURCE}"
 					return 0
 				;;
-				*) log 1 "export: Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
+				*) log info "djvuexport() Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
 					local NAMEPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
 					if [ -z "${NAMEPAGE}" ] ; then
 						# djvutool bundle.djvu export
@@ -817,7 +928,7 @@ function djvuexport {
 		else
 			local NAMEPAGE=${PAGENAME##+([[:blank:]])}
 			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
-			log 1 "export: Export page identificated by name -${NAMEPAGE}- from ${FILE} into -${TARGETDIR}-"
+			log info "djvuexport() Export page identificated by name -${NAMEPAGE}- from ${FILE} into -${TARGETDIR}-"
 			local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
 			[ -z "${IDPAGE}" ] && echo "export: In ${FILE} is not any page with name ${NAMEPAGE}" >> /dev/stderr &&  exit 1
 			local TARGETDIR=$(targetdir "${TARGETDIR}")
@@ -862,7 +973,7 @@ function exportdjvuall {
 	local NUMPAGE=1
 	while [ ${PAGES} -gt "0" ] ; do
 		local NAMEPAGE=$(identifyname "${SOURCE}" "${NUMPAGE}")
-		log 1 "exportdjvuall: Exportuji stránku ${NAMEPAGE}"
+		log info "exportdjvuall() Exportuji stránku ${NAMEPAGE}"
 
 		[[ $EXPORTDJVU =~ $EXPORTVALUE ]] && exportdjvupage "${1}" "${NAMEPAGE}" "${2}"
 		[[ $EXPORTIMG =~ $EXPORTVALUE ]] && exportimgpage "${1}" "${NAMEPAGE}" "${2}"
@@ -900,7 +1011,7 @@ function exportdsedbundle {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUSED} "${1}" -e "${EXPORT}" > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "exportdsedbundle: Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportdsedbundle() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "exportdsedbundle: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUSED} "${1}" -e "${EXPORT}" > "${TARGET}"
@@ -933,7 +1044,7 @@ function exportxmlbundle {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUTOXML} "${1}" "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "exportxmlbundle: Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportxmlbundle() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "exportxmlbundle: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUTOXML} "${1}" "${TARGET}"
@@ -967,7 +1078,7 @@ function exportimgpage {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "exportimgpage: Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportimgpage() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "exportimgpage: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
@@ -1002,7 +1113,7 @@ function exportxmlpage {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${1}" "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportxmlpage() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${1}" "${TARGET}"
@@ -1404,7 +1515,7 @@ function exportmetabundle {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUSED} "${1}" -e "print-meta" > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "Soubor ${TARGET} již v adresáři ${2} existuje."
+				log warn "exportmetabundle() Soubor ${TARGET} již v adresáři ${2} existuje."
 			else
 				echo "Soubor ${TARGET} již v adresáři ${2} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUSED} "${1}" -e "print-meta" > "${TARGET}"
@@ -1428,7 +1539,7 @@ function exportmetapage {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUSED} "${1}" -e "select '${2}'; print-meta" > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportmetapage() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUSED} "${1}" -e "select '${2}'; print-meta" > "${TARGET}"
@@ -1461,7 +1572,7 @@ function exportdsedpage {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUSED} "${1}" -e "select '${2}'; ${EXPORT}" > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportdsedpage() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUSED} "${1}" -e "select '${2}'; ${EXPORT}" > "${TARGET}" 2>${LOG}
@@ -1480,14 +1591,14 @@ function exportdjvupage {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
 	# $3 - targetdir - full path
-	log 1 "exportdjvupage: -${1}- -${2}- ${3}"
+	log info "exportdjvupage() -${1}- -${2}- ${3}"
 	pushd "${3}"
 	if [ "${PAGE}" == "yes" ] ; then
 		if [ -f "${2}" ] ; then
 			if [ "${FORCE}" == "yes" ] ; then
 				${DJVUSED} -e "select '${2}'; save-page-with '${2}'" "${1}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log 1 "Soubor ${2} již v adresáři ${3} existuje."
+				log warn "exportdjvupage() Soubor ${2} již v adresáři ${3} existuje."
 			else
 				echo "Soubor ${2} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DJVUSED} -e "select '${2}'; save-page-with '${2}'" "${1}"
@@ -1504,7 +1615,7 @@ function getocr {
 	local FILE="${SOURCE##*/}"
 	if [ "${OCR}" ] ; then
 		${OCRODJVU} --in-place -l "${OCR}" "${SOURCE}"
-		[ "$?" ] && log 1 "getocr: OCR was applicated on ${FILE}" 
+		[ "$?" ] && log info "getocr() OCR was applicated on ${FILE}" 
 	fi
 }
 
@@ -1516,7 +1627,7 @@ function testfile {
 	if [ -f "${SOURCE}" ] ; then
 		local TYPE=$(${MIME} -dbM "${SOURCE}" | awk '{print $1}')
 	else
-		log 1 "testfile: File ${1} is NOT valid."
+		log err "testfile() File ${1} is NOT valid."
 		exit 1
 	fi
 	echo "${TYPE,,}"
@@ -1526,7 +1637,7 @@ function targetdir {
 	# Function return path into existing directory
 	# $1 - path
 	if [ -z "${1}" ] ; then
-		log 1 "targetdir: NOT PATH"
+		log err "targetdir() NOT PATH"
 		exit 1
 	else
 		local TARGETDIR=$(${REALPATH} -m -P "${1}")
@@ -1535,7 +1646,7 @@ function targetdir {
 		else
 			mkdir -p "${TARGETDIR}"
 			if [ $? -gt "0" ] ; then
-				log 1 "targetdir: Could not create target directory ${TARGETDIR}"
+				log err "targetdir() Could not create target directory ${TARGETDIR}"
 				exit 1
 			else
 				echo -n "${TARGETDIR}"
@@ -1550,13 +1661,13 @@ function identifybundle {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	if [ -z "${SOURCE}" ] ; then
-		log 1 "identifybundle: Path ${1} is not valid."
+		log err "identifybundle() Path ${1} is not valid."
 		exit 1
 	else
 		if [ $(testfile "${SOURCE}") == "djvu" ] ; then
 			${DJVM} -l "${SOURCE}" &>/dev/null && [ $? ] && return 0 || return 1
 		else
-			log 1 "identifybundle: File ${FILE} is NOT DjVu file."
+			log err "identifybundle() File ${FILE} is NOT DjVu file."
 			exit 1
 		fi
 	fi
@@ -1700,10 +1811,10 @@ function identifypage {
 	local FILE="${SOURCE##*/}"
 	local IDENTIFICATOR="${2##+([[:blank:]])}"
 	if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-#		log 1 "identifypage: Has DjVu file ${FILE} page on position ${IDENTIFICATOR}?"
+		log info "identifypage() Has DjVu file ${FILE} page on position ${IDENTIFICATOR}?"
 		local SEARCH="\[P${IDENTIFICATOR}\]"
 	else
-#		log 1 "identifypage: Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
+		log info "identifypage() Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
 		local SEARCH="\{${IDENTIFICATOR}\}"
 	fi
 #	echo "${SEARCH}" >> /dev/stderr
@@ -1715,7 +1826,7 @@ function identifypage {
 		return 0
 	else
 		local ORDER="${OUTPUT//+([\]P\[ ])/}"
-		log 1 "identifypage: OK order page is %s.\n" "${ORDER}" >> ${LOG}
+		log info "identifypage() OK order page is %s.\n" "${ORDER}"
 		echo -n "${ORDER}"
 	fi
 }
@@ -1726,7 +1837,7 @@ function lastpage {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	[ "$(testfile ${SOURCE})" == "djvu" ] || exit 1
-	log 1 "lastpage: Count of all pages in ${FILE}"
+	log info "lastpage() Count of all pages in ${FILE}"
 	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
 	echo -n "${OUTPUT}"
 	
@@ -1887,7 +1998,7 @@ function djvumove {
 		case "${VSTUP:$START:$POS}" in
 			*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
 				local SOUBOR="${VSTUP:0:$POS}"
-				log 1 "move: Zachycen soubor $SOUBOR - ${SOUBOR:$((${#SOUBOR} - 4)):4}"
+				log info "move() Zachycen soubor $SOUBOR - ${SOUBOR:$((${#SOUBOR} - 4)):4}"
 				if [ "${SOUBOR:$((${#SOUBOR} - 4)):4}" == "djvu" ] ; then
 #					echo "Před testem.. '${SOUBOR##+([[:blank:]])}'" >> /dev/stderr
 					local TESTORDER=$(identifypage "${SOURCE}" "${SOUBOR##+([[:blank:]])}")
@@ -2061,7 +2172,7 @@ function djvumove {
 								else
 									local COUNT=${#VSTUP}
 									local POS=0
-									log 1 "move: INFO - page ${ANAME} has order ${A}. What is the identificator of target page from bundle -$VSTUP-?"
+									log warn "move() INFO - page ${ANAME} has order ${A}. What is the identificator of target page from bundle -$VSTUP-?"
 								fi
 							fi
 						elif [ "${ANAME}" == "none" ] ; then
@@ -2073,7 +2184,7 @@ function djvumove {
 							else
 								local A=""
 								local BNAME="${SOUBOR}"
-								log 1 "move: Vkládá se konvertovaná stránka ${FROM} před stránu -${BNAME}- na pozici ${B}"
+								log warn "move() Vkládá se konvertovaná stránka ${FROM} před stránu -${BNAME}- na pozici ${B}"
 								break
 							fi
 						else
@@ -3436,7 +3547,7 @@ function todjvu {
 	esac
 	local TARGETPATH=$(${REALPATH} -m -P "${2}")
 	local TARGET="${TARGETPATH##*/}"
-	log 1 "todjvu: From input file ${SOURCE} make DjVu file ${TARGET}" >> /dev/stderr
+	log warn "todjvu() From input file ${SOURCE} make DjVu file ${TARGET}"
 	if [ $(testfile "${SOURCE}") == "djvu" ] ; then
 		echo "todjvu: ERROR - ${SOURCE} is DjVu file" >> /dev/stderr
 		exit 1
@@ -3444,15 +3555,15 @@ function todjvu {
 		if [ "${#ALG[@]}" -gt "1" ] ; then
 			for i in ${ALG[@]} ; do 
 				${DIDJVU} encode -o "${TARGETPATH/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "${SOURCE}"
-				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH/.djvu/.$i.djvu}"
+				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH/.djvu/.$i.djvu}"
 				getocr "${TARGETPATH/.djvu/.$i.djvu}"
 			done
 		else
 			if [ -f "${TARGETPATH}" ] ; then
 				if [ "${FORCE}" == "yes" ] ; then
-				log 1 "todjvu: INFO - rewrite target file ${TARGET}."
+				log info "todjvu() INFO - rewrite target file ${TARGET}."
 					${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
-				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH}"
+				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH}"
 					getocr "${TARGETPATH}"
 				else
 					echo "Mám přepsat cílový soubor ${TARGET}?"
@@ -3462,7 +3573,7 @@ function todjvu {
 			else
 				${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
 				getocr "${TARGETPATH}"
-				[ "$?" ] && log 1 "todjvu: INFO - file ${FILE} was converted into ${TARGETPATH}"
+				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH}"
 			fi
 		fi
 	fi
@@ -3532,7 +3643,7 @@ do local POS=$((POS+1))
 				local VSTUP="${TEMP}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
+				log warn "main() Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
 			else
 				for i in ${VALUE//,/ } ; do
 #					echo "$i" >> /dev/stderr
@@ -3546,7 +3657,7 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
+				log info "main() Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
 			fi
 		;;
 		-d|--dsed) # Volba pro akci export
@@ -3563,9 +3674,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro DSED parametr - ${DSED}"
+				log info "main() Aplikuji pro DSED parametr - ${DSED}"
 				;;
-				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
+				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
 				DSED="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
@@ -3588,7 +3699,7 @@ do local POS=$((POS+1))
 					local VSTUP="${NEXT}"
 					local POS=0
 					local COUNT=${#VSTUP}
-					log 1 "main: Aplikuji pro DPI parametr - ${DPI}"
+					log info "main() Aplikuji pro DPI parametr - ${DPI}"
 				else
 					echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
 					exit 1
@@ -3611,9 +3722,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro FORCE parametr - ${FORCE}"
+				log info "main() Aplikuji pro FORCE parametr - ${FORCE}"
 				;;
-				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
+				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
 				FORCE="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
@@ -3651,19 +3762,19 @@ do local POS=$((POS+1))
 						local COUNT=${#VSTUP}
 						if [ "${XXX}" -ge "0" ] && [ "${XXX}" -lt "200" ] ; then
 							LEVEL="--loss-level=${XXX}"
-							log 1 "main: Aplikuji pro LEVEL hodnotu - ${LEVEL}"
+							log info "main() Aplikuji pro LEVEL hodnotu - ${LEVEL}"
 						else
 							help level && exit 0
 						fi
 					else
-						echo "main: Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
+						echo "main() Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
 						exit 1
 					fi
 				;;
 				*) echo "Sem se nikdy neměl dostat"
 				;;
 			esac
-			log 1 "Úroveň ztrátovosti při kompresi ${LEVEL}"
+			log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
 		;;
 		-i|--image) # Volba pro akci export
 			local POS=$((POS+1))
@@ -3679,9 +3790,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro IMG parametr - ${IMG}"
+				log info "main)) Aplikuji pro IMG parametr - ${IMG}"
 				;;
-				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
+				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
 				IMG="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
@@ -3702,13 +3813,13 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro META parametr - ${META}"
+				log info "main() Aplikuji pro META parametr - ${META}"
 			else
 				META="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
+				log warn "main() Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
 			fi
 		;;
 		-o|--ocr) # Volba pro akci insert
@@ -3790,7 +3901,7 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro OCR parametr - ${OCR}"
+				log info "main() Aplikuji pro OCR parametr - ${OCR}"
 			else
 				OCR="${OCR=ces}"
 				local VSTUP="${TEMP}"
@@ -3815,9 +3926,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro PAGE parametr - ${PAGE}"
+				log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
 			else
-				log 1 "Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
+				log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
 				PAGE="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
@@ -3838,9 +3949,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro RENAME parametr - ${RENAME}"
+				log info "main() Aplikuji pro RENAME parametr - ${RENAME}"
 			else
-				echo "main: FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
+				echo "main() FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
 				exit 1
 			fi
 		;;
@@ -3860,7 +3971,7 @@ do local POS=$((POS+1))
 					local VSTUP="${NEXT}"
 					local POS=0
 					local COUNT=${#VSTUP}
-					log 1 "main: Aplikuji pro THUMB parametr - ${DPI}"
+					log info "main() Aplikuji pro THUMB parametr - ${DPI}"
 				else
 					echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
 					exit 1
@@ -3870,7 +3981,7 @@ do local POS=$((POS+1))
 				exit 1
 			fi
 		;;
-		-v|--verbose) # Volba pro ukecaný výstup
+    -v*|--verbose*) # Volba pro ukecaný výstup
 			local PARAM=${VSTUP:0:$POS}
 			local POS=$((POS+1))
 			local TEMP=${VSTUP:$POS}
@@ -3878,13 +3989,31 @@ do local POS=$((POS+1))
 				-h*|--help*) help verbose && exit 0
 				;;
 			esac
+            echo "PARAM ${PARAM} ; TEMP ${TEMP}" >> /dev/stderr
 			case "${PARAM}" in
-				-v|--verbose) LOG="/dev/stderr"
+				--verbose) DEBUG="-d1"
 					local VSTUP="${TEMP}"
 					local POS=0
 				;;
-			esac
-#			log 1 "Nastavuji ukecaný výstup"
+                -v[0-9]) DEBUG="-d${PARAM:2}"
+					local VSTUP="${TEMP}"
+					local POS=0
+                    ;;
+                *=*)
+                    case "${PARAM#*=}" in
+                       0) local VSTUP="${TEMP}"
+                        local POS=0
+                       ;;
+                        [1-9]) DEBUG="-d${PARAM#*=}"
+                         local VSTUP="${TEMP}"
+                            local POS=0
+                        ;;
+                        *) help_debug "${PARAM#*=}" && exit 1 ;;
+                    esac
+                    ;;
+#                *) help_debug "${1#*=}" && exit 1 ;;
+            esac
+            log set "main() DEBUG –> ${DEBUG}"
 		;;
 		-x|--xml) # Volba pro akci export
 			local POS=$((POS+1))
@@ -3900,9 +4029,9 @@ do local POS=$((POS+1))
 				local VSTUP="${NEXT}"
 				local POS=0
 				local COUNT=${#VSTUP}
-				log 1 "main: Aplikuji pro XML parametr - ${XML}"
+				log info "main() Aplikuji pro XML parametr - ${XML}"
 				;;
-				*) log 1 "Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
+				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
 				XML="yes"
 				local VSTUP="${TEMP}"
 				local POS=0
@@ -3925,9 +4054,9 @@ do local POS=$((POS+1))
 				local TEMP="${OREZ%${CHARSTRING}}"
 				local KEY="${TEMP%%+([[:blank:]])}"
 			fi
-#			log 1 "KEY -${KEY}-"
-#			log 1 "FILE -${FILE}-"
-#			log 1 "CHARSTRING -${CHARSTRING}-"
+#			log info "KEY -${KEY}-"
+#			log info "FILE -${FILE}-"
+#			log info "CHARSTRING -${CHARSTRING}-"
 		break
 		;;
 	esac
@@ -3944,7 +4073,7 @@ done
 	esac
 
 	if [ -f "${FILE}" ] ; then
-#		log 1 "main: Soubor -${FILE}- existuje.."
+#		log warn "main: Soubor -${FILE}- existuje.."
 #		FILE=${FILE//\ /\\ }
 		FILETYPE=$(testfile "${FILE}")
 		case ${FILETYPE} in
@@ -3963,7 +4092,7 @@ done
 						exit 1
 						if [ -f "${3}" ] ; then
 							if [ $(testfile ${3}) == "djvu" ] ; then
-								log 1 "main - insert: Soubor je typu djvu"
+								log info "main() - insert: Soubor je typu djvu"
 								local INSERTFILE=${3}
 							else
 								[ "${#ALG[@]}" == "1" ] || exit 32
@@ -3976,7 +4105,7 @@ done
 							fi
 							# Určit pozici...
 							local P=$(identifypage ${1} ${4})
-							log 1 "main - insert: Cílová pozice je $P"
+							log info "main() - insert: Cílová pozice je $P"
 							if [ -z "${P}" ] ; then
 								if [ -z "${4}" ] ; then
 									echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
@@ -3986,7 +4115,7 @@ done
 									exit 1
 								fi
 							else
-								log 1 "main - insert: Vkládám ${INSERTFILE} na pozici $P"
+								log info "main() - insert: Vkládám ${INSERTFILE} na pozici $P"
 								insertpage ${1} ${INSERTFILE} ${P}
 							fi
 						else
