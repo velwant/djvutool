@@ -82,6 +82,8 @@ case $CHYBA in
  ;;
  25) echo "ERROR: xmlstarlet - tool for work with xml not installed"
  ;;
+ 26) echo "ERROR: xcftools - tool for work with xcf file (GIMP) not installed"
+ ;;
  31) echo "Není nainstalován balík ocrodjvu, na djvu soubory nelze aplikovat OCR. Buďto jej doinstalujte, nebo odstraňte z příkazové řádky parametr -o (--ocr)" >> /dev/stderr
  ;;
  32) echo "Pokud má při operaci zpracovat do DjVu bitmapový soubor, je třeba uvést na příkazové řádce parametrem -a jaký se má použít algoritmus. Jaké parametry lze použít se dozvíte pokud místo jména algoritmu napíšete znak ?" >> /dev/stderr
@@ -138,12 +140,18 @@ STAT=$(which readlink)
 [ ! -x "${STAT}" ] && exit 22
 EXIFTOOL=$(which exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
-TESSERACT=$(which tesseract)
-[ ! -x "${TESSERACT}" ] && exit 31
+# Přesunuto do funkce main k volbě -o|--ocr
+#TESSERACT=$(which tesseract)
+#[ ! -x "${TESSERACT}" ] && exit 31
 IDENTIFY=$(which identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
 CONVERT=$(which convert)
 [ ! -x "${CONVERT}" ] && echo exit 24
+XCFINFO=$(which xcfinfo)
+[ ! -x "${XCFINFO}" ] && echo exit 26
+XCF2PNM=$(which xcf2pnm)
+[ ! -x "${XCF2PNM}" ] && echo exit 26
+
 
 
 NETPBM=0
@@ -152,7 +160,7 @@ PNMSCALE=$(which pnmscale)
 if (( $NETPBM == 0 )); then
     VERSION=($(${PNMSCALE} -version 2>&1 | head -1))
     case ${VERSION[$((${#VERSION[@]} - 1))]} in
-	10.0*|9*) echo "WARNING: Version Netpbm pnmacele don't support filters. I must use imagemagick convert" >> /dev/stderr
+	9*) echo "WARNING: Version Netpbm pnmscale don't support filters. I must use imagemagick convert" >> /dev/stderr
 	    NETPBM=1
 	    ;;
 	*)  NETPBM=0
@@ -183,6 +191,7 @@ if (( $NETPBM == 1 )) ; then
     CONVERT=$(which convert)
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
+
 #=== konec testu závislostí ===
 
 ## Pomocné funkce...
@@ -664,11 +673,11 @@ function djvuexport {
 
 #	echo "${PAGE} ${DSED} ${XML} ${IMG} ${META} ${FORCE} option" >> /dev/stderr
 	export EXPORTVALUE=0
-	[ "${PAGE}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 1 ))
-	[ "${IMG}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 2 ))
-	[ "${XML}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 4 ))
-	[ "${META}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 8 ))
-	[ "${DSED}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 16 ))
+	[ "${PAGE}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 1 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
+	[ "${IMG}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 2 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
+	[ "${XML}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 4 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
+	[ "${META}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 8 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
+	[ "${DSED}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 16 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
 #	if [ "${PAGE}" == "no" ] && [ "${DSED}" == "no" ] && [ "${XML}" == "no" ] && [ "${IMG}" == "no" ] && [ "${META}" == "no" ] ; then
 
 	if  [ "${FORCE}" == "skip" ] ; then
@@ -949,20 +958,23 @@ function exportimgpage {
 		no) return 0
 		;;
 	esac
+	echo "$EXPORT" >> /dev/stderr
+	echo "$PNMTOPNG" >> /dev/stderr
 	if [ "${IMG}" != "no" ] ; then
 		local PAGE=$(identifypage "${1}" "${2}")
 		local TARGET="${2/.djvu/.png}"
 		if [ -f "${TARGET}" ] ; then
 			if [ "${FORCE}" == "yes" ] ; then
-				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
 				log 1 "exportimgpage: Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
 				echo "exportimgpage: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 			fi
 		else
-			${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+			echo "${DDJVU} -format=pnm ${EXPORT} -page=${PAGE%%(*} ${1} | ${PNMTOPNG} > ${TARGET}"
+			${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 		fi
 	fi
 	popd
@@ -1596,6 +1608,33 @@ function comparedjvu {
 		done
 	fi
 	potvrdit && return 0 || return 1
+}
+
+function splitxcf {
+	# vrátí seznam
+#	echo ${RANGE[@]} >> /dev/stderr
+	local SOURCE=$(${REALPATH} -m -P "${1}")
+	local FILE="${SOURCE##*/}"
+	pushd ${TEMPDIR}
+		i=0
+		${XCFINFO} ${SOURCE} | grep -v Version | cut -d ' ' -f5- | while read line
+		do i=$((i+1))
+			if [ -z ${RANGE} ] ; then
+				${XCF2PNM} ${SOURCE} -o "${line%.pnm}.pnm" "$line"
+			else
+				for x in ${RANGE[@]}
+					do if [ "$x" -eq "$i" ] ; then
+						${XCF2PNM} ${SOURCE} -o "${line%.pnm}.pnm" "$line"
+					fi
+				done
+			fi
+		done
+	popd
+}
+
+function splittiff {
+	# vrátí seznam
+	echo nic
 }
 
 function convertimg {
@@ -3021,6 +3060,35 @@ Options:
   * Subkey [3m'pages'[23m with an identificator of page return only item for this.
 """
 		;;
+		keywords-convert) echo """
+options:
+* není-li uvedeno -o tak se OCR nedělá!
+* je třeba přidat volbu, která dovolí upravit chování
+	c (color) barevná kresba na pozadí
+	b (black-white) černobílá kresba na popředí
+	n (na výstupu pouze xml soubor s výsledkem OCR)
+
+  ACTION [1mconvert[0m
+
+  Conversion multipage file into DjVu bundle.
+
+  [1m${0##*/}[0m <Multipage file> convert [ALG [<num>|<name>]]
+
+         num  - order or range layers
+         name - name of layer in multipage file
+
+  ALG:
+         [3mexif[23m - return exif info about DjVu file
+         [3mmeta[23m - return meta attribute keys from DjVu file
+        [3mpages[23m - return ordered list pages from DjVu bundle with names
+
+[3mNotice:[23m
+  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
+  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
+  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
+"""
+
+		;;
 		keywords-print) echo """
    Action [1mprint[0m
 
@@ -3654,16 +3722,69 @@ do local POS=$((POS+1))
 			esac
 			local NEXT="${TEMP#* }"
 			local VALUE="${TEMP% ${NEXT}}"
-#			echo "$VALUE" >> /dev/stderr
+			echo "$VALUE" >> /dev/stderr
+
 #			echo $(${TESSERACT} --list-langs 2>&1 | sed '1d;x') >> /dev/stderr
 			for i in ${VALUE//+/ } ; do
 				local TEST="no"
-				for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
-					[ "$i" == "$y" ] && local TEST="yes"
-#					echo "$i - $y" >> /dev/stderr
-				done
-				[ "${TEST}" == "no" ] && echo "Pro jazyk $i nemá tesseract nainstalovanou jazykovou podporu" >> /dev/stderr && exit 0
+				local OCR=(${i//:/\ })
+				if [ "${#OCR[@]}" -eq 2 ] ; then
+					# ${OCR[0]} engine
+					# ${OCR[1]} jazyk
+					case "${OCR[0]:0:1}" in
+						c) CUNEIFORM=$(which cuneiform)
+							[ ! -x "${CUNEIFORM}" ] && exit 31
+							if [ "${OCR[1]}" == "?" ] ; then
+								${CUNEIFORM} -l
+								exit 0
+							else
+								for y in $(${CUNEIFORM} -l | grep languages | sed 's/^[a-Z ]*://') ; do
+									[ "${OCR[1]}" == "$y" ] && OCRLANG=$y && local TEST="yes"
+								done
+							fi
+						;;
+						t) TESSERACT=$(which tesseract)
+							[ ! -x "${TESSERACT}" ] && exit 31
+							if [ "${OCR[1]}" == "?" ] ; then
+								${TESSERACT} --list-langs
+								exit 0
+							else
+								for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
+									[ "${OCR[1]}" == "$y" ]  && OCRLANG=$y && local TEST="yes"
+								done
+							fi
+						;;
+						*) help keywords-convert-ocr
+							exit 0
+						;;
+					esac
+				elif [ "${#OCR[@]}" -eq 1 ] ; then
+					# ${OCR[0]} jazyk
+					# výchozí engine je tesseract
+					TESSERACT=$(which tesseract)
+					[ ! -x "${TESSERACT}" ] && exit 31
+					if [ "${OCR[0]}" == "?" ] ; then
+						${TESSERACT} --list-langs
+						exit 0
+					else
+						for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
+							[ "${OCR[0]}" == "$y" ]  && OCRLANG=$y && local TEST="yes"
+						done
+					fi
+				else
+					help keywords-convert-ocr
+					exit 0
+				fi
+				echo "OCR ${#OCR[@]}" >> /dev/stderr
+				echo "OCRLANG ${OCRLANG}" >> /dev/stderr
+				echo "TESSERACT ${TESSERACT}" >> /dev/stderr
+				echo "CUNEIFORM ${CUNEIFORM}" >> /dev/stderr
+				if [ "${TEST}" == "no" ] ; then
+					echo "Pro OCR engine $i není nainstalovanájazyková podpora" >> /dev/stderr
+#					exit 1
+				fi
 			done
+
 			if [ "${TEST}" == "yes" ] ; then
 				OCR="${VALUE%%+([[:blank:]])}"
 				local VSTUP="${NEXT}"
@@ -3676,6 +3797,7 @@ do local POS=$((POS+1))
 				local POS=0
 				local COUNT=${#VSTUP}
 				echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
+#				exit 1
 			fi
 		;;
 		-p|--page) # Volba pro akci export
@@ -3687,6 +3809,7 @@ do local POS=$((POS+1))
 			esac
 			local NEXT="${TEMP#* }"
 			local VALUE="${TEMP%${NEXT}}"
+
 			if [ "${VALUE%%+([[:blank:]])}" == "yes" ] || [ "${VALUE%%+([[:blank:]])}" == "no" ] ; then
 				PAGE="${VALUE%%+([[:blank:]])}"
 				local VSTUP="${NEXT}"
@@ -3823,7 +3946,8 @@ done
 	if [ -f "${FILE}" ] ; then
 #		log 1 "main: Soubor -${FILE}- existuje.."
 #		FILE=${FILE//\ /\\ }
-		case $(testfile "${FILE}") in
+		FILETYPE=$(testfile "${FILE}")
+		case ${FILETYPE} in
 			djvu)
 				#echo "AKCE ${KEY}" >> /dev/stderr
 				#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
@@ -4064,14 +4188,152 @@ done
 				echo "ToDo"
 				exit 1
 			;;
-			gimp|xcf|tiff|mng)
-			if [ "${2}" == "-h" ] || [ "${2}" == "--help" ] ; then
-					echo "Nápověda?"
-#					exit 0
+			gimp|xcf|tiff|mng|pdf)
+				if [ -z "${2}" ] ; then
+#					echo ${ACTION} >> /dev/stderr
+					ACTION=( ${1#${FILE}} )
+					if [ -z "${ACTION[1]:0:1}" ] ; then
+						echo "INFO: Konvertuji všechny vrstvy (stránky)" >> /dev/stderr
+					else
+						case ${ACTION[1]:0:1} in
+							[1-9]) # echo "INFO zpracovávám rozsah ${ACTION[1]}" >> /dev/stderr
+								RANGE=($(range ${ACTION[1]} | sort -n))
+							;;
+							0) echo "INFO: zpracuji všechny stránky" >> /dev/stderr
+							;;
+							*) echo "INFO: aplikuji algoritmus ${ACTION[1]}" >> /dev/stderr
+								# mohou následovat další konverzní argumenty...
+								#echo ${#ACTION[@]} >> /dev/stderr
+								echo ${ACTION[$((${#ACTION[@]}-1))]:0:1} >> /dev/stderr
+								case ${ACTION[$((${#ACTION[@]}-1))]:0:1} in
+									[1-9]) #echo "INFO zpracovávám rozsah ${ACTION[2]}" >> /dev/stderr
+										RANGE=($(range ${ACTION[$((${#ACTION[@]}-1))]} | sort -n))
+										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-2))}
+									;;
+									0) # Rozsah začíná nulou... konvertovat vše..
+										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-2))}
+									;;
+									*) echo "INFO: zpracuji všechny stránky s algoritmem ${ACTION[1]}" >> /dev/stderr
+										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-1))}
+									;;
+								esac
+								case ${ACTION[1]} in
+									test) if [ "${#RANGE[@]}" -eq "1" ] ; then
+											echo "Konvertuji stranu ${RANGE[0]}" >> /dev/stderr
+										elif [ "${#RANGE[@]}" -eq "0" ] ; then
+											RANGE="1"
+										else
+											echo "WARNING: U testovací konverze je zpracována pouze první strana uvedeného rozsahu" >> /dev/stderr
+										fi
+										# vrátí pouze stranu vymezenou přes range
+										splitxcf ${FILE}
+										;;
+									abutaleb) #ok
+										;;
+									bernsen) # params
+										;;
+									brink|shading-subtraction) # ok  Gamera ≥ 3.4.0
+										;;
+									djvu) # params
+										;;
+									niblack) #params
+										;;
+									otsu) # ok
+										;;
+									sauvola) # params
+										;;
+									shading-subtraction) # params  Gamera ≥ 3.4.0
+										;;
+									tsai) # ok
+										;;
+									white-rohrer) # params
+										;;
+									*) echo -e "${ALGORITHM//\ /\\\n}" >> /dev/stderr
+										exit 0
+									;;
+								esac
+							;;
+						esac
+					fi
+					case ${ACTION[0]} in
+						info) echo "Info o souboru ${FILETYPE}"
+							case ${FILETYPE} in
+								pdf) echo -n "PDF "
+#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
+									exit 0
+								;;
+								mng) echo -n "MNG "
+#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
+									exit 0
+								;;
+								xcf|gimp) echo -n "XCF "
+									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
+									exit 0
+								;;
+								tiff) echo -n "TIFF "
+									tiffinfo ${FILE} | grep TIFF | wc -l
+									exit 0
+								;;
+							esac
+						;;
+						convert) echo "Konverze souboru do DjVu"
+							case ${FILETYPE} in
+								pdf) 
+#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
+									exit 0
+								;;
+								mng)
+#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
+									exit 0
+								;;
+								xcf|gimp) splitxcf ${FILE}
+									pushd ${TEMPDIR}
+									ls -1cr | while read line
+										do todjvu "$line" "${line/.pnm/.djvu}"
+									done
+									popd
+									# Rozděleno na pnm soubory to je..
+									# konvertovat tam, nebo jinde?
+									# použít funkci todjvu? Asi jo..
+									# konvertovat po jednom a přesouvat do cílové lokace
+									# Zatím je to uloženo v tempdir - který se odstraní..
+									potvrdit && echo "ano"
+									echo xxxxxxxxxxxxxxxxxxxxx >> /dev/stderr
+									exit 0
+								;;
+								tiff) echo -n "TIFF "
+									tiffinfo ${FILE} | grep TIFF | wc -l
+									exit 0
+								;;
+							esac
+						# Rozebrání souboru na pnm
+						# vytvoření pole s názvy souborů
+						# zpracování podle ${RANGE}
+
+						 # Je-li předán rozsah - vytvoření číselné řady..
+								#xcf2pnm $SOURCE -o ${TARGETNAME%\.*}-$i.pnm $i
+
+						 # Je-li předán rozsah, tak se provede rekonverze..
+								#echo ${${RANGE[@]}//\ /,}
+									#tiffcp -c none $FILE,${RANGE//\n/,} temporary.tiff
+									#tiffsplit temporary.tiff
+									 # není-li předán rozsah...
+									#tiffsplit source.tiff
+
+						;;
+						*) help keywords-convert
+						;;
+					esac
+						echo "Nápověda pro akci convert"
+#						help keywords-convert
+#						exit 0
+#						echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
+#						echo "Povolené akce: info, convert, import" >> /dev/stderr
+#						echo ${@} >> /dev/stderr
+#						convertimg ${FILE} ${2}
+					exit 0
 				else
-					echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
-#					exit 0
-					convertimg ${FILE} ${2}
+					echo "Sem by se neměl dostat v případě že je předaný soubor typu multipage" >> /dev/stderr
 					exit 0
 				fi
 			;;
