@@ -5,6 +5,8 @@
 # TODO:
 # - aktuálně se všechny pomocné soubory dělají v tmp
 
+# Pro konverzi používá místo convert xcftools
+
 function todjvu {
     RANDOMKEY=$[ 8000 + $[ RANDOM % 1000 ]]
     TEMP_DIR="/tmp/$WINDOWID$BASHPID$RANDOMKEY"
@@ -16,29 +18,43 @@ function todjvu {
     case ${1##*.} in
 	tiff|tif) KONVERT="tifftopnm";;
 	png) KONVERT="pngtopnm";;
+	pnm) KONVERT="cat";;
 	jpg) KONVERT="jpegtopnm" ;;
     esac
 
     #$KONVERT $1 | pnmflip -cw | tee $TEMP_IMG | ppmtopgm | pgmtopbm -threshold -value 0.${3-5} | pnmtoplainpnm > $TEMP_MASK;
     #$KONVERT $1 | pnmflip -r180 | tee $TEMP_IMG | ppmtopgm | pgmtopbm -threshold -value 0.${3-5} | pnmtoplainpnm > $TEMP_MASK;
+    echo $1 >> /dev/stderr
     $KONVERT $1  | tee $TEMP_IMG | ppmtopgm | pgmtopbm -threshold -value 0.${3-5} | pnmtoplainpnm > $TEMP_MASK;
     cjb2 -lossy -clean $TEMP_MASK $DJVU_MASK;
-    djvumake ${1/.png/.djvu} Sjbz=$DJVU_MASK PPM=$TEMP_IMG;
+    djvumake ${1/.pnm/.djvu} Sjbz=$DJVU_MASK PPM=$TEMP_IMG;
     rm -rf $TEMP_DIR
+}
+
+function xcftopnm {
+	SOURCE="$1"
+	TARGETDIR="${2%/*}"
+#	echo $2 >> /dev/stderr
+	TARGETNAME="${2##*/}"
+#	echo $TARGETNAME >> /dev/stderr
+#	echo ${TARGETNAME%\.*} >> /dev/stderr
+	for i in $(xcfinfo ${SOURCE} | awk '{print $5}' | grep -v color)
+	do xcf2pnm $SOURCE -o ${TARGETNAME%\.*}-$i.pnm $i
+	done
 }
 
 if [ "${1##*.}" == "xcf" ] ; then
     TEMPORARY="/tmp/$WINDOWID$BASHPID"
     mkdir $TEMPORARY
-    convert ${1} ${TEMPORARY}/test.png
-    pushd $TEMPORARY
+    xcftopnm ${1} ${TEMPORARY}/test.png
+#    pushd $TEMPORARY
     BUNDLE=" "
-    for i in $(ls -cr -1) ; do
+    for i in $(ls -1v test*pnm) ; do
 	todjvu $i
-	BUNDLE="$BUNDLE ${i/.png/.djvu}"
+	BUNDLE="$BUNDLE ${i/.pnm/.djvu}"
     done
     djvm -c out.djvu $BUNDLE
-    popd
+#    popd
     mv $TEMPORARY/out.djvu ./
     rm -rf $TEMPORARY
 fi
