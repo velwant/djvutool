@@ -3616,225 +3616,144 @@ function todjvuclassic {
 }
 
 # Zpracování parametrů předaných při startu skriptu
-function main {
+main() {
 #	echo "$@" >> /dev/stderr
 #	echo "$*" >> /dev/stderr
 
-local VSTUP="$*"
-local COUNT=${#VSTUP}
-local POS=0
-local START=0
-while [ $POS -lt $COUNT ]
-do local POS=$((POS+1))
-	case "${VSTUP:$START:$POS}" in
-		-a|--algorithm) # Volba pro akci insert
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help algorithm && exit 0
-				;;
-				*) echo "Seru na tebe? $TEMP"
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-#			echo "$VALUE" >> /dev/stderr
-			if [ "${VALUE:0:1}" == "-" ] ; then
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log warn "main() Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
-			else
-				for i in ${VALUE//,/ } ; do
-#					echo "$i" >> /dev/stderr
-					local TEST="no"
-					for y in ${ALGORITHM[@]} ; do
-						[ "$i" == "$y" ] && local TEST="yes"
-					done
-					[ "${TEST}" == "no" ] && echo "Algoritmus $i nelze použít" >> /dev/stderr && exit 0
-				done
-				ALG=(${VALUE//,/ })
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
-			fi
-		;;
-		-d|--dsed) # Volba pro akci export
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help dsed && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-			case "${VALUE%%+([[:blank:]])}" in
-				yes|no|txt|ant|all) DSED="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro DSED parametr - ${DSED}"
-				;;
-				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
-				DSED="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-			esac
-		;;
-		--dpi) # Volba pro akci insert
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help dpi && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP% ${NEXT}}"
-#			echo "${VALUE//+([[:digit:]])}" >> /dev/stderr
-			if [ "${VALUE//+([[:digit:]])}" == "" ] ; then
-				if [ "${VALUE}" -ge "72" ] && [ "${VALUE}" -le "6000" ] ; then
-					DPI="${VALUE%%+([[:blank:]])}"
-					local VSTUP="${NEXT}"
-					local POS=0
-					local COUNT=${#VSTUP}
-					log info "main() Aplikuji pro DPI parametr - ${DPI}"
-				else
-					echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
-					exit 1
-				fi
-			else
-				echo "Nebyla uvedena hodnota dpi. Pokud chcete volbou --dpi změnit výchozí hodnotu (300), musíte ji uvést jako číselný parametr" >> /dev/stderr
-				exit 1
-			fi
-		;;
-		-f|--force) local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help force && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-			case "${VALUE%%+([[:blank:]])}" in
-				yes|no|skip) FORCE="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro FORCE parametr - ${FORCE}"
-				;;
-				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
-				FORCE="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-			esac
-		;;
-		--clean|--lossy|--lossless|--level) # Volba pro akci insert
-			local PARAM=${VSTUP:0:$POS}
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help force && exit 0
-				;;
-			esac
-			case "${PARAM}" in
-				--lossy) LEVEL="--loss-level=100"
-					local VSTUP="${TEMP}"
-					local POS=0
-				;;
-				--lossless) LEVEL="--loss-level=0"
-					local VSTUP="${TEMP}"
-					local POS=0
-				;;
-				--clean) LEVEL="--loss-level=1"
-					local VSTUP="${TEMP}"
-					local POS=0
-				;;
-				--level)
-							local NEXT="${TEMP#* }"
-						local VALUE="${TEMP%${NEXT}}"
-						local XXX=${VALUE%%+([[:blank:]])}
-						if [ "${XXX//+([[:digit:]])}" == "" ] ; then
-						local VSTUP="${NEXT}"
-						local POS=0
-						local COUNT=${#VSTUP}
-						if [ "${XXX}" -ge "0" ] && [ "${XXX}" -lt "200" ] ; then
-							LEVEL="--loss-level=${XXX}"
-							log info "main() Aplikuji pro LEVEL hodnotu - ${LEVEL}"
-						else
-							help level && exit 0
-						fi
-					else
-						echo "main() Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
-						exit 1
-					fi
-				;;
-				*) echo "Sem se nikdy neměl dostat"
-				;;
-			esac
-			log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
-		;;
-		-i|--image) # Volba pro akci export
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help image && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-			case "${VALUE%%+([[:blank:]])}" in
-				yes|no|color|black|foreground|background|mask) IMG="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main)) Aplikuji pro IMG parametr - ${IMG}"
-				;;
-				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
-				IMG="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-			esac
-		;;
-		-m|--meta) # Volba pro akci export
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
+while [ $# -gt 0 ]
+do case ${1} in
+    a|--algorithm) # Volba pro akci insert
+        case ${2} in
+            -*) case ${2} in
+                -h|--help)
+                    help algorithm
+                    exit 0
+                    ;;
+                    *) log warn "main() Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
+                    shift
+                    ;;
+                esac
+                ;;
+            *) for i in ${2//,/ } ; do
+#                   echo "$i" >> /dev/stderr
+                    local TEST="no"
+                    for y in ${ALGORITHM[@]} ; do
+                        [ "$i" == "$y" ] && local TEST="yes"
+                    done
+                    [ "${TEST}" == "no" ] && echo "Algoritmus $i nelze použít" >> /dev/stderr && exit 0
+                done
+                ALG=(${2//,/ })
+                log info "main() Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
+                shift && shift
+            ;;
+        esac
+        ;;
+    -d|--dsed) # Volba pro akci export
+        case ${2} in
+            -h*|--help*) help dsed && exit 0
+                ;;
+            yes|no|txt|ant|all) DSED=${2}
+                log info "main() Aplikuji pro DSED parametr - ${DSED}"
+                shift && shift
+                ;;
+            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
+                DSED="yes"
+                shift
+                ;;
+        esac
+        ;;
+    --dpi) # Volba pro akci insert
+        case ${2} in
+            -h*|--help*) help dpi && exit 0
+            ;;
+            [[:digit:]])
+                if [ "${2}" -ge "72" ] && [ "${2}" -le "6000" ] ; then
+                    DPI="${2}"
+                    log info "main() Aplikuji pro DPI parametr - ${DPI}"
+                    shift && shift
+                else
+                    echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
+                    exit 1
+                fi
+            *) echo "Nebyla uvedena hodnota dpi. Pokud chcete volbou --dpi změnit výchozí hodnotu (300), musíte ji uvést jako číselný parametr" >> /dev/stderr
+                exit 1
+                ;;
+        esac
+        ;;
+    -f|--force)
+        case ${2} in
+            -h*|--help*) help force && exit 0
+                ;;
+            yes|no|skip) FORCE=${2}
+                log info "main() Aplikuji pro FORCE parametr - ${FORCE}"
+                shift && shift
+                ;;
+            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
+                FORCE="yes"
+                shift
+                ;;
+        esac
+        ;;
+    --clean) LEVEL="--loss-level=1" && shift
+        ;;
+    --lossy) LEVEL="--loss-level=100" && shift
+        ;;
+    --lossless) LEVEL="--loss-level=0" && shift
+        ;;
+    --level) # Volba pro akci insert
+        case ${2} in
+            -h*|--help*) help force && exit 0
+                ;;
+            [[:digit:]])
+                if [ "${2}" -ge "0" ] && [ "${2}" -lt "200" ] ; then
+                    LEVEL="--loss-level=${2}"
+                    log info "main() Aplikuji pro LEVEL hodnotu - ${LEVEL}"
+                else
+                    help level && exit 0
+                fi
+                ;;
+            *) echo "main() Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
+                exit 1
+                ;;
+        esac
+        log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
+        ;;
+    -i|--image) # Volba pro akci export
+        case "${2}" in
+            -h*|--help*) help image && exit 0
+                ;;
+            yes|no|color|black|foreground|background|mask)
+                IMG="${2}"
+                log info "main)) Aplikuji pro IMG parametr - ${IMG}"
+                shift && shift
+                ;;
+            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
+                IMG="yes"
+                shift
+                ;;
+        esac
+        ;;
+        -m|--meta) # Volba pro akci export
+                case "${2}" in
 				-h*|--help*) help meta && exit 0
 				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-			if [ "${VALUE%%+([[:blank:]])}" == "yes" ] || [ "${VALUE%%+([[:blank:]])}" == "no" ] ; then
-				META="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
+				yes|no) META="${2}"
 				log info "main() Aplikuji pro META parametr - ${META}"
-			else
-				META="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
+                shift && shift
+                ;;
+                *) META="yes"
 				log warn "main() Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
-			fi
+                shift
+                ;;
+            esac
 		;;
 		-o|--ocr) # Volba pro akci insert
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
+			case "${2}" in
 				-h*|--help*) help ocr
 					${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
 					exit 0
 				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP% ${NEXT}}"
-			echo "$VALUE" >> /dev/stderr
-
+                *)
 #			echo $(${TESSERACT} --list-langs 2>&1 | sed '1d;x') >> /dev/stderr
 			for i in ${VALUE//+/ } ; do
 				local TEST="no"
@@ -3910,137 +3829,104 @@ do local POS=$((POS+1))
 				echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
 #				exit 1
 			fi
+            ;;
+        esac
 		;;
-		-p|--page) # Volba pro akci export
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help page && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-
-			if [ "${VALUE%%+([[:blank:]])}" == "yes" ] || [ "${VALUE%%+([[:blank:]])}" == "no" ] ; then
-				PAGE="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
-			else
-				log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
-				PAGE="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-			fi
-		;;
-		-r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help rename && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP% ${NEXT}}"
-			if [ "${VALUE##+([[:alnum:]%_-])}" == "" ] ; then
-				RENAME="${VALUE}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro RENAME parametr - ${RENAME}"
-			else
-				echo "main() FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
-				exit 1
-			fi
-		;;
-		-t|--thumb) # Volba pro akci insert
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help thumb && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP% ${NEXT}}"
-#			echo "${VALUE//+([[:digit:]])}" >> /dev/stderr
-			if [ "${VALUE//+([[:digit:]])}" == "" ] ; then
-				if [ "${VALUE}" -ge "32" ] && [ "${VALUE}" -le "256" ] ; then
-					THUMB="${VALUE%%+([[:blank:]])}"
-					local VSTUP="${NEXT}"
-					local POS=0
-					local COUNT=${#VSTUP}
-					log info "main() Aplikuji pro THUMB parametr - ${DPI}"
-				else
-					echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
-					exit 1
-				fi
-			else
-				echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
-				exit 1
-			fi
-		;;
+    -p|--page) # Volba pro akci export
+        case "${2}" in
+            -h*|--help*) help page && exit 0
+                ;;
+            yes|no) PAGE="${2}"
+                log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
+                shift && shift
+                ;;
+            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
+                PAGE="yes"
+                shift
+                ;;
+        esac
+        ;;
+    -r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
+        case "${2}" in
+            -h*|--help*) help rename && exit 0
+                ;;
+            *) if [ "${2##+([[:alnum:]%_-])}" == "" ] ; then
+                    RENAME="${2}"
+                    log info "main() Aplikuji pro RENAME parametr - ${RENAME}"
+                    shift && shift
+                else
+                    echo "main() FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
+                    exit 1
+                fi
+            ;;
+        esac
+        ;;
+    -t|--thumb) # Volba pro akci insert
+        case "${2}" in
+            -h*|--help*) help thumb && exit 0
+                ;;
+            *) if [ "${2//+([[:digit:]])}" == "" ] ; then
+                    if [ "${2}" -ge "32" ] && [ "${2}" -le "256" ] ; then
+                        THUMB="${2%%+([[:blank:]])}"
+                        log info "main() Aplikuji pro THUMB parametr - ${DPI}"
+                        shift && shift
+                    else
+                        echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
+                        exit 1
+                    fi
+                else
+                    echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
+                    exit 1
+                fi
+                ;;
+        esac
+        ;;
     -v*|--verbose*) # Volba pro ukecaný výstup
-			local PARAM=${VSTUP:0:$POS}
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help verbose && exit 0
-				;;
-			esac
-            echo "PARAM ${PARAM} ; TEMP ${TEMP}" >> /dev/stderr
-			case "${PARAM}" in
-				--verbose) DEBUG="-d1"
-					local VSTUP="${TEMP}"
-					local POS=0
-				;;
-                -v[0-9]) DEBUG="-d${PARAM:2}"
-					local VSTUP="${TEMP}"
-					local POS=0
+        case "${2}" in
+            -h*|--help*) help verbose && exit 0
+                ;;
+                [0-9]) DEBUG="-d${2:2}"
+                    shift && shift
                     ;;
-                *=*)
-                    case "${PARAM#*=}" in
-                       0) local VSTUP="${TEMP}"
-                        local POS=0
-                       ;;
-                        [1-9]) DEBUG="-d${PARAM#*=}"
-                         local VSTUP="${TEMP}"
-                            local POS=0
+                *) case "${1}" in
+                    --verbose) DEBUG="-d1"
+                        shift
                         ;;
-                        *) help_debug "${PARAM#*=}" && exit 1 ;;
+                    -v[0-9]) DEBUG="-d${1:2}"
+                        shift
+                        ;;
+                    *=*)
+                        case "${1#*=}" in
+                            0) shift
+                            ;;
+                        [1-9]) DEBUG="-d${1#*=}"
+                            shift
+                            ;;
+                            *) help_debug "${PARAM#*=}" && exit 1
+                            ;;
                     esac
                     ;;
-#                *) help_debug "${1#*=}" && exit 1 ;;
-            esac
-            log set "main() DEBUG –> ${DEBUG}"
-		;;
-		-x|--xml) # Volba pro akci export
-			local POS=$((POS+1))
-			local TEMP=${VSTUP:$POS}
-			case "$TEMP" in
-				-h*|--help*) help xml && exit 0
-				;;
-			esac
-			local NEXT="${TEMP#* }"
-			local VALUE="${TEMP%${NEXT}}"
-			case "${VALUE%%+([[:blank:]])}" in
-				yes|no|txt|ant|all) XML="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro XML parametr - ${XML}"
-				;;
-				*) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
-				XML="yes"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-			esac
-		;;
-		*.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
+        esac
+        log set "main() DEBUG –> ${DEBUG}"
+        ;;
+    -x|--xml) # Volba pro akci export
+        case "${2}" in
+            -h*|--help*) help xml && exit 0
+                ;;
+            yes|no|txt|ant|all) XML="${2%%+([[:blank:]])}"
+                log info "main() Aplikuji pro XML parametr - ${XML}"
+                shift && shift
+                ;;
+            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
+                XML="yes"
+                shift
+                ;;
+        esac
+        ;;
+    *.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
 # tady vzniká problém, pokud akce nemá žádné další parametry...
-			local FILE="${VSTUP:0:$POS}"
+			local FILE="${1}"
+            shift
 			local TEMP=${VSTUP#${FILE}}
 #			echo "Délka řetězce ${#TEMP} -${TEMP}-" >> /dev/stderr
 			local OREZ=${TEMP##+([[:blank:]])}
