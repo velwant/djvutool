@@ -64,7 +64,7 @@ INSERTTEXT="${INSERTTEXT=no}"
 ALG="${ALG=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
-ALGORITHM="abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction"
+ALGORITHM=( abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction )
 TABS="8"
 
 trap '''CHYBA=$? ;
@@ -3621,236 +3621,237 @@ main() {
 #	echo "$*" >> /dev/stderr
 
 while [ $# -gt 0 ]
-do case ${1} in
-    a|--algorithm) # Volba pro akci insert
-        case ${2} in
-            -*) case ${2} in
-                -h|--help)
-                    help algorithm
+do
+#echo $1 >> /dev/stderr
+    case ${1} in
+        -a|--algorithm) #/ Volba pro akci insert
+            #/ Není-li uveden žádný kompresní algoritmus, je aplikováno
+            #/ výchozí nastavení proměnné $ALG z konfigurace"
+            case ${2} in
+                -h|--help) help algorithm
                     exit 0
                     ;;
-                    *) log warn "main() Nebyl uveden žádný kompresní algoritmus, aplikuji výchozí - $ALG"
+                *) for i in ${2//,/ } ; do
+                    if [[ ${ALGORITHM[@]} =~ (^|[^[:alpha:]])$i([^[:alpha:]]|$) ]] ; then
+                        log info "main() Verify algorithm $i –> OK"
+                    else
+                        printf "Algorithm %s isn't supported\n" "$i" 1>&2
+                        exit 0
+                    fi
+                    done
+                    ALG=(${2//,/ })
+                    log set "main() Compression algorithm –> ${ALG[@]}"
+                    shift && shift
+                    ;;
+            esac
+            ;;
+        -d|--dsed) # Volba pro akci export
+            case ${2} in
+                -h*|--help*) help dsed && exit 0
+                    ;;
+                yes|no|txt|ant|all) DSED=${2}
+                    log info "main() Aplikuji pro DSED parametr - ${DSED}"
+                    shift && shift
+                    ;;
+                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
+                    DSED="yes"
                     shift
                     ;;
-                esac
-                ;;
-            *) for i in ${2//,/ } ; do
-#                   echo "$i" >> /dev/stderr
-                    local TEST="no"
-                    for y in ${ALGORITHM[@]} ; do
-                        [ "$i" == "$y" ] && local TEST="yes"
-                    done
-                    [ "${TEST}" == "no" ] && echo "Algoritmus $i nelze použít" >> /dev/stderr && exit 0
-                done
-                ALG=(${2//,/ })
-                log info "main() Kompresní algoritmy jsou ověřeny, použiji - ${ALG[@]}"
-                shift && shift
-            ;;
-        esac
-        ;;
-    -d|--dsed) # Volba pro akci export
-        case ${2} in
-            -h*|--help*) help dsed && exit 0
-                ;;
-            yes|no|txt|ant|all) DSED=${2}
-                log info "main() Aplikuji pro DSED parametr - ${DSED}"
-                shift && shift
-                ;;
-            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
-                DSED="yes"
-                shift
-                ;;
-        esac
-        ;;
-    --dpi) # Volba pro akci insert
-        case ${2} in
-            -h*|--help*) help dpi && exit 0
-            ;;
-            [[:digit:]])
-                if [ "${2}" -ge "72" ] && [ "${2}" -le "6000" ] ; then
-                    DPI="${2}"
-                    log info "main() Aplikuji pro DPI parametr - ${DPI}"
-                    shift && shift
-                else
-                    echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
-                    exit 1
-                fi
-            *) echo "Nebyla uvedena hodnota dpi. Pokud chcete volbou --dpi změnit výchozí hodnotu (300), musíte ji uvést jako číselný parametr" >> /dev/stderr
-                exit 1
-                ;;
-        esac
-        ;;
-    -f|--force)
-        case ${2} in
-            -h*|--help*) help force && exit 0
-                ;;
-            yes|no|skip) FORCE=${2}
-                log info "main() Aplikuji pro FORCE parametr - ${FORCE}"
-                shift && shift
-                ;;
-            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
-                FORCE="yes"
-                shift
-                ;;
-        esac
-        ;;
-    --clean) LEVEL="--loss-level=1" && shift
-        ;;
-    --lossy) LEVEL="--loss-level=100" && shift
-        ;;
-    --lossless) LEVEL="--loss-level=0" && shift
-        ;;
-    --level) # Volba pro akci insert
-        case ${2} in
-            -h*|--help*) help force && exit 0
-                ;;
-            [[:digit:]])
-                if [ "${2}" -ge "0" ] && [ "${2}" -lt "200" ] ; then
-                    LEVEL="--loss-level=${2}"
-                    log info "main() Aplikuji pro LEVEL hodnotu - ${LEVEL}"
-                else
-                    help level && exit 0
-                fi
-                ;;
-            *) echo "main() Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
-                exit 1
-                ;;
-        esac
-        log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
-        ;;
-    -i|--image) # Volba pro akci export
-        case "${2}" in
-            -h*|--help*) help image && exit 0
-                ;;
-            yes|no|color|black|foreground|background|mask)
-                IMG="${2}"
-                log info "main)) Aplikuji pro IMG parametr - ${IMG}"
-                shift && shift
-                ;;
-            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
-                IMG="yes"
-                shift
-                ;;
-        esac
-        ;;
-        -m|--meta) # Volba pro akci export
-                case "${2}" in
-				-h*|--help*) help meta && exit 0
-				;;
-				yes|no) META="${2}"
-				log info "main() Aplikuji pro META parametr - ${META}"
-                shift && shift
-                ;;
-                *) META="yes"
-				log warn "main() Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
-                shift
-                ;;
             esac
-		;;
-		-o|--ocr) # Volba pro akci insert
-			case "${2}" in
-				-h*|--help*) help ocr
-					${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
-					exit 0
-				;;
+            ;;
+        --dpi) # Volba pro akci insert
+            case ${2} in
+                -h*|--help*) help dpi && exit 0
+                    ;;
+                [[:digit:]])
+                    if [ "${2}" -ge "72" ] && [ "${2}" -le "6000" ] ; then
+                        DPI="${2}"
+                        log info "main() Aplikuji pro DPI parametr - ${DPI}"
+                        shift && shift
+                    else
+                        echo "Hodnota u volby --dpi se musí pohybovat v rozmezí od 72 do 6000" >> /dev/stderr
+                        exit 1
+                    fi
+                    ;;
+                *) echo "Nebyla uvedena hodnota dpi. Pokud chcete volbou --dpi změnit výchozí hodnotu (300), musíte ji uvést jako číselný parametr" >> /dev/stderr
+                    exit 1
+                    ;;
+            esac
+            ;;
+        -f|--force)
+            case ${2} in
+                -h*|--help*) help force && exit 0
+                    ;;
+                yes|no|skip) FORCE=${2}
+                    log info "main() Aplikuji pro FORCE parametr - ${FORCE}"
+                    shift && shift
+                    ;;
+                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro FORCE parametr - skip"
+                    FORCE="yes"
+                    shift
+                    ;;
+            esac
+            ;;
+        --clean) LEVEL="--loss-level=1" && shift
+            ;;
+        --lossy) LEVEL="--loss-level=100" && shift
+            ;;
+        --lossless) LEVEL="--loss-level=0" && shift
+            ;;
+        --level) # Volba pro akci insert
+            case ${2} in
+                -h*|--help*) help force && exit 0
+                    ;;
+                [[:digit:]])
+                    if [ "${2}" -ge "0" ] && [ "${2}" -lt "200" ] ; then
+                        LEVEL="--loss-level=${2}"
+                        log info "main() Aplikuji pro LEVEL hodnotu - ${LEVEL}"
+                        shift && shift
+                    else
+                        help level && exit 0
+                    fi
+                    ;;
+                *) echo "main() Volba --loss-level musí mít vždy uvedenou číselnou hodnotu v rozmezí 0-199" >> /dev/stderr
+                    exit 1
+                    ;;
+            esac
+            log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
+            ;;
+        -i|--image) # Volba pro akci export
+            case "${2}" in
+                -h*|--help*) help image && exit 0
+                    ;;
+                yes|no|color|black|foreground|background|mask)
+                    IMG="${2}"
+                    log info "main)) Aplikuji pro IMG parametr - ${IMG}"
+                    shift && shift
+                    ;;
+                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
+                    IMG="yes"
+                    shift
+                    ;;
+            esac
+            ;;
+        -m|--meta) # Volba pro akci export
+            case "${2}" in
+                -h*|--help*) help meta && exit 0
+                    ;;
+                yes|no) META="${2}"
+                    log info "main() Aplikuji pro META parametr - ${META}"
+                    shift && shift
+                    ;;
+                *) META="yes"
+                    log warn "main() Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
+                    shift
+                    ;;
+            esac
+            ;;
+        -o|--ocr) # Volba pro akci insert
+            case "${2}" in
+                -h*|--help*) help ocr
+                    ${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
+                    exit 0
+                    ;;
                 *)
 #			echo $(${TESSERACT} --list-langs 2>&1 | sed '1d;x') >> /dev/stderr
-			for i in ${VALUE//+/ } ; do
-				local TEST="no"
-				local OCR=(${i//:/\ })
-				if [ "${#OCR[@]}" -eq 2 ] ; then
-					# ${OCR[0]} engine
-					# ${OCR[1]} jazyk
-					case "${OCR[0]:0:1}" in
-						c) CUNEIFORM=$(which cuneiform)
-							[ ! -x "${CUNEIFORM}" ] && exit 31
-							if [ "${OCR[1]}" == "?" ] ; then
-								${CUNEIFORM} -l
-								exit 0
-							else
-								for y in $(${CUNEIFORM} -l | grep languages | sed 's/^[a-Z ]*://') ; do
-									[ "${OCR[1]}" == "$y" ] && OCRLANG=$y && local TEST="yes"
-								done
-							fi
-						;;
-						t) TESSERACT=$(which tesseract)
-							[ ! -x "${TESSERACT}" ] && exit 31
-							if [ "${OCR[1]}" == "?" ] ; then
-								${TESSERACT} --list-langs
-								exit 0
-							else
-								for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
-									[ "${OCR[1]}" == "$y" ]  && OCRLANG=$y && local TEST="yes"
-								done
-							fi
-						;;
-						*) help keywords-convert-ocr
-							exit 0
-						;;
-					esac
-				elif [ "${#OCR[@]}" -eq 1 ] ; then
-					# ${OCR[0]} jazyk
-					# výchozí engine je tesseract
-					TESSERACT=$(which tesseract)
-					[ ! -x "${TESSERACT}" ] && exit 31
-					if [ "${OCR[0]}" == "?" ] ; then
-						${TESSERACT} --list-langs
-						exit 0
-					else
-						for y in $(${TESSERACT} --list-langs 2>&1 | sed -n '1!p') ; do
-							[ "${OCR[0]}" == "$y" ]  && OCRLANG=$y && local TEST="yes"
-						done
-					fi
-				else
-					help keywords-convert-ocr
-					exit 0
-				fi
-				echo "OCR ${#OCR[@]}" >> /dev/stderr
-				echo "OCRLANG ${OCRLANG}" >> /dev/stderr
-				echo "TESSERACT ${TESSERACT}" >> /dev/stderr
-				echo "CUNEIFORM ${CUNEIFORM}" >> /dev/stderr
-				if [ "${TEST}" == "no" ] ; then
-					echo "Pro OCR engine $i není nainstalovanájazyková podpora" >> /dev/stderr
+                for i in ${2//+/ } ; do
+                    local TEST="no"
+                    local OCR=(${i//:/\ })
+                    if [ "${#OCR[@]}" -eq 2 ] ; then
+                        # ${OCR[0]} engine
+                        # ${OCR[1]} jazyk
+                        case "${OCR[0]:0:1}" in
+                            c) CUNEIFORM=$(which cuneiform)
+                                [ ! -x "${CUNEIFORM}" ] && exit 31
+                                if [ "${OCR[1]}" == "?" ] ; then
+                                    ${CUNEIFORM} -l
+                                    exit 0
+                                else
+                                    local LANGUAGES=($(${CUNEIFORM} -l | grep languages | sed 's/^[a-Z ]*://'))
+                                    if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
+                                        OCRLANG=$y && local TEST="yes"
+                                        log info "main() OCR lang –> $y"
+                                    fi
+                                fi
+                                ;;
+                            t) TESSERACT=$(which tesseract)
+                                [ ! -x "${TESSERACT}" ] && exit 31
+                                if [ "${OCR[1]}" == "?" ] ; then
+                                    ${TESSERACT} --list-langs
+                                    exit 0
+                                else
+                                    local LANGUAGES=($(${TESSERACT} --list-langs 2>&1 | sed -n '1!p'))
+                                    if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
+                                        OCRLANG=$y && local TEST="yes"
+                                        log info "main() OCR lang –> $y"
+                                    fi
+                                fi
+                                ;;
+                            *) help keywords-convert-ocr
+                                exit 0
+                                ;;
+                        esac
+                    elif [ "${#OCR[@]}" -eq 1 ] ; then
+                        # ${OCR[0]} jazyk
+                        # výchozí engine je tesseract
+                        TESSERACT=$(which tesseract)
+                        [ ! -x "${TESSERACT}" ] && exit 31
+                        if [ "${OCR[0]}" == "?" ] ; then
+                            ${TESSERACT} --list-langs
+                            exit 0
+                        else
+                            local LANGUAGES=($(${TESSERACT} --list-langs 2>&1 | sed -n '1!p'))
+                            if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
+                                OCRLANG=$y && local TEST="yes"
+                                log info "main() OCR lang –> $y"
+                            fi
+                        fi
+                    else
+                        help keywords-convert-ocr
+                        exit 0
+                    fi
+                    echo "OCR ${#OCR[@]}" >> /dev/stderr
+                    echo "OCRLANG ${OCRLANG}" >> /dev/stderr
+                    echo "TESSERACT ${TESSERACT}" >> /dev/stderr
+                    echo "CUNEIFORM ${CUNEIFORM}" >> /dev/stderr
+                    if [ "${TEST}" == "no" ] ; then
+                        echo "Pro OCR engine $i není nainstalovanájazyková podpora" >> /dev/stderr
 #					exit 1
-				fi
-			done
+                    fi
+                done
 
-			if [ "${TEST}" == "yes" ] ; then
-				OCR="${VALUE%%+([[:blank:]])}"
-				local VSTUP="${NEXT}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				log info "main() Aplikuji pro OCR parametr - ${OCR}"
-			else
-				OCR="${OCR=ces}"
-				local VSTUP="${TEMP}"
-				local POS=0
-				local COUNT=${#VSTUP}
-				echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
+                if [ "${TEST}" == "yes" ] ; then
+                    OCR="${2%%+([[:blank:]])}"
+                    log info "main() Aplikuji pro OCR parametr - ${OCR}"
+                    shift && shift
+                else
+                    OCR="${OCR=ces}"
+                    echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
 #				exit 1
-			fi
+                    shift
+                fi
+                ;;
+            esac
             ;;
-        esac
-		;;
-    -p|--page) # Volba pro akci export
-        case "${2}" in
-            -h*|--help*) help page && exit 0
+        -p|--page) # Volba pro akci export
+            case "${2}" in
+                -h*|--help*) help page && exit 0
+                    ;;
+                yes|no) PAGE="${2}"
+                    log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
+                    shift && shift
+                    ;;
+                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
+                    PAGE="yes"
+                    shift
+                    ;;
+            esac
+            ;;
+        -r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
+            case "${2}" in
+                -h*|--help*) help rename && exit 0
                 ;;
-            yes|no) PAGE="${2}"
-                log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
-                shift && shift
-                ;;
-            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
-                PAGE="yes"
-                shift
-                ;;
-        esac
-        ;;
-    -r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
-        case "${2}" in
-            -h*|--help*) help rename && exit 0
-                ;;
-            *) if [ "${2##+([[:alnum:]%_-])}" == "" ] ; then
+                *) if [ "${2##+([[:alnum:]%_-])}" == "" ] ; then
                     RENAME="${2}"
                     log info "main() Aplikuji pro RENAME parametr - ${RENAME}"
                     shift && shift
@@ -3859,95 +3860,109 @@ do case ${1} in
                     exit 1
                 fi
             ;;
-        esac
+            esac
         ;;
-    -t|--thumb) # Volba pro akci insert
-        case "${2}" in
-            -h*|--help*) help thumb && exit 0
-                ;;
-            *) if [ "${2//+([[:digit:]])}" == "" ] ; then
-                    if [ "${2}" -ge "32" ] && [ "${2}" -le "256" ] ; then
-                        THUMB="${2%%+([[:blank:]])}"
-                        log info "main() Aplikuji pro THUMB parametr - ${DPI}"
-                        shift && shift
+        -t|--thumb) # Volba pro akci insert
+            case "${2}" in
+                -h*|--help*) help thumb && exit 0
+                    ;;
+                *) if [ "${2//+([[:digit:]])}" == "" ] ; then
+                        if [ "${2}" -ge "32" ] && [ "${2}" -le "256" ] ; then
+                            THUMB="${2%%+([[:blank:]])}"
+                            log info "main() Aplikuji pro THUMB parametr - ${DPI}"
+                            shift && shift
+                        else
+                            echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
+                            exit 1
+                        fi
                     else
-                        echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
+                        echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
                         exit 1
                     fi
-                else
-                    echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
-                    exit 1
-                fi
-                ;;
-        esac
-        ;;
-    -v*|--verbose*) # Volba pro ukecaný výstup
-        case "${2}" in
-            -h*|--help*) help verbose && exit 0
-                ;;
-                [0-9]) DEBUG="-d${2:2}"
-                    shift && shift
                     ;;
-                *) case "${1}" in
-                    --verbose) DEBUG="-d1"
-                        shift
-                        ;;
-                    -v[0-9]) DEBUG="-d${1:2}"
-                        shift
-                        ;;
-                    *=*)
-                        case "${1#*=}" in
-                            0) shift
+            esac
+            ;;
+        -v*|--verbose*) #/ Změna výchozí hodnoty proměnné $DEBUG
+            case ${1} in
+                -v|--verbose)
+                    case ${2} in
+                        -h|--help|help|\?)
+                            help verbose && exit 0
+                            ;;
+                        [0-9])
+                            DEBUG="-d${2}"
+                            shift && shift
+                            ;;
+                        *) DEBUG="-d1"
+                            shift
+                            ;;
+                    esac
+                    ;;
+                -v[0-9])
+                    DEBUG="-d${1:2}"
+                    shift
+                    ;;
+                *=*)
+                    case "${1#*=}" in
+                        0) shift
                             ;;
                         [1-9]) DEBUG="-d${1#*=}"
                             shift
                             ;;
-                            *) help_debug "${PARAM#*=}" && exit 1
+                        *) help_debug "${1#*=}" && exit 1
                             ;;
                     esac
                     ;;
-        esac
-        log set "main() DEBUG –> ${DEBUG}"
-        ;;
-    -x|--xml) # Volba pro akci export
-        case "${2}" in
-            -h*|--help*) help xml && exit 0
-                ;;
-            yes|no|txt|ant|all) XML="${2%%+([[:blank:]])}"
-                log info "main() Aplikuji pro XML parametr - ${XML}"
-                shift && shift
-                ;;
-            *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
-                XML="yes"
-                shift
-                ;;
-        esac
-        ;;
-    *.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF]) 
-# tady vzniká problém, pokud akce nemá žádné další parametry...
-			local FILE="${1}"
+            esac
+            log set "main() DEBUG –> ${DEBUG}"
+            ;;
+        -x|--xml) # Volba pro akci export
+            case "${2}" in
+                -h*|--help*) help xml && exit 0
+                    ;;
+                yes|no|txt|ant|all) XML="${2%%+([[:blank:]])}"
+                    log info "main() Aplikuji pro XML parametr - ${XML}"
+                    shift && shift
+                    ;;
+                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
+                    XML="yes"
+                    shift
+                    ;;
+            esac
+            ;;
+        *.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF])
+            local FILE="${1}"
             shift
-			local TEMP=${VSTUP#${FILE}}
-#			echo "Délka řetězce ${#TEMP} -${TEMP}-" >> /dev/stderr
-			local OREZ=${TEMP##+([[:blank:]])}
-#			echo "Délka řetězce ${#OREZ} -${OREZ}-" >> /dev/stderr
-			local CHARSTRING="${OREZ#* }"
-#			echo "CHARSTRING Délka řetězce ${#CHARSTRING} -${CHARSTRING}-" >> /dev/stderr
-			if [ "${#CHARSTRING}" -eq "${#OREZ}" ] ; then
-				local KEY="${CHARSTRING}"
-				local CHARSTRING=""
-			else
-				local TEMP="${OREZ%${CHARSTRING}}"
-				local KEY="${TEMP%%+([[:blank:]])}"
-			fi
-#			log info "KEY -${KEY}-"
-#			log info "FILE -${FILE}-"
-#			log info "CHARSTRING -${CHARSTRING}-"
-		break
-		;;
-	esac
+            ;;
+        *) KEYS=(
+            delete
+            fore
+            back
+            rotate
+            export
+            import
+            edit
+            info
+            rename
+            insert
+            print
+            set
+            unset
+            view
+            )
+            if [[ ${KEYS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] ; then
+                KEY=${1}
+                local CHARSTRING="$@"
+                log info "main() ACTION –> ${KEY}"
+                break
+            else
+                break
+            fi
+            ;;
+    esac
 done
 
+echo "Zpracované volby" >> /dev/stderr
 	case "${CHARSTRING}" in
 		*-h|*--help|-h*|--help*) if [ -z "${KEY}" ] ; then
 				help
@@ -4386,6 +4401,6 @@ done
 	fi
 }
 
-main "$*"
+main $@
 
 exit 0
