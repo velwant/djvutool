@@ -64,7 +64,7 @@ INSERTTEXT="${INSERTTEXT=no}"
 ALG="${ALG=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
-ALGORITHM=( abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction )
+ALGORITHM=( abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
 TABS="8"
 
 trap '''CHYBA=$? ;
@@ -84,6 +84,14 @@ case $CHYBA in
  25) echo "ERROR: xmlstarlet - tool for work with xml not installed"
  ;;
  26) echo "ERROR: xcftools - tool for work with xcf file (GIMP) not installed"
+ ;;
+ 27) echo "ERROR: libtiff-tools - tool for work with tiff file not installed"
+ ;;
+ 28) echo "ERROR: libopenjp2-tools - tool for work with jp2 file not installed"
+ ;;
+ 29) echo "ERROR: 7z - tool for work with compressed archives is not installed"
+ ;;
+ 30) echo "ERROR: PDF viewer not installed"
  ;;
  31) echo "Není nainstalován balík ocrodjvu, na djvu soubory nelze aplikovat OCR. Buďto jej doinstalujte, nebo odstraňte z příkazové řádky parametr -o (--ocr)" >> /dev/stderr
  ;;
@@ -152,7 +160,27 @@ XCFINFO=$(which xcfinfo)
 [ ! -x "${XCFINFO}" ] && echo exit 26
 XCF2PNM=$(which xcf2pnm)
 [ ! -x "${XCF2PNM}" ] && echo exit 26
+TIFFINFO=$(which tiffinfo)
+[ ! -x "${TIFFINFO}" ] && echo exit 27
+PDFVIEW=$(which xpdf)
+if [ ! -x "${PDFVIEW}" ] ; then
+    PDFVIEW=$(which evince)
+    if [ ! -x "${PDFVIEW}" ] ; then
+        if [ ! -x "${xournal}" ] ; then
+            echo exit 30
+        fi
+    fi
+fi
+# Konverze z formátu JPEG2000 (jp2)
+JP2TO=$(which opj_decompress)
+[ ! ${JP2TO} ] && exit 28
+JP2IN=$(which opj_compress)
+[ ! ${JP2IN} ] && exit 28
+# Nástroje pro konverzi animovaných gifů a png souborů
+# apng2gif, gif2apng, 
 
+ZIP=$(which 7z)
+[ ! -x "${ZIP}" ] && echo exit 29
 
 
 NETPBM=0
@@ -347,6 +375,48 @@ function popd {
     command popd "$@" > /dev/null
 }
 
+# ### <span id="filepath">filepath()</span> ([top](#FUNCTIONS))
+# Funkce na základě předaného jména (parametr __$1__) zjišťuje skutečnou
+# cestu k souboru.
+# V případě že cílový soubor neexistuje, je návratový kód __1__
+filepath() {
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    if [ -n "${SOURCE}" ] ; then
+        FILEFULL="${SOURCE}"
+        FILEPATH="${SOURCE%/*}"
+        FILENAME="${SOURCE##*/}"
+        FILESUFFIX="${FILENAME##*\.}"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ### <span id="anone">anone()</span> ([top](#FUNCTIONS))
+# Ověřovací funkce.
+# V případě, že se lze pokračovat v realizaci akce vrací __0__,
+# v opačném případě __1__.
+anone() {
+    if [ -n "${1}" ] ; then
+        if [ "${FORCE}" != "yes" ] ; then
+            echo "$1"
+            while true ; do
+#                read -p "(ANO/NE) : " yn
+                read -er yn
+                case $yn in
+                    [AaYy]*) break;;
+                    [Nn]*) return 1;;
+                    *) echo "Napište ANO či NE:";;
+                esac
+            done
+        fi
+        return 0
+    else
+        log warn "anone() Not value"
+        return 1
+    fi
+}
+
 function potvrdit {
     read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
     case $response in
@@ -425,9 +495,14 @@ function createant {
 	return 0
 }
 
-function anttodsed {
-	# Funkce převádí obsah .ant souboru na formát .dsed
-	# Výstup zapisuje do souborů s příponou .dsed umístěných v cílovém adresáři
+# ### <span id="anttodsed">anttodsed()</span> ([top](#FUNCTIONS))
+# Funkce převádí obsah .ant souboru na formát .dsed, který lze naimportovat
+# do DjVu souboru.
+# Výstup funkce se zapisuje rovnou do souborů s příponou .dsed, umístěných
+# v cílovém adresáři
+#
+# Používá se úpravách textové vrstvy DjVu souborů
+anttodsed() {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	if [ ! -z "${SOURCE}" ] ; then
@@ -455,6 +530,20 @@ function anttodsed {
 		done
 		echo "Soubory jsou uloženy v adresáři ${TEMPDIR}"
 	fi
+}
+
+# ### <span id="imginfo">imginfo()</span> ([top](#FUNCTIONS))
+# Zobrazení informací o bitmapových souborech
+#
+# $1 - soubor
+imginfo() {
+    local FILETYPE=$(testfile "${1}")
+    case ${FILETYPE} in
+        xcf) ${XCFINFO} -i ${1}
+            ;;
+        tiff) tiffinfo ${1}
+            ;;
+    esac
 }
 
 function important {
@@ -584,15 +673,19 @@ function printant {
 	fi
 }
 
-function printmeta {
-	# $1 - svazek
-	# $2 - identifikátor, klíčové slovo 'all' nebo atribut
+# ### <span id="printmeta">printmeta()</span> ([top](#FUNCTIONS))
+# Odstraňuje z DjVu Bundle svazku stránky
+#
+# $1 - svazek
+# $2 - identifikátor, klíčové slovo 'all' nebo atribut
+printmeta() {
+    log goto "printmeta() ${1} –> ${2}"
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	case "${2}" in
-		all) printf "printmeta: All meta attributes for %s\n" "${FILE}" >> ${LOG}
+		all) log info "printmeta() All meta attributes for %s\n" "${FILE}"
 			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
-			if [ ! -z "${META}" ] ; then
+			if [ -n "${META}" ] ; then
 				echo "#"
 				echo -e "${META}" | tr '\000' '\\'
 				echo -e "\n."
@@ -600,7 +693,7 @@ function printmeta {
 			for i in $(seq $(lastpage ${SOURCE})) ; do
 				local PAGENAME=$(identifyname "${SOURCE}" "${i}")
 				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
-				if [ ! -z "${META}" ] ; then
+				if [ -n "${META}" ] ; then
 					echo "#$i '${PAGENAME}'"
 					echo -e "${META}" | tr '\000' '\\'
 					echo -e "\n."
@@ -947,7 +1040,7 @@ function djvuexport {
 	#echo "export: For export text content from DjVu page in dsed format we must use option -d" >> /dev/stderr
 	exportxmlpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
 	#echo "export: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
-	exportimgpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
+	exportpage2img "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
 	#echo "export: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
 	exportmetapage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
 	# echo "export: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
@@ -976,7 +1069,7 @@ function exportdjvuall {
 		log info "exportdjvuall() Exportuji stránku ${NAMEPAGE}"
 
 		[[ $EXPORTDJVU =~ $EXPORTVALUE ]] && exportdjvupage "${1}" "${NAMEPAGE}" "${2}"
-		[[ $EXPORTIMG =~ $EXPORTVALUE ]] && exportimgpage "${1}" "${NAMEPAGE}" "${2}"
+		[[ $EXPORTIMG =~ $EXPORTVALUE ]] && exportpage2img "${1}" "${NAMEPAGE}" "${2}"
 		[[ $EXPORTXML =~ $EXPORTVALUE ]] && exportxmlpage "${1}" "${NAMEPAGE}" "${2}"
 		[[ $EXPORTMETA =~ $EXPORTVALUE ]] && exportmetapage "${1}" "${NAMEPAGE}" "${2}"
 		[[ $EXPORTDSED =~ $EXPORTVALUE ]] && exportdsedpage "${1}" "${NAMEPAGE}" "${2}"
@@ -1056,7 +1149,7 @@ function exportxmlbundle {
 	popd
 }
 
-function exportimgpage {
+function exportpage2img {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
 	# $3 - targetdir - full path
@@ -1078,9 +1171,9 @@ function exportimgpage {
 			if [ "${FORCE}" == "yes" ] ; then
 				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportimgpage() Soubor ${TARGET} již v adresáři ${3} existuje."
+				log warn "exportpage2img() Soubor ${TARGET} již v adresáři ${3} existuje."
 			else
-				echo "exportimgpage: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
+				echo "exportpage2img: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
 				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
 			fi
 		else
@@ -1140,8 +1233,10 @@ function importmetaall {
 	${DJVUSED} "${1}" -e "select; set-meta ${2}; save"
 }
 
-function encode {
-	# Funkce průběžně konvertuje unicode znaky do číselné podoby
+# ### <span id="encode">encode()</span> ([top](#FUNCTIONS))
+# Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
+# Velmi důležitá funkce!!!
+encode() {
 	while read -n 1 a
 	do
 	CHAR=($( echo "$a" | od -A n -t c ))
@@ -1159,7 +1254,34 @@ function encode {
 	done
 }
 
-function bookmarktooutline {
+# ### <span id="encodefile">encodefile()</span> ([top](#FUNCTIONS))
+# Konvertuje bitmapový soubor, předaný jako __$2__ do DjVu souboru __$3__
+# s využitím binarizačního algoritmu __$1__
+encodefile() {
+    log goto "encodefile() Use $1 for $2 –> $3"
+    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
+        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+    fi
+    ${DIDJVU} encode -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
+    return $?
+}
+
+# ### <span id="separatemask">separatemask()</span> ([top](#FUNCTIONS))
+# Z bitmapového souboru, který je předán jako __$2__ generuje černobílou
+# masku __$3__ s využitím binarizačního algoritmu __$1__ a dalších předaných
+# algoritmů
+separatemask() {
+    log goto "separatemask() Use $1 for $2 –> $3"
+    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
+        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+    fi
+    ${DIDJVU} separate -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
+    return $?
+}
+
+# ### <span id="bookmarktooutline">bookmarktooutline()</span> ([top](#FUNCTIONS))
+# Funkce zpracovává záložky z DjVu souboru do formátu s odsazením
+bookmarktooutline() {
 	local TARGET="$1"
 	local BEGIN=""
 	local TAB=0
@@ -1611,6 +1733,7 @@ function exportdjvupage {
 }
 
 function getocr {
+    log goto "getocr() OCR ${OCR} –> ${1}"
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	if [ "${OCR}" ] ; then
@@ -1619,18 +1742,23 @@ function getocr {
 	fi
 }
 
-function testfile {
-	# Function return type file by MIME
-	# $1 - file
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	if [ -f "${SOURCE}" ] ; then
-		local TYPE=$(${MIME} -dbM "${SOURCE}" | awk '{print $1}')
-	else
-		log err "testfile() File ${1} is NOT valid."
-		exit 1
-	fi
-	echo "${TYPE,,}"
+# ### <span id="testfile">testfile()</span> ([top](#FUNCTIONS))
+# Function return type file by MIME
+#
+# $1 - jméno testovaného souboru se kterým se pracuje
+testfile () {
+    log goto "testfile() –> ${1}"
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    local FILE="${SOURCE##*/}"
+    if [ -f "${SOURCE}" ] ; then
+        local TYPE=$(${MIME} -dbM "${SOURCE}" | awk '{print $1}')
+    else
+        log err "testfile() File ${1} is NOT valid."
+        return 1
+    fi
+    log info "testfile() ${1} –> ${TYPE,,}"
+    echo "${TYPE,,}"
+    return 0
 }
 
 function targetdir {
@@ -1655,21 +1783,23 @@ function targetdir {
 	fi
 }
 
-function identifybundle {
-	# Function testing DjVu file if is (0) or not (1) bundle
-	# $1 - DjVu file
+# ### <span id="identifybundle">identifybundle()</span> ([top](#FUNCTIONS))
+# Function testing DjVu file if is (0) or not (1) bundle
+# $1 - DjVu file
+identifybundle() {
+    log goto "identifybundle() –> $1"
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
-	if [ -z "${SOURCE}" ] ; then
-		log err "identifybundle() Path ${1} is not valid."
-		exit 1
-	else
-		if [ $(testfile "${SOURCE}") == "djvu" ] ; then
-			${DJVM} -l "${SOURCE}" &>/dev/null && [ $? ] && return 0 || return 1
+	if [ -n "${SOURCE}" ] ; then
+        if [ $(testfile "${SOURCE}") == "djvu" ] ; then
+            ${DJVM} -l "${SOURCE}" &>/dev/null && [ $? ] && return 0 || return 2
 		else
-			log err "identifybundle() File ${FILE} is NOT DjVu file."
-			exit 1
+			log err "identifybundle() Is NOT DjVu file –> ${1}"
+			return 1
 		fi
+	else
+		log err "identifybundle() Invalid path –> ${1}"
+		return 1
 	fi
 }
 
@@ -1743,12 +1873,364 @@ function splitxcf {
 	popd
 }
 
+#/ NEPOUŽITÁ FUNKCE
 function splittiff {
 	# vrátí seznam
 	echo nic
 }
 
-function convertimg {
+
+# ### <span id="orezat">orezat()</span> ([top](#FUNCTIONS))
+# Funkce ořezává řetězec předaný jako $2 o řetězec předaný jako $1
+orezat() {
+    echo ${2#*${1}}
+}
+
+# ### <span id="targets">targets()</span> ([top](#FUNCTIONS))
+# Funkce nastavuje TARGETDIR a TARGETSAMPLE
+targets() {
+    log goto "targets() –> $1"
+    case "${1:$((${#1}-1)):1}" in
+        /) TARGETSAMPLE="ORIGINAL"
+            TARGETDIR=$(${REALPATH} -m -P "${1}")
+            log info "targets() Export pages with a original names into –> ${TARGETDIR}"
+            [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+        ;;
+        *) if [[ "${1}" =~ "/" ]] ; then
+                #/ obsahuje cestu
+                local TEMPORARY=$(${REALPATH} -m -P "${1}")
+                TARGETDIR="${TEMPORARY%/*}"
+                TARGETSAMPLE="${TEMPORARY##*/}"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} –> ${TARGETDIR}"
+                [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+            else
+                #/ jde o vzorek
+                TARGETDIR="$(pwd)/"
+                TARGETSAMPLE="${1}"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} into actual directory"
+            fi
+        ;;
+    esac
+    return 0
+}
+
+# ### <span id="filters">filters()</span> ([top](#FUNCTIONS))
+# Funkce přijme řetězec __$1__ a pokud obsahuje nastavení pro škálování
+# tak přenastaví SCALE
+filters() {
+    log goto "filters() –> $1"
+    case "${TEMPORAR}" in
+        -filter*) echo "následuje filtr pro resize, nutno přilepit do SCALE"
+            echo "TODO"
+        ;;
+        *) targets "${1}"
+        ;;
+    esac
+    return 0
+}
+
+# ### <span id="extractionpage">extractionpage()</span> ([top](#FUNCTIONS))
+# Funkce se volá již s předžvýkanými parametry
+extractionpage() {
+    log goto "extractionpage() From $1 –> $2"
+    local PARAMS=(${2})
+    # První položka je rozsah
+    local RANGE="${PARAMS[0]}"
+    echo "RANGE ${RANGE}"
+    if [ -n "${PARAMS[1]}" ] ; then
+        SCALE="1"
+        if [ "${PARAMS[1]}" == "${SCALE}" ] || [ "${PARAMS[1]}" == "ORIGINAL" ] ; then
+            if [ "${#PARAMS[@]}" -eq "2" ] ; then
+                [ "${PARAMS[1]}" == "1" ] && SCALE="ORIGINAL"
+                #/ už žádné další parametry
+                targets "$(pwd)/"
+            else
+                # následuje cílový adresář, a možná i vzorek pro přejmenování
+                if [ "${PARAMS[1]}" == "ORIGINAL" ] ; then
+                    targets "${2##* ORIGINAL }"
+                else
+                    [ "${PARAMS[1]}" == "1" ] && SCALE="ORIGINAL"
+                    targets "${2##* 1 }"
+                fi
+            fi
+        elif [[ ${PARAMS[1]} =~ [1-9][0-9]{2,}x[1-9][0-9]{2,} ]] ; then
+            log info "extractionpage() Nastavení fixním poměrem cols x rows"
+            # musí následovat parametr buď: -xyfit -xyfill nebo -xysize
+            if [[ "${2}" =~ "-xyfit" ]] ; then
+                SCALE="-xyfit ${PARAMS[1]/x/ }"
+                local TEMPORAR="${2#*xyfit}"
+            elif [[ "${2}" =~ "-xyfill" ]] ; then
+                SCALE="-xyfill ${PARAMS[1]/x/ }"
+                local TEMPORAR="${2#*xyfill}"
+            elif [[ "${2}" =~ "-xysize" ]] ; then
+                SCALE="-xysize ${PARAMS[1]/x/ }"
+                local TEMPORAR="${2#*xysize}"
+            else
+                return 1
+            fi
+            #/ může následovat filtr
+            filters "${TEMPORAR}"
+        elif [[ ${PARAMS[1]} =~ [0-9].[0-9]{1,2}x ]] ; then
+            log info "extractionpage() Nastavení velikosti násobkem scalefactor –> ${PARAMS[1]}"
+            # přepočítat na číslo
+            SCALE="${PARAMS[1]%x}"
+            #/ může následovat filtr
+            filters "${2#*${RANGE} ${PARAMS[1]}}"
+        elif [[ ${PARAMS[1]} =~ [0-9]+[.x] ]] ; then
+            echo "Invalid resize parameter –> ${PARAMS[1]}"
+            return 1
+        elif [[ ${PARAMS[1]} =~ [1-9][0-9]{1,2}% ]] ; then
+            log info "extractionpage() Nastavení výstupní velikosti procentuální ${PARAMS[1]}"
+            local NUMBER=$((${PARAMS[1]%\%}/100))
+            local MODULO=$((${PARAMS[1]%\%}-${NUMBER}*100))
+            SCALE="${NUMBER}.${MODULO}"
+            #/ může následovat filtr
+            filters "${2#*${PARAMS[1]}}"
+        else
+            echo "Další parametr"
+            # následuje adresář, či sample
+            targets "${2##*${RANGE} }"
+        fi
+        echo "SCALE –> ${SCALE}"
+        echo "TARGETDIR –> ${TARGETDIR}"
+        echo "TARGETSAMPLE –> ${TARGETSAMPLE}"
+    else
+        echo "není tam - je uveden pouze rozsah. Budu exportovat příslušné stránky v původním formátu do lokálního adresáře"
+    fi
+    # Druhá typ cílového souboru
+    local TARGETTYPE="${PARAMS[1]}"
+    # Pokud to není známý typ souboru, je to považováno za bug!!!
+    echo "TARGETYPE ${TARGETTYPE}"
+    # Sem přijde kontrola...
+    # a teprve za ní jedeme dál...
+    local TEMPORAR="${TEMPORAR#${TARGETTYPE} }"
+    # tady může být velikost - číslo, případně rozměny...
+    echo "TEMPORAR ${TEMPORAR}"
+    echo "${FORMATS[@]}"
+    # a zbytek je cesta..
+    return 0
+    local PAGES=($(range "${PARAMS[0]}"))
+    case ${FILETYPE} in
+        tar|zip) local LISTPAGES=($(ziplist "${FILE}"))
+            if [ "${#PAGES[@]}" -gt "0" ] && [ "${PAGES[$((${#PAGES[@]}-1))]}" -le "${#LISTPAGES[@]}" ] && [ "${PAGES[0]}" -gt "0" ]; then
+                #/ echo "${LISTPAGES[-1]}"
+                #/ echo "${PAGES[@]}"
+                for i in ${PAGES[@]} ; do
+                    local PAGE="${LISTPAGES[$((i-1))]}"
+                    if [[ "${PARAMS[1]}"  == "" ]] ; then
+                        #/ pokud PARAMS[1] nic neobsahuje, exportuje soubor pod původním názvem
+                        log info "Extrakce ${FILE} ${PAGE}"
+                        log info "Ukládám do souboru: $(pwd)/${PAGE#*/}"
+                        if [ -f "$(pwd)/${PAGE#*/}" ] ; then
+                            anone "Soubor ${PAGE#*/} již existuje, mám pokračovat a ten soubor přepsat?"
+                            [ $? -eq 1 ] && return 1
+                        else
+                            log info "Jedu bez ptaní"
+                        fi
+                        $(zipitem "${FILE}" "${PAGE}" > "${PAGE#*/}")
+                        echo $(pwd)
+                    elif [[ "${PARAMS[1]}"  =~ "%" ]] ; then
+                        #/ pokud PARAMS[1] obsahuje znak %, exportuje soubor do původního formátu, ale zmenšený dle příslušné hodnoty
+                        echo "Zmenšuji na 30% původního souboru"
+                        local TARGETTYPE=${PAGE##*.}
+                        local TEMPORARY=${PAGE#*/}
+                        echo "A ukládám do souboru: ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}.${TARGETTYPE}"
+                    elif [[ ${FORMATS[@]}  =~ ${PARAMS[1]} ]] ; then
+                        #/ pokud PARAMS[1] obsahuje některý z podporovaných formátů, provádí konverzi
+                        local TARGETTYPE=${PAGE##*.}
+                        local TEMPORARY=${PAGE#*/}
+                        echo "Konvertuji z formátu ${TARGETTYPE} do souboru ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
+                        if [ -f "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}" ] ; then
+                            anone "Soubor ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]} již existuje, mám pokračovat a ten soubor přepsat?"
+                            [ $? -eq 1 ] && return 1
+                        else
+                            log info "Jedu bez ptaní"
+                        fi
+                        local TEMPFILE=$(tempfile)
+                        $(zipitem "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                        if [ $? -eq 0 ] ; then
+                            local TEMPTYPE=$(testfile "${TEMPFILE}")
+                            if [[ "${FORMATS_FULL[@]}" =~ "${PARAMS[1]}" ]] ; then
+                                case ${TEMPTYPE} in
+                                    jpeg-2000)  jp2to "${TEMPFILE}" "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
+                                    ;;
+                                esac
+                            elif [[ "${FORMATS_MISS[@]}" =~ "${PARAMS[1]}" ]] ; then
+                                case ${TEMPTYPE} in
+                                    jpeg-2000)  jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
+                                        ${CONVERT} "${TEMPFILE}.pnm" "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
+                                        if [ $? -eq 0 ] ; then
+                                            rm "${TEMPFILE}"
+                                            rm "${TEMPFILE}.pnm"
+                                        fi
+                                    ;;
+                                esac
+                            else
+                                echo "Format ${PARAMS[1]} is not supported for conversion"
+                                exit 1
+                            fi
+                        fi
+                    else
+                    #/ PARAMS[1] zbytek řádku je sample pro pojmenování souborů
+                        local SAMPLE="${CHARSTRING#${PARAMS[0]}}"
+                        echo "Přejmenovávám dle vzoru: $SAMPLE"
+                    fi
+                done
+                return 0
+            else
+                echo "Pages are numbered from 1 and last page is ${#LISTPAGES[@]}. You have invalid value in range: ${CHARSTRING}" >> /dev/stderr
+                return 1
+            fi
+        ;;
+        *) echo "Formát ${FILETYPE^^} obsahuje pouze jednu stránku"
+            return 0
+        ;;
+    esac
+}
+
+# ### <span id="fromfile">fromfile()</span> ([top](#FUNCTIONS))
+# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# __$1__ je cesta k souboru ze kterého se exportuje stránka
+# __$2__ obsahuje parametry
+#
+# Tato funkce umožňuje zpracovávat i parametry předané funkci exportimg
+# prostřednictvím souboru
+fromfile() {
+    log goto "fromfile() $1 –> ${CHARSTRING}"
+    local FILE="${1}"
+    local PARAMS=(${2})
+    if [ "${#PARAMS[@]}" -eq "0" ] ; then
+        log info "fromfile() All pages exported as original file format"
+        local PAGES=$($0 "${FILE}" info pages)
+        CHARSTRING="1-${PAGES} ${FILETYPE} $(pwd)/"
+    else
+        local FORMATS_FULL=(
+            bmp
+            pnm
+            png
+            tif
+        )
+        local FORMATS_MISS=(
+            jpg
+            xcf
+            jp2
+        )
+        local FORMATS=( ${FORMATS_FULL[@]} ${FORMATS_MISS[@]} )
+        if [[ "${FORMATS[@]}"  =~ "${PARAMS[0]}" ]] ; then
+            log info "fromfile() All pages exported as –> ${PARAMS[0]}"
+            # zjistit počet stránek ve vstupním souboru
+            local PAGES=$($0 "${FILE}" info pages)
+            if [[ "${PAGES}" -eq "1" ]] ; then
+                log info "fromfile() Input file has only one page"
+                CHARSTRING="1 ${FILETYPE} $(pwd)/"
+            else
+                log info "fromfile() Input file has ${PAGES} pages"
+                CHARSTRING="1-${PAGES} ${FILETYPE} $(pwd)/"
+            fi
+        elif [[ "${PARAMS[0]}"  =~ "%" ]] ; then
+            log info "fromfile() All pages exported as original file format, resized to –> ${PARAMS[0]}"
+            local PAGES=$($0 "${FILE}" info pages)
+            if [[ "${PAGES}" -eq "1" ]] ; then
+                log info "fromfile() Input file has only one page"
+                if [ "${#PARAMS[@]}" -eq "1" ] ; then
+                    CHARSTRING="1 ${FILETYPE} ${PARAMS[0]} $(pwd)/"
+                else
+                    CHARSTRING="1 ${FILETYPE} ${PARAMS[0]} ${CHARSTRING#${PARAMS[0]} }"
+                fi
+            else
+                log info "fromfile() Input file has ${PAGES} pages"
+                if [ "${#PARAMS[@]}" -eq "1" ] ; then
+                    CHARSTRING="1-${PAGES} ${FILETYPE} ${PARAMS[0]} $(pwd)/"
+                else
+                    CHARSTRING="1-${PAGES} ${FILETYPE} ${PARAMS[0]} ${CHARSTRING#${PARAMS[0]} }"
+                fi
+            fi
+        else
+            case "${PARAMS[0]:0:1}" in
+                [[:digit:]]) log info "fromfile() Range –> ${PARAMS[0]}"
+                    #/ Call main function for extraction
+                    extractionpage "${FILE}" "${CHARSTRING}"
+                    return $?
+                ;;
+                *) case "${CHARSTRING:$((${#CHARSTRING}-1)):1}" in
+                    /) log info "fromfile() All pages exported as original file format into dir –> ${PARAMS[0]}"
+                        local TARGETDIR=$(${REALPATH} -m -P "${CHARSTRING}")
+                        [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+                        local PAGES=$($0 "${FILE}" info pages)
+                        if [[ "${PAGES}" -eq "1" ]] ; then
+                            log info "fromfile() Input file has only one page"
+                            CHARSTRING="1 ${FILETYPE} ${TARGETDIR}/"
+                        else
+                            log info "fromfile() Input file has ${PAGES} pages"
+                            CHARSTRING="1-${PAGES} ${FILETYPE} ${TARGETDIR}/"
+                        fi
+                    ;;
+                    *) log info "fromfile() All pages exported as original file format named by sample –> ${PARAMS[0]}"
+                        local TARGETSAMPLE=$(${REALPATH} -m -P "${CHARSTRING}")
+                        local TARGETDIR="${TARGETSAMPLE%/*}"
+                        [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+                        local PAGES=$($0 "${FILE}" info pages)
+                        if [[ "${PAGES}" -eq "1" ]] ; then
+                            log info "fromfile() Input file has only one page"
+                            CHARSTRING="1 ${FILETYPE} ${TARGETSAMPLE}"
+                        else
+                            log info "fromfile() Input file has ${PAGES} pages"
+                            CHARSTRING="1-${PAGES} ${FILETYPE} ${TARGETSAMPLE}"
+                        fi
+                    ;;
+                esac
+                ;;
+            esac
+        fi
+    fi
+    fromfile ${FILE} ${CHARSTRING}
+    return $?
+}
+
+# ### <span id="exportimg">exportimg()</span> ([top](#FUNCTIONS))
+# Funkce exportuje ze souboru stránky jako obrázky.
+# Vstupními parametry jsou globální proměnné:
+# * FILE - Soubor ze kterého se stránka exportuje.
+# * CHARSTRING - Proměnná, která obsahuje další parametry:
+# ** Rozsah exportovaných stránek. Není-li uveden, budou exportovány
+#    všechny stránky ze souboru.
+# ** Formát cílového souboru
+# ** Velikost cílového souboru, nastavená buď formou XxY, nebo procetuálně Z%
+#
+# Místo parametrů může být také předána také cesta k souboru, ve kterém
+# mohou být parametry nastaveny specificky pro každou stránku (rozsah)
+# zvlášť. Tento soubor __musí__ mít příponu `.list`
+#
+# Za parametry, nebo cestou k souboru s příponou `.list` může následovat
+# cílový adresář, resp. vzor pro pojmenování stránek
+#
+#     example/example
+#
+# Při exportu jpeg souborů z archívu uloží do podadresáře example
+# exportované stránky pod názvy: example_00001.jpg, example_00002.jpg, …
+#
+exportimg() {
+    log goto "exportimg() ${FILE} –> ${CHARSTRING}"
+    if [[ "${CHARSTRING}" =~ ".list" ]] ; then
+        local SOURCE=$(${REALPATH} -m -P "${CHARSTRING%.list*}.list" 2>/dev/null)
+        if [ -f "${SOURCE}" ] ; then
+            log info "exportimg() Read params from –> ${SOURCE}"
+            local TARGET="${CHARSTRING#*.list}"
+            while read line ; do
+                CHARSTRING="$line ${TARGET}"
+                fromfile "${FILE}" "${CHARSTRING}"
+            done < "${SOURCE}"
+        else
+            return 1
+        fi
+    else
+        fromfile "${FILE}" "${CHARSTRING}"
+    fi
+    return $?
+}
+
+#/ NEPOUŽITÁ FUNKCE
+function convertimg_old {
 	# Function for splitting multilayer image format
 	# $1 Image in multilayer format (tiff, mng or xcf (gimp)
 	local SOURCE=$(${REALPATH} -m -P "${1}")
@@ -1774,33 +2256,117 @@ function convertimg {
 	popd
 }
 
-function identifyname {
-	# Function return NAME of DjVu page in DjVu bundle
-	# $1 DjVu Bundle
-	# $2 Page identificator (order or name)
+# ### <span id="jp2to">jp2to()</span> ([top](#FUNCTIONS))
+# Konvertuje obrázky z formátu JPEG-2000 do bitmapových formátů:
+# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
+# Využívá se při tom nástroj libopenjp2-tools
+# Při konverzi do PNG je vyžadována knihovna libpng a při konverzi do
+# formátu TIFF zase knihovna libtiff.
+#
+# Srovnání: Cca 4,1M jp2 ve stupních šedi, mizerné kvality má po konverzi
+# do DjVu při použití výchozího algoritmu (`djvu`) 1,1M. O něco lepší výsledek
+# jak z hlediska vizuálního, tak velikosti souboru nabídnul algoritmus
+# `otsu` – 0.7MB
+# Stejný soubor nekomprimovaný zabral 33M a v PNG 21M
+jp2to() {
+    log goto "jp2to() $1 –> $2"
+    ${JP2TO} -i "${1}" -o "${2}"
+    return $?
+}
+
+# ### <span id="jp2in">jp2in()</span> ([top](#FUNCTIONS))
+# Konvertuje obrázky do formátu JPEG-2000
+# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
+# Využívá se při tom nástroj libopenjp2-tools.
+# Při konverzi z PNG je vyžadována knihovna libpng a při konverzi z
+# formátu TIFF zase knihovna libtiff.
+#
+# Konverze již zpracovaného obrázku už není tak dobrá jako z originálu 8-/
+jp2in() {
+    log goto "jp2in() $1 –> $2"
+    ${JP2IN} -i "${1}" -o "${2}"
+    return $?
+}
+
+# ### <span id="ziplist">ziplist()</span> ([top](#FUNCTIONS))
+# Vrací setříděný seznam souborů v ZIP archivu - je založen na syntaxi
+# používané u souborů archive.org, kdy číslování stránek je před příponou
+# souboru, oddělené od jména adresáře podtržítkem
+#
+#         pg35600_jp2/pg35600_0158.jp2
+#
+# Pořadové číslo souboru tak odpovídá číslu stránky
+ziplist() {
+    ${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
+}
+
+# ### <span id="zipitem">zipitem()</span> ([top](#FUNCTIONS))
+# Funkce vyblije na standardní výstup ze zazipovaného archívu __$1__
+# soubor __$2__
+zipitem() {
+    log goto "zipitem() From $1 flush –> $2"
+    ${ZIP} e -so "${1}" "${2}"
+}
+
+# ### <span id="infoitem">infoitem()</span> ([top](#FUNCTIONS))
+# Na vstupu je stream a výstupem je sada hodnot
+infoitem() {
+    ${EXIFTOOL} -s3 -FileType -ImageSize -Compression -AnimationFrames -FrameCount -
+}
+
+# ### <span id="convertovergimp">convertovergimp()</span> ([top](#FUNCTIONS))
+# Bitmapový editor gimp lze rovněž využívat ke konverzi bitmapových souborů
+#
+# $1 - výstupní formát
+convertovergimp() {
+    # Start gimp with python-fu batch-interpreter
+    gimp -i --batch-interpreter=python-fu-eval -b - << EOF
+import gimpfu
+
+def convert(filename):
+    img = pdb.gimp_file_load(filename, filename)
+    new_name = filename.rsplit(".",1)[0] + ".$1"
+    layer = pdb.gimp_image_merge_visible_layers(img, 1)
+
+    pdb.gimp_file_save(img, layer, new_name, new_name)
+    pdb.gimp_image_delete(img)
+
+convert('${FILE}')
+
+pdb.gimp_quit(1)
+EOF
+}
+
+# ### <span id="identifyname">identifyname()</span> ([top](#FUNCTIONS))
+# Function return NAME of DjVu page in DjVu bundle
+# $1 DjVu Bundle
+# $2 Page identificator (order or name)
+identifyname() {
+    log goto "identifyname() ${1} –> ${2}"
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	local IDENTIFICATOR="${2##+([[:blank:]])}"
 	identifybundle "${SOURCE}" 
-	if identifybundle "${SOURCE}" ; then
-		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-			${DJVM} -l "${SOURCE}" | grep PAGE\ #${IDENTIFICATOR}\  | awk '{print $4}'
-		else
-			${DJVM} -l "${SOURCE}" | grep PAGE\ # | grep ${IDENTIFICATOR}$ | awk '{print $4}'
-		fi
-	else
-		if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-			local SEARCH="\[P${IDENTIFICATOR}\]"
-		else
-			local SEARCH="\{${IDENTIFICATOR}\}"
-		fi
-		local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $2}')
-		if [ -z "${OUTPUT}" ] ; then
-			return 0
-		else
-			echo -n "${OUTPUT}"
-		fi
-	fi
+    case $? in
+        2) if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
+                local SEARCH="\[P${IDENTIFICATOR}\]"
+            else
+                local SEARCH="\{${IDENTIFICATOR}\}"
+            fi
+            local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $2}')
+            if [ -n "${OUTPUT}" ] ; then
+                echo -n "${OUTPUT}"
+            fi
+            ;;
+        1) return 1 ;;
+        *) if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
+                ${DJVM} -l "${SOURCE}" | grep PAGE\ #${IDENTIFICATOR}\  | awk '{print $4}'
+            else
+                ${DJVM} -l "${SOURCE}" | grep PAGE\ # | grep ${IDENTIFICATOR}$ | awk '{print $4}'
+            fi
+            ;;
+    esac
+    return 0
 }
 
 function identifypage {
@@ -1831,33 +2397,50 @@ function identifypage {
 	fi
 }
 
-function lastpage {
-	# Function return count of all pages in DjVu bundle
-	# $1 DjVu file
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	[ "$(testfile ${SOURCE})" == "djvu" ] || exit 1
-	log info "lastpage() Count of all pages in ${FILE}"
-	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
-	echo -n "${OUTPUT}"
-	
+# ### <span id="lastpage">lastpage()</span> ([top](#FUNCTIONS))
+# Function return count of all pages in DjVu bundle
+# $1 DjVu file
+lastpage() {
+    log goto "lastpage() –> ${1}"
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    local FILE="${SOURCE##*/}"
+    [ "$(testfile ${SOURCE})" == "djvu" ] || return 1
+    local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
+    log info "lastpage() Count of all pages in ${FILE} –> ${OUTPUT}"
+    echo -n "${OUTPUT}"
+    return 0
 }
 
-function deletepage {
-	# $1 - soubor se kterým se pracuje
-	# $2 - číslo, nebo název strany co se má odstranit
-	local FILE="${1##*/}"
-	if $(identifybundle "${1}") ; then
-		echo "Soubor ${FILE} je typu single-page"
-		return 1
-	else
-		local PAGE=$(identifypage "${1}" "${2}")
-		if [ ! -z "${PAGE}" ] ; then
-			${DJVM} -d "${1}" "${PAGE}"
-		else
-			return 2
-		fi
-	fi
+# ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
+# Odstraňuje z DjVu Bundle svazku stránky
+#
+# $1 - jméno DjVu svazku se kterým se pracuje
+# $2 - číslo, nebo název strany co se má odstranit
+#
+# Pokud je stránka úspěšně odstraněna, vrací __0__
+# Pokud se stránka ve svazku nevyskytuje, vrací __1__
+# Pokud není DjVu soubor typu bundle, vrací __2__
+deletepage() {
+    log goto "deletepage() From ${1} delete –> ${2}"
+    [ -z ${2} ] && return 1
+    local FILE="${1##*/}"
+    identifybundle "${1}"
+    case $? in
+        2) echo "Soubor ${FILE} je typu single-page" >> /dev/stderr
+            return 2
+            ;;
+        1)  log warn "deletepage() ${FILE} is not DjVu bundle"
+            return 1
+            ;;
+        *) local PAGE=$(identifypage "${1}" "${2}")
+            if [ ! -z "${PAGE}" ] ; then
+                ${DJVM} -d "${1}" "${PAGE}"
+            else
+                return 1
+            fi
+            ;;
+    esac
+    return $?
 }
 
 function djvurotate {
@@ -2484,22 +3067,28 @@ function djvumove {
 # Má se přesouvat kupředu
 }
 
-function range {
-	# 1,2,3-9,10-20
-	case "${1:0:1}" in
-		[[:digit:]]) local INPUTARRAY=( ${1//,/ } )
-			for i in ${INPUTARRAY[@]} ; do
-				if [[ "$i" =~ "-" ]] ; then
-					seq ${i//-/ }
-				else
-					seq ${i} ${i}
-				fi
-			done | sort -u
-		;;
-		*) printf "range: FAIL - range of pages must be set only from order numbers, commas and hyphens.\n" >> /dev/stderr
-		exit 1
-		;;
-	esac
+# ### <span id="range">range()</span> ([top](#FUNCTIONS))
+# Funkce, která zpracuje předaný řetězec do sekvence čísel
+# 1,2,3-9,10-20
+# Pokud zpracování řetězce proběhne v pořádku je návratový kód __0__,
+# v opačném případě __1__.
+range() {
+    log goto "range() –> ${@}"
+    case "${1:0:1}" in
+        [[:digit:]]) local INPUTARRAY=( ${1//,/ } )
+            for i in ${INPUTARRAY[@]} ; do
+                if [[ "$i" =~ "-" ]] ; then
+                    seq ${i//-/ }
+                else
+                    seq ${i} ${i}
+                fi
+            done | sort -nu
+            return 0
+        ;;
+        *) printf "range: FAIL - range of pages must be set only from order numbers, commas and hyphens.\n" >> /dev/stderr
+            return 1
+        ;;
+    esac
 }
 
 function changemeta {
@@ -2666,43 +3255,38 @@ EOF
 	return 0
 }
 
-function djvuinfo {
-	# $1 - soubor
-	# $2 - parametry
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	if $(identifybundle "${SOURCE}") ; then
-		local PAGES="none"
-	else
-		local PAGES=$(lastpage "${SOURCE}")
-	fi
-	if [ -z "${2}" ] ; then
-		case "${PAGES}" in
-			none) local INFO="${FILE}"
-				echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu single-page\n"
-			;;
-			*) local INFO="${FILE}"
-				echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu bundle - ${PAGES} pages\n"
-			;;
-		esac
-	else
-		case "${2}" in
-			exif) ${EXIFTOOL} "${SOURCE}"
-			;;
-			meta) printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
-			;;
-			pages) if identifybundle ${SOURCE} ; then
-					${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
-				else
-					${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
-				fi
-				return 0
-			;;
-			*) case "${2%%\ *}" in
-					meta) if [ "${2#* }" == "all" ] ; then
-							printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
-							return 0
-						elif [ "${2#* }" == "global" ] ; then
+# ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
+# Odstraňuje z DjVu Bundle svazku stránky
+#
+# $1 - soubor
+# $2 - parametry
+djvuinfo() {
+    log goto "djvuinfo() $1 –> $2"
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    local FILE="${SOURCE##*/}"
+    if $(identifybundle "${SOURCE}") ; then
+        local PAGES="none"
+    else
+        local PAGES=$(lastpage "${SOURCE}")
+    fi
+    if [ -n "${2}" ] ; then
+        case "${2}" in
+            exif) ${EXIFTOOL} "${SOURCE}"
+                ;;
+            meta) printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
+                ;;
+            pages) if identifybundle ${SOURCE} ; then
+                    ${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
+                else
+                    ${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
+                fi
+                return 0
+            ;;
+            *) case "${2%%\ *}" in
+                    meta) if [ "${2#* }" == "all" ] ; then
+                            printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
+                            return 0
+                        elif [ "${2#* }" == "global" ] ; then
 							printmeta "${SOURCE}" global | grep -v '^[#.]\|^$'
 							return 0
 						else
@@ -2762,12 +3346,63 @@ function djvuinfo {
 				esac
 			;;
 		esac
-	fi
+    else
+        case "${PAGES}" in
+            none) local INFO="${FILE}"
+                echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu single-page\n"
+                ;;
+            *) local INFO="${FILE}"
+                echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu bundle - ${PAGES} pages\n"
+                ;;
+        esac
+    fi
 }
 
 function help {
 	case "$1" in
-		algorithm) echo """Nápověda pro algoritmy.. ToDo
+		algorithm) echo """
+
+Binarizační algoritmy ovliňují vygenerování optimální černobílé masky
+Utilita DiDjVu podporuje tyto algoritmy:
+
+abutaleb
+bernsen
+  - region-size=N (1 .. 50, default: 11)
+  - contrast-limit=N (0 .. 255, default: 80)
+  - doubt-to-black
+brink
+djvu (default) (vhodný pro černobílé obrázky)
+  - smoothness=X (0.0 .. 1.0, default: 0.2)
+  - max-block-size=N (default: 512)
+  - min-block-size=N (default: 64)
+  - block-factor=N (1 .. 8, default: 2)
+global
+  - threshold=N
+niblack
+  - region-size=N (default: 15)
+  - sensitivity=X (default: -0.2)
+  - lower-bound=N (0 .. 255, default: 20)
+  - upper-bound=N (0 .. 255, default: 150)
+otsu (vhodný pro černobílé obrázky, lepší komprese než u výchozího djvu)
+sauvola
+  - region-size=N (default: 15)
+  - sensitivity=X (default: 0.5)
+  - dynamic-range=N (1 .. 255, default: 128)
+  - lower-bound=N (0 .. 255, default: 20)
+  - upper-bound=N (0 .. 255, default: 150)
+shading-subtraction
+  - k=N (default: 7)
+  - threshold=N
+tsai
+white-rohrer
+  - x-lookahead=N (default: 8)
+  - y-lookahead=N (default: 1)
+  - bias-mode=N (default: 0)
+  - bias-factor=N (default: 100)
+  - f-factor=N (default: 100)
+  - g-factor=N (default: 100)
+
+Výchozí nastavení algoritmů lze upravit 
 		"""
 		;;
 		bundle) echo """Nápověda pro volbu typu svazku.. ToDo
@@ -3181,12 +3816,12 @@ options:
 
   ACTION [1mconvert[0m
 
-  Conversion multipage file into DjVu bundle.
+  Conversion input file.
 
-  [1m${0##*/}[0m <Multipage file> convert [ALG [<num>|<name>]]
+  [1m${0##*/}[0m <file> convert [<num>] [<name>]
 
          num  - order or range layers
-         name - name of layer in multipage file
+         name - name output file with suffix
 
   ALG:
          [3mexif[23m - return exif info about DjVu file
@@ -3484,6 +4119,8 @@ Use:  [1m${0##*/}[0m [options] { [-h|--help] | <file> {KEYWORDS} [...] }
 	esac
 }
 
+# ### <span id="filetodjvu">filetodjvu()</span> ([top](#FUNCTIONS))
+# Dublovaná funkce
 function filetodjvu {
 	echo "filetodjvu: vstupuji sem.." >> /dev/stderr
 	local SOURCE=$(${REALPATH} -m -P "${1}")
@@ -3530,67 +4167,72 @@ function filetodjvu {
 	esac
 }
 
-function todjvu {
-	# $1 - soubor ke konverzi
-	# $2 - target path to new DjVu file (full path!!)
-	#echo "to djvu -${1}- -${2}-" >> /dev/stderr
-	#return 0
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	case "${FILE##*.}" in
-		[jJ][pP][gG]|[pP][nN][gG]|[gG][iI][fF]|[pP][nN][mM])
-		;;
-		[tT][iI][fF][fF]|[xX][cC][fF]|[nM][nN][gG]|[pP][dD][fF]) echo "todjvu: INFO - Format file ${FILE##*\.} now is not accepted. Sorry!!" >> /dev/stderr && exit 1
-		;;
-		*) echo "todjvu: INFO - Format file ${FILE##*\.} is not supported. Sorry!!" >> /dev/stderr && exit 1
-		;;
-	esac
-	local TARGETPATH=$(${REALPATH} -m -P "${2}")
-	local TARGET="${TARGETPATH##*/}"
-	log warn "todjvu() From input file ${SOURCE} make DjVu file ${TARGET}"
-	if [ $(testfile "${SOURCE}") == "djvu" ] ; then
-		echo "todjvu: ERROR - ${SOURCE} is DjVu file" >> /dev/stderr
-		exit 1
-	else
-		if [ "${#ALG[@]}" -gt "1" ] ; then
-			for i in ${ALG[@]} ; do 
-				${DIDJVU} encode -o "${TARGETPATH/.djvu/.$i.djvu}" -d "${DPI-300}" ${LEVEL} -m "$i" "${SOURCE}"
-				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH/.djvu/.$i.djvu}"
-				getocr "${TARGETPATH/.djvu/.$i.djvu}"
-			done
-		else
-			if [ -f "${TARGETPATH}" ] ; then
-				if [ "${FORCE}" == "yes" ] ; then
-				log info "todjvu() INFO - rewrite target file ${TARGET}."
-					${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
-				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH}"
-					getocr "${TARGETPATH}"
-				else
-					echo "Mám přepsat cílový soubor ${TARGET}?"
-					potvrdit && ${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
-					getocr "${TARGETPATH}"
-				fi
-			else
-				${DIDJVU} encode -o "${TARGETPATH}" -d "${DPI-300}" ${LEVEL} -m "${ALG}" "${SOURCE}"
-				getocr "${TARGETPATH}"
-				[ "$?" ] && log info "todjvu() INFO - file ${FILE} was converted into ${TARGETPATH}"
-			fi
-		fi
-	fi
+# ### <span id="todjvu">todjvu()</span> ([top](#FUNCTIONS))
+# Funkce která konvertuje soubory do DjVu
+todjvu() {
+    log goto "todjvu() View ${VIEW} ${1} –> ${2}"
+    filepath "${1}"
+    [ $? -eq 1 ] && echo "todjvu() Invalid path –> ${1}" && return 1
+    case "${FILESUFFIX}" in
+        [jJ][pP][gG]|[pP][nN][mM]) #/ Konverze není nutná
+            ;;
+        [pP][nN][gG]|[gG][iI][fF]) #/ mohou mít více framů
+            ;;
+        [jJ][2kKpP][2cCtT])
+            jp2to "${FILEFULL}" "${TEMPDIR}/${FILENAME/.${FILESUFFIX}/.pnm}"
+            filepath "${TEMPDIR}/${FILENAME/.${FILESUFFIX}/.pnm}"
+            ;;
+        [tT][iI][fF][fF]|[xX][cC][fF]|[nM][nN][gG]|[pP][dD][fF]) echo "todjvu() INFO - Format file ${FILESUFFIX} now is not accepted. Sorry!!" >> /dev/stderr && return 1
+            ;;
+        [dD][jJ][vV][uU]) echo "todjvu: ERROR - ${FILENAME} is DjVu file" >> /dev/stderr && return 1
+            ;;
+        *) echo "todjvu() INFO - Format file ${FILESUFFIX} is not supported. Sorry!!" >> /dev/stderr && return 1
+            ;;
+    esac
+    local SOURCE="${FILEFULL}"
+    filepath "${2}"
+    case "${FILESUFFIX}" in
+        [dD][jJ][vV][uU])
+            if [ "${#ALG[@]}" -gt "1" ] ; then
+                for i in ${ALG[@]} ; do
+                    [ -f "${FILEPATH}/${FILENAME/.${FILESUFFIX}/.$i.djvu}" ] && \
+                    anone "Soubor ${FILEPATH}/${FILENAME/.${FILESUFFIX}/.$i.djvu}, mám pokračovat a ten soubor přepsat?"
+                    [ $? -eq 1 ] && return 1
+                    encodefile $i "${SOURCE}" "${FILEPATH}/${FILENAME/.${FILESUFFIX}/.$i.djvu}" && \
+                    getocr "${FILEPATH}/${FILENAME/.${FILESUFFIX}/.$i.djvu}"
+                    [ -n "${VIEW}" ] && djvuview "${FILEPATH}/${FILENAME/.${FILESUFFIX}/.$i.djvu}"
+                done
+            else
+                [ -f "${FILEPATH}/${FILENAME}" ] && \
+                anone "Soubor ${FILEPATH}/${FILENAME}, mám pokračovat a ten soubor přepsat?"
+                [ $? -eq 1 ]&& return 1
+                encodefile $i "${SOURCE}" "${FILEPATH}/${FILENAME}" && \
+                getocr "${FILEPATH}/${FILENAME}"
+                [ -n "${VIEW}" ] && djvuview "${FILEPATH}/${FILENAME}"
+                log info "todjvu() ${FILE} was converted into ${FILEPATH}/${FILENAME}"
+            fi
+            return 0
+            ;;
+        *) echo "todjvu: ERROR - Target must be with suffix .djvu" >> /dev/stderr
+            return 1
+            ;;
+    esac
 }
 
-# TODO - test - testovací enkode proces
-function todotest {
-	for i in ${ALG[@]} ; do 
-		${DIDJVU} encode -o "${1%.*}-$i.djvu" -d 300 -m "$i" "$1"
-	done
-}
-
-# TODO - test - zobrazení testovacích DjVu souborů
-function todoview {
-	for i in ${ALG[@]} ; do 
-		(${DJVIEW} ${1%.*}-$i.djvu &)
-	done
+# ### <span id="djvuview">djvuview()</span> ([top](#FUNCTIONS))
+# Funkce na základě předaného jména (parametr __$1__) a zvolených
+# enkodovacích algoritmů otevře prohlížeč DjVu souborů, aby bylo možné
+# provést vizuální srovnání kvality zkonvertovaných souborů
+djvuview() {
+    log goto "djvuview() Open –> $@"
+    while [ $# -gt 0 ] ; do
+        local TYPE=$(testfile "${1}")
+        case "${TYPE}" in
+            djvu) (${DJVIEW} "${1}" &) ;;
+            *) echo "File ${1} is not DjVu file" >> /dev/stderr ;;
+        esac
+        shift
+    done
 }
 
 # TODO - insert
@@ -3617,12 +4259,8 @@ function todjvuclassic {
 
 # Zpracování parametrů předaných při startu skriptu
 main() {
-#	echo "$@" >> /dev/stderr
-#	echo "$*" >> /dev/stderr
-
 while [ $# -gt 0 ]
 do
-#echo $1 >> /dev/stderr
     case ${1} in
         -a|--algorithm) #/ Volba pro akci insert
             #/ Není-li uveden žádný kompresní algoritmus, je aplikováno
@@ -3691,6 +4329,7 @@ do
                     shift
                     ;;
             esac
+            log set "main() FORCE –> ${FORCE}"
             ;;
         --clean) LEVEL="--loss-level=1" && shift
             ;;
@@ -3930,17 +4569,32 @@ do
                     ;;
             esac
             ;;
-        *.[dD][jJ][vV][uU]|*.[gG][iI][fF]|*.[jJ][pP][gG]|*.[mM][nN][gG]|*.[pP][dD][fF]|*.[pP][nN][gG]|*.[pP][nN][mM]|*.[tT][iI][fF][fF]|*.[xX][cC][fF])
-            local FILE="${1}"
+        *.[dD][jJ][vV][uU]|\
+        *.[gG][iI][fF]|\
+        *.[jJ][pP][gG]|\
+        *.[jJ][pP]2|\
+        *.[zZ][iI][pP]|\
+        *.[pP][nN][gG]|\
+        *.[pP][nN][mM]|\
+        *.[pP][cC][dD]|\
+        *.[mM][nN][gG]|\
+        *.[pP][dD][fF]|\
+        *.[tT][aA][rR]|\
+        *.[tT][iI][fF][fF]|\
+        *.[tT][iI][fF]|\
+        *.[xX][cC][fF])
+            local FILE=$(realpath -P "${1}")
+            [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
             shift
             ;;
-        *) KEYS=(
+        *) ACTIONS=(
             delete
             fore
             back
             rotate
             export
             import
+            convert
             edit
             info
             rename
@@ -3950,230 +4604,253 @@ do
             unset
             view
             )
-            if [[ ${KEYS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] ; then
-                KEY=${1}
+            
+            if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] ; then
+                ACTION=${1}
+                shift
                 local CHARSTRING="$@"
-                log info "main() ACTION –> ${KEY}"
+                log info "main() ACTION –> ${ACTION}"
                 break
             else
+# Smyčka se přeruší, pokud není předaná žádná známá akce, ani parametr,
+# který by byl ošetřen pomocí voleb. Další paramtery jsou pak již číslovány
+# 1, 2, 3 atd..
                 break
             fi
             ;;
     esac
 done
 
-echo "Zpracované volby" >> /dev/stderr
-	case "${CHARSTRING}" in
-		*-h|*--help|-h*|--help*) if [ -z "${KEY}" ] ; then
-				help
-			else
-				help "keywords-${KEY}"
-			fi
-			exit 0
-		;;
-	esac
+case "${CHARSTRING}" in
+    *-h|*--help|-h*|--help*)
+        if [ -z "${ACTION}" ] ; then
+            help
+        else
+            help "keywords-${ACTION}"
+        fi
+        exit 0
+    ;;
+esac
 
-	if [ -f "${FILE}" ] ; then
-#		log warn "main: Soubor -${FILE}- existuje.."
-#		FILE=${FILE//\ /\\ }
-		FILETYPE=$(testfile "${FILE}")
-		case ${FILETYPE} in
-			djvu)
-				#echo "AKCE ${KEY}" >> /dev/stderr
-				#echo "Parametry #${CHARSTRING}#" >> /dev/stderr
-				case "${KEY}" in
-					delete) deletepage "${FILE}" "${CHARSTRING}"
-						case "$?" in
-							2) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
-							;;
-						esac
-						exit 0
-					;;
-					insert) # ToDo - zpracovat ${CHARSTRING}
-						exit 1
-						if [ -f "${3}" ] ; then
-							if [ $(testfile ${3}) == "djvu" ] ; then
-								log info "main() - insert: Soubor je typu djvu"
-								local INSERTFILE=${3}
-							else
-								[ "${#ALG[@]}" == "1" ] || exit 32
-								local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
-								todjvu ${3} ${INSERTFILE}
-								if [ $? -gt "0" ] ; then
-									echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
-									exit 1
-								fi
-							fi
-							# Určit pozici...
-							local P=$(identifypage ${1} ${4})
-							log info "main() - insert: Cílová pozice je $P"
-							if [ -z "${P}" ] ; then
-								if [ -z "${4}" ] ; then
-									echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
-									insertpage ${1} ${INSERTFILE}
-								else
-									echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
-									exit 1
-								fi
-							else
-								log info "main() - insert: Vkládám ${INSERTFILE} na pozici $P"
-								insertpage ${1} ${INSERTFILE} ${P}
-							fi
-						else
-							echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
-							exit 1
-						fi
-						exit 0
-					;;
-					fore) MOVE="fore"
-						djvumove "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					back) MOVE="back"
-						djvumove "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					rotate) djvurotate "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					export) case "${CHARSTRING%% *}" in
-						ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
-							#anttodsed "${CHARSTRING#* }"
-							echo nil
-							;;
-						outline) # Exportuje obsah ve fromátu .outline
-							printoutline "${FILE}" "${CHARSTRING#* }"
-							;;
-						bookmark) # Exportuje obsah ve formátu .bookmarks
-							outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
-							;;
-						dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
-							echo nil
-							;;
-						xml) #exportuje obsah textové vrstvy ve formátu .xml
-							;;
-						djvu) # exportuje celé stránky ve formátu DjVu
-							echo nil
-							;;
-						img) # exportuje náhledy stránek ve formátu PNG
-							echo nil
-							;;
-						*) djvuexport "${FILE}" "${CHARSTRING}"
-							;;
-						esac
-						exit 0
-					;;
-					convert) # Konvertuje obsah předhozeného souboru
-						case "${CHARSTRING%% *}" in
-						ant) # Převede obsah .ant souboru do formátu pro dsed
-							anttodsed "${CHARSTRING#* }"
-							;;
-						outline) # Převede obsah .outline souboru do formátu pro dsed
-							#outlinetodsed "${CHARSTRING#* }" | encode >> "${TARGET/.djvu/.outline}"
-							local OUTLINE="${CHARSTRING#* }"
-							outlinetodjvu "${FILE}" "${OUTLINE%%.outline*}.outline" "${OUTLINE#*outline}"
-							;;
-						bookmark) # Převede obsah .outline souboru do formátu pro import
-							outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
-							;;
-						
-						dsed) # Převede obsah .dsed souboru podle obsahu na soubor typu .outline a soubor typu .ant
-							;;
-						-h) help keyword-import
-							;;
-						*) djvuimport "${FILE}" "${CHARSTRING}"
-							;;
-					esac
-					;;
-					import) case "${CHARSTRING%% *}" in
-						ant) # Importuje obsah předhozeného .ant souboru
-							local ANT=${CHARSTRING#* }
-							if [ -f "${ANT%% *}" ] ; then
-								echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
-								#anttodsed "${CHARSTRING#* }"
-								important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
-							else
-								echo "ERROR: ${ANT%% *} isn't .ant file!"
-								exit 1
-							fi
-							;;
-						meta) echo "import from meta file to ${FILE}"
-							;;
-						outline) if [ -f "${CHARSTRING#* }" ] ; then
-								outlinetodjvu "${FILE}" "${CHARSTRING#* }"
-							else
-								echo "Import bokmarks is only from outline file"
-							fi
-							;;
-						-h) help keyword-import
-							;;
-						*) djvuimport "${FILE}" "${CHARSTRING}"
-							;;
-					esac
-						exit 33
-					;;
-					info) djvuinfo "${FILE}" "${CHARSTRING}"
-						exit 0
-					;;
-					print) case "${CHARSTRING%% *}" in
-						ant) printant "${FILE}" "${CHARSTRING#* }"
-							;;
-						outline) printoutline "${FILE}"
-							;;
-						test) compgen -A "${CHARSTRING#* }"
-							;;
-						*) help keyword-print
-							;;
-					esac
-					exit 33
-					;;
-					rename)   # ToDo - zpracovat ${CHARSTRING}
-						exit 1
-					;;
-					set) case "${CHARSTRING%% *}" in
-							meta) setmeta "${FILE}" "${CHARSTRING#* }"
-							;;
-							outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
-							;;
-							*) help keyword-meta
-							;;
-						esac
-						exit 0
-					;;
-					unset) case "${CHARSTRING%% *}" in
-							meta) unsetmeta "${FILE}" "${CHARSTRING#* }"
-							;;
-							outline) outlineunset "${FILE}" "${CHARSTRING#outline *}"
-							;;
-							*) help keyword-meta
-							;;
-						esac
-						exit 0
-					;;
-					edit) case "${CHARSTRING}" in
-							ant) # export všech ant 
-								printant "${FILE}" "${CHARSTRING#* }"
-								editor "${TEMPFILE}"
-								echo "chybí funkce pro vložení.. set.."
-							;;
-							outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-								printf '; Pravidla pro obsah souboru .outline :\n' >> "${TEMPFILE}"
-								printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
-								printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n' >> "${TEMPFILE}"
-								printf ';  * Identifikátor vždy začíná znakem #\n' >> "${TEMPFILE}"
-								printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n' >> "${TEMPFILE}"
-								printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
-								printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
-								printf ';  * Soubor nesmí končit prázným řádkem!\n' >> "${TEMPFILE}"
-								printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
-								printf ';\n' >> "${TEMPFILE}"
-								printf ';"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
-								printf ';      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
-								printoutline "${FILE}" "${TEMPFILE}"
-								editor "${TEMPFILE}"
-								outlinetodjvu "${FILE}" "${TEMPFILE}"
-							;;
-							meta) echo "nahrazuje ant"
+#/ echo "${ACTION}" >> /dev/stderr
+#/ echo "$@" >> /dev/stderr
+
+    if [ -f "${FILE}" ] ; then
+        FILETYPE=$(testfile "${FILE}")
+        case ${FILETYPE} in
+            djvu) #/ Pracuji se souborem v DjVu formátu
+                log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
+                case "${ACTION}" in
+                    delete) #/ Odstraňuji stránk, či stránky z DjVu svazku dle rozsahu, pořadí či jména
+                        deletepage "${FILE}" "${CHARSTRING}"
+                        case "$?" in
+                            1) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
+                            ;;
+                        esac
+                        return 0
+                    ;;
+                    insert) #/ Vkládám soubor předaný jako parametr 
+                            # ToDo - zpracovat ${CHARSTRING}
+                        exit 1
+                        if [ -f "${3}" ] ; then
+                            if [ $(testfile ${3}) == "djvu" ] ; then
+                                log info "main() - insert: Soubor je typu djvu"
+                                local INSERTFILE=${3}
+                            else
+                                [ "${#ALG[@]}" == "1" ] || exit 32
+                                local INSERTFILE="$TEMPDIR/${3%.*}.djvu"
+                                todjvu ${3} ${INSERTFILE}
+                                if [ $? -gt "0" ] ; then
+                                    echo "main - insert: Soubor ${3} se nepodařilo zkonvertovat do souboru ${INSERTFILE}" >> /dev/stderr
+                                    return 1
+                                fi
+                            fi
+                            # Určit pozici...
+                            local P=$(identifypage ${1} ${4})
+                            log info "main() - insert: Cílová pozice je $P"
+                            if [ -z "${P}" ] ; then
+                                if [ -z "${4}" ] ; then
+                                    echo "Připojení souboru ${INSERTFILE} na konec souboru ${1}" >> /dev/stderr
+                                    insertpage ${1} ${INSERTFILE}
+                                else
+                                    echo "Identifikátor ${4} je pro soubor ${1} neplatný" >> /dev/stderr
+                                    return 1
+                                fi
+                            else
+                                log info "main() - insert: Vkládám ${INSERTFILE} na pozici $P"
+                                insertpage ${1} ${INSERTFILE} ${P}
+                            fi
+                        else
+                            echo "Akci insert lze použít pouze ke vložení souboru" >> /dev/stderr
+                            return 1
+                        fi
+                        return 0
+                    ;;
+                    fore) #/ Přesouvám stránku kupředu
+                        MOVE="fore"
+                        djvumove "${FILE}" "${CHARSTRING}"
+                        return 0
+                    ;;
+                    back) #/ Přesouvám stránku dozadu
+                        MOVE="back"
+                        djvumove "${FILE}" "${CHARSTRING}"
+                        return 0
+                    ;;
+                    rotate) #/ Otáčím stránku
+                        djvurotate "${FILE}" "${CHARSTRING}"
+                        return 0
+                    ;;
+                    export) #/ Exportuji stránku
+                        case "${CHARSTRING%% *}" in
+                            ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
+                                #anttodsed "${CHARSTRING#* }"
+                                echo nil
+                            ;;
+                            outline) # Exportuje obsah ve fromátu .outline
+                                printoutline "${FILE}" "${CHARSTRING#* }"
+                            ;;
+                            bookmark) # Exportuje obsah ve formátu .bookmarks
+                                outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
+                            ;;
+                            dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
+                                echo nil
+                            ;;
+                            xml) #exportuje obsah textové vrstvy ve formátu .xml
+                            ;;
+                            djvu) # exportuje celé stránky ve formátu DjVu
+                                echo nil
+                            ;;
+                            img) # exportuje náhledy stránek ve formátu PNG
+                                echo nil
+                            ;;
+                            *) djvuexport "${FILE}" "${CHARSTRING}"
+                            ;;
+                        esac
+                        return 0
+                    ;;
+                    convert) # Konvertuje obsah předhozeného souboru
+                        case "${CHARSTRING%% *}" in
+                            ant) # Převede obsah .ant souboru do formátu pro dsed
+                                anttodsed "${CHARSTRING#* }"
+                            ;;
+                            outline) # Převede obsah .outline souboru do formátu pro dsed
+                                #outlinetodsed "${CHARSTRING#* }" | encode >> "${TARGET/.djvu/.outline}"
+                                local OUTLINE="${CHARSTRING#* }"
+                                outlinetodjvu "${FILE}" "${OUTLINE%%.outline*}.outline" "${OUTLINE#*outline}"
+                            ;;
+                            bookmark) # Převede obsah .outline souboru do formátu pro import
+                                outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
+                            ;;
+                            dsed) # Převede obsah .dsed souboru podle obsahu na soubor typu .outline a soubor typu .ant
+                            ;;
+                            -h) help keyword-import
+                            ;;
+                            *) djvuimport "${FILE}" "${CHARSTRING}"
+                            ;;
+                        esac
+                        return 0
+                    ;;
+                    import) #/ Import předhozeného souboru
+                        case "${CHARSTRING%% *}" in
+                            ant) #/ Importuje obsah předhozeného .ant souboru
+                                local ANT=${CHARSTRING#* }
+                                if [ -f "${ANT%% *}" ] ; then
+                                    echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
+                                    #anttodsed "${CHARSTRING#* }"
+                                    important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
+                                else
+                                    echo "ERROR: ${ANT%% *} isn't .ant file!"
+                                    return 1
+                                fi
+                                return 0
+                            ;;
+                            meta) echo "import from meta file to ${FILE}"
+                            ;;
+                            outline) #/ Importují se záložky
+                                if [ -f "${CHARSTRING#* }" ] ; then
+                                    outlinetodjvu "${FILE}" "${CHARSTRING#* }"
+                                else
+                                    echo "Import bokmarks is only from outline file"
+                                fi
+                            ;;
+                            -h) help keyword-import
+                            ;;
+                            *) djvuimport "${FILE}" "${CHARSTRING}"
+                            ;;
+                        esac
+                        return 33
+                    ;;
+                    info) #/ Info o DjVu svazku
+                        djvuinfo "${FILE}" "${CHARSTRING}"
+                        return 0
+                    ;;
+                    print) #/ Zobrazení položky dle následujícího parametru
+                        case "${CHARSTRING%% *}" in
+                            ant) printant "${FILE}" "${CHARSTRING#* }"
+                            ;;
+                            outline) printoutline "${FILE}"
+                            ;;
+                            test) compgen -A "${CHARSTRING#* }"
+                            ;;
+                            *) help keyword-print
+                            ;;
+                        esac
+                        return 33
+                    ;;
+                    rename) log info "main() Rename pages in ${FILE} by TEMPLATE –> ${CHARSTRING}"
+                        #/ TODO!
+                        return 1
+                    ;;
+                    set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
+                        #/ REWORK!
+                        case "${CHARSTRING%% *}" in
+                            meta) setmeta "${FILE}" "${CHARSTRING#* }"
+                            ;;
+                            outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
+                            ;;
+                            *) help keyword-meta
+                            ;;
+                        esac
+                        return 0
+                    ;;
+                    unset) log info "main() Remove bookmark or ant from ${FILE} –> ${CHARSTRING}"
+                        #/ REWORK!
+                        case "${CHARSTRING%% *}" in
+                            meta) unsetmeta "${FILE}" "${CHARSTRING#* }"
+                            ;;
+                            outline) outlineunset "${FILE}" "${CHARSTRING#outline *}"
+                            ;;
+                            *) help keyword-meta
+                            ;;
+                        esac
+                        return 0
+                    ;;
+                    edit) log info "main() Edit from ${FILE} –> ${CHARSTRING}"
+                        #/ REWORK!
+                        case "${CHARSTRING}" in
+                            ant) # export všech ant 
+                                printant "${FILE}" "${CHARSTRING#* }"
+                                editor "${TEMPFILE}"
+                                echo "chybí funkce pro vložení.. set.."
+                            ;;
+                            outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+                                printf '; Pravidla pro obsah souboru .outline :\n' >> "${TEMPFILE}"
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
+                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n' >> "${TEMPFILE}"
+                                printf ';  * Identifikátor vždy začíná znakem #\n' >> "${TEMPFILE}"
+                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n' >> "${TEMPFILE}"
+                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
+                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
+                                printf ';  * Soubor nesmí končit prázným řádkem!\n' >> "${TEMPFILE}"
+                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
+                                printf ';\n' >> "${TEMPFILE}"
+                                printf ';"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
+                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
+                                printoutline "${FILE}" "${TEMPFILE}"
+                                editor "${TEMPFILE}"
+                                outlinetodjvu "${FILE}" "${TEMPFILE}"
+                            ;;
+                            meta) echo "nahrazuje ant"
 #							 local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
 #								printmeta "${FILE}" all > "${TEMPFILE}"
 #								# Doplnit vzor meta stránky pro případ, že zatím žádný obsah neexistuje
@@ -4204,203 +4881,527 @@ echo "Zpracované volby" >> /dev/stderr
 #									exit 1
 #								fi
 							;;
-						esac
-						exit 33
-					;;
-					view) djview "${FILE}" &
-						exit 1
-					;;
-					*) help keywords && exit 0
-					;;
-				esac
-			;;
-			jpeg|png) echo "Bude se zpracovávat soubor v bitmapovém formátu"
-				echo "ToDo"
-				exit 1
-			;;
-			gimp|xcf|tiff|mng|pdf)
-				if [ -z "${2}" ] ; then
-#					echo ${ACTION} >> /dev/stderr
-					ACTION=( ${1#${FILE}} )
-					if [ -z "${ACTION[1]:0:1}" ] ; then
-						echo "INFO: Konvertuji všechny vrstvy (stránky)" >> /dev/stderr
-					else
-						case ${ACTION[1]:0:1} in
-							[1-9]) # echo "INFO zpracovávám rozsah ${ACTION[1]}" >> /dev/stderr
-								RANGE=($(range ${ACTION[1]} | sort -n))
-							;;
-							0) echo "INFO: zpracuji všechny stránky" >> /dev/stderr
-							;;
-							*) echo "INFO: aplikuji algoritmus ${ACTION[1]}" >> /dev/stderr
-								# mohou následovat další konverzní argumenty...
-								#echo ${#ACTION[@]} >> /dev/stderr
-								echo ${ACTION[$((${#ACTION[@]}-1))]:0:1} >> /dev/stderr
-								case ${ACTION[$((${#ACTION[@]}-1))]:0:1} in
-									[1-9]) #echo "INFO zpracovávám rozsah ${ACTION[2]}" >> /dev/stderr
-										RANGE=($(range ${ACTION[$((${#ACTION[@]}-1))]} | sort -n))
-										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-2))}
-									;;
-									0) # Rozsah začíná nulou... konvertovat vše..
-										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-2))}
-									;;
-									*) echo "INFO: zpracuji všechny stránky s algoritmem ${ACTION[1]}" >> /dev/stderr
-										ENCODEPARAM=${ACTION[@]:1:$((${#ACTION[@]}-1))}
-									;;
-								esac
-								case ${ACTION[1]} in
-									test) if [ "${#RANGE[@]}" -eq "1" ] ; then
-											echo "Konvertuji stranu ${RANGE[0]}" >> /dev/stderr
-										elif [ "${#RANGE[@]}" -eq "0" ] ; then
-											RANGE="1"
-										else
-											echo "WARNING: U testovací konverze je zpracována pouze první strana uvedeného rozsahu" >> /dev/stderr
-										fi
-										# vrátí pouze stranu vymezenou přes range
-										splitxcf ${FILE}
-										;;
-									abutaleb) #ok
-										;;
-									bernsen) # params
-										;;
-									brink|shading-subtraction) # ok  Gamera ≥ 3.4.0
-										;;
-									djvu) # params
-										;;
-									niblack) #params
-										;;
-									otsu) # ok
-										;;
-									sauvola) # params
-										;;
-									shading-subtraction) # params  Gamera ≥ 3.4.0
-										;;
-									tsai) # ok
-										;;
-									white-rohrer) # params
-										;;
-									*) echo -e "${ALGORITHM//\ /\\\n}" >> /dev/stderr
-										exit 0
-									;;
-								esac
-							;;
-						esac
-					fi
-					case ${ACTION[0]} in
-						info) echo "Info o souboru ${FILETYPE}"
-							case ${FILETYPE} in
-								pdf) echo -n "PDF "
-#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
-									exit 0
-								;;
-								mng) echo -n "MNG "
-#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
-									exit 0
-								;;
-								xcf|gimp) echo -n "XCF "
-									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
-									exit 0
-								;;
-								tiff) echo -n "TIFF "
-									tiffinfo ${FILE} | grep TIFF | wc -l
-									exit 0
-								;;
-							esac
-						;;
-						convert) echo "Konverze souboru do DjVu"
-							case ${FILETYPE} in
-								pdf) 
-#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
-									exit 0
-								;;
-								mng)
-#									xcfinfo ${FILE} | grep '^[+-]'  | wc -l
-									exit 0
-								;;
-								xcf|gimp) splitxcf ${FILE}
-									pushd ${TEMPDIR}
-									ls -1cr | while read line
-										do todjvu "$line" "${line/.pnm/.djvu}"
-									done
-									popd
-									# Rozděleno na pnm soubory to je..
-									# konvertovat tam, nebo jinde?
-									# použít funkci todjvu? Asi jo..
-									# konvertovat po jednom a přesouvat do cílové lokace
-									# Zatím je to uloženo v tempdir - který se odstraní..
-									potvrdit && echo "ano"
-									echo xxxxxxxxxxxxxxxxxxxxx >> /dev/stderr
-									exit 0
-								;;
-								tiff) echo -n "TIFF "
-									tiffinfo ${FILE} | grep TIFF | wc -l
-									exit 0
-								;;
-							esac
-						# Rozebrání souboru na pnm
-						# vytvoření pole s názvy souborů
-						# zpracování podle ${RANGE}
+                        esac
+                        return 33
+                    ;;
+                    view) log info "main() Open –> ${FILE}"
+                        djview "${FILE}" &
+                        return 0
+                    ;;
+                    *) help keywords && exit 0
+                    ;;
+                esac
+            ;;
+            *) log info "main() Input bitmap file (or archive) ${FILE} is in format –> ${FILETYPE}"
+                case ${ACTION} in
+                    # ### export
+                    # Operace export slouží k extrakci stránek (vrstev)
+                    # z formátů, které mohou obsahovat více stránek, případně
+                    # k jejich transormaci na jiný rozměr či konverzi do
+                    # jiného formát. Viz příklad:
+                    #
+                    #      djvutool soubor.jpg export 1 jpg 30%
+                    #
+                    # Vygeneruje JPEG obrázek s názvem soubor_30%.jpg jehož
+                    # obsahem bude původní obrázek, zmenšený na 30% velikost
+                    #
+                    # U kontejnerů, které mají uloženy v sobě obrázky,
+                    # lze provést export pouze s uvedením rozsahu. Cílové
+                    # soubory se pak budou jmenovat stejně, jako v archívu:
+                    #
+                    # djvutool soubor.zip export 2-7
+                    # 
+                    # U formátů s podporou více stránek, které mají
+                    # uložen název vrstvy či stránky, je vhodné uvést
+                    # cílový formát souboru. Jméno cílového souboru pak
+                    # bude stejné jako název příslušné vrstvy či stránky:
+                    # 
+                    # djvutool soubor.xcf export 2-7
+                    #
+                    # V případě PDF souborů, které mohou obsahovat mix textu
+                    # a obrázků volbou přípony sdělíte, že chcete vyexportovat
+                    # pouze obrázky:
+                    #
+                    # djvutool soubor.pdf export 1 jpg
+                    #
+                    # V tomto případě se budou jmenovat soubory bůhví jak.
+                    # Je tedy v tomto případě žádoucí uvést případně jméno
+                    # a případně i výchozí cestu:
+                    #
+                    # djvutool soubor.pdf export 1 jpg 30% example/
+                    #
+                    # V tomto případě se obrázky nasypou do adresáře example.
+                    # Pokud neexistuje, tak se založí.
+                    #
+                    #  djvutool soubor.pdf export 1 jpg 30% example
+                    #
+                    # Pokud nekončí řádek lomítkem, použije se celý zbytek
+                    # řetězce jako výchozí vzor pro pojmenování stránky
+                    # (obrázku) cílový soubor se tedy bude v tomto případě
+                    # jmenovat example_30%_001.jpg
+                    export) exportimg
+                    ;;
+                    # ### info
+                    # Operace info slouží v případě vstupních souborů
+                    # ke zjištění bližších informací potřebných při
+                    # konverzi do DjVu formátu
+                    #
+                    # Bez parametrů vrací formát vstupního souboru,
+                    # rozměry stránky a případně počet stran – vrstev,
+                    # skenů, snímků, či stránek v něm obsažených.
+                    #
+                    # __pages__ vrací celkový počet stránek jako číslo
+                    # __meta__ vrací informace uložené jako exif tagy
+                    #
+                    # Za parametrem __meta__ může následovat číslo stránky
+                    # Pokud není žádné uvedeno, vrací se u vícestránkových
+                    # formátů exif informace pro první stránku
+                    info) case ${FILETYPE} in
+                                gif)  # GIF je grafický formát, s bezztrátovou
+                                # kompresí, který má podporu pro animace.
+                                # Je omezený především v tom, že má k dispozici
+                                # pouze 256 barev. Za určitých okolností
+                                # může fungovat i jako kontejner pro více
+                                # stránkové dokumenty (co vrstva, to stránka).
+                                #
+                                # Výhodou GIF formátu oproti MNG či (AP)NG
+                                # je především to, že má širokou podporu u
+                                # webových prohlížečů. Proto se vyžívá
+                                # především pro náhledy vícestránkových
+                                # dokumentů. Kdy se náhledy vybraných
+                                # stránek, uložené jako jednotlivé snímky
+                                # přehrávají v nekonečné smyčce.
+                                # Počet snímků (stránek) udává exif tag
+                                # 'Animation frames'
+                                #
+                                # .gif
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "Zjistit počet vrstev"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                jpg) # JPEG je grafický formát se ztrátovou
+                                # kompresí, který podporuje pouze jednu vrstvu
+                                # .jpg, .jpeg, .jpe, .jif, .jfif, .jfi
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "1"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                jpeg-2000) # JPEG 2000 je grafický formát, který
+                                # pracuje se ztrátovou, ale i bezeztrátovou
+                                # wavelet kompresí.
+                                # To je klíčovým rozdílem oproti DjVu, protože
+                                # u DjVu z principu vždy dojde k částečné
+                                # ztrátě grafické informace.
+                                # Oproti bezeztrátovému PNG má lepší kompresní
+                                # poměr. A při ztrátové kompresi je výsledek
+                                # po dekompresi vždy lepší než u JPEG formátu.
+                                # Nevýhodou je zdlouhavá dekomprese a tím i
+                                # pomalejší zobrazování v prohlížeči. Proto se
+                                # využívá především pro archivaci původního
+                                # skenu.
+                                #
+                                # Nepodporuje více vrstev! Proto se naskenované
+                                # soubory obvykle zabalí do `.zip` kontejneru
+                                #
+                                # .jp2, .j2k, .jpf, .jpx, .jpm, .mj2
+                                #
+                                #
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "1"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                pnm) # Formát se kterým přišel projekt Netpbm.
+                                # Nepodporuje více vrstev!!!
+                                # PNM formát (portable anymap) zastupuje
+                                # následující formáty:
+                                # * PBM - portable bitmap (černobílé obrázky)
+                                #   V hlavičce má P1 (P4 - binární formát)
+                                # * PGM - portable graymap (obrázky ve stupních šedi)
+                                #   V hlavičce má P2 (P5 - binární formát)
+                                # * PPM - portable pixmap (RGB obrázky)
+                                #   V hlavičce má P3 (P6 - binární formát)
+                                # * PAM - portable anymap, zastupuje podobně
+                                #   jako PNM všechny formáty a v má hlavičce P7
+                                #   Je schopen zachytit barvy stejně jako CMYK
+                                #
+                                # Rozdíly jsou především v popdpoře bitobvé
+                                # hloubky barev:
+                                # 48-bitů podporuje pouze PPM (rgb48be)
+                                # 32-bitů podporuje plain PNM a plain PAM - binární verze nikoliv!!!
+                                # 24-bitová podopora je u všech formátů
+                                # 16-bitů PGM a PAM bez průhlednosti (grap16be)
+                                #
+                                # https://en.wikipedia.org/wiki/Netpbm_format
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "1"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                mng) # MNG je formát pro animace, založený na PNG,
+                                # podobně jako (A)PNG. Není moc rozšířený.
+                                # Počet vrstev udává v exifu 'Animation frames'
+                                #
+                                # .mng
+                                # https://en.wikipedia.org/wiki/Netpbm_format
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
+                                            echo "${SUMPAGES}"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
+                                            echo "${INFO[@]} ${SUMPAGES}"
+                                        ;;
+                                    esac
+                                ;;
+                                png) # PNG je formát, u kterého se původně vůbec
+                                # nepočítalo, že by mohl mít více než jednu vrstvu.
+                                # Protože ale formát GIF, který animace podporuje,
+                                # má sná omezení (nepodporuje průhlednost a má k
+                                # dispozici pouze 256 barev) vzniklo jako alternativa
+                                # APNG – což je svým způsobem video kontejner, který
+                                # obsahuje řadu po sobě jdoucích PNG obrázků.
+                                #
+                                # Oproti podobnému MNG formátu však umožňuje zpětnou
+                                # kompatibilitu, kdy se v prohlížečích co animace
+                                # nepodporují, zobrazuje pouze první snímek. Soubory
+                                # mají stejnou příponu .png, jako klasické PNG
+                                # Počet vrstev udává exif tag 'Animation frames'
+                                #
+                                # .png
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "Zjistit počet vrstev"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                gimp|xcf) # Nativní formát Gimpu
+                                    # může mít více vrstev
+                                    case ${CHARSTRING} in
+                                        meta)  ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages*) local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                                            echo "${SUMPAGES}"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                                            echo "${INFO[@]} ${SUMPAGES}"
+                                        ;;
+                                    esac
+                                ;;
+                                tiff) #
+                                # může mít více stránek
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
+                                            echo "${SUMPAGES}"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
+                                            echo "${INFO[@]} ${SUMPAGES}"
+                                        ;;
+                                    esac
+                                ;;
+                                stl|pcd) # PCD je rastrový formát fy. Kodak
+                                # Starší formát, pro jehož konverzi lze
+                                # ImageMagick, ale lepší výsledky dává
+                                # již delší dobu neudržovaná konverzní
+                                # utilita pcdtojpeg.
+                                # http://pcdtojpeg.sourceforge.net/Download.html
+                                #
+                                # Formát je podobný formátu:
+                                # Tiled Multi-Resolution TIFF
+                                # …
+                                # Obrázek je v kontejneru uložen v 6
+                                # velikostech:
+                                # Suffix [1] produces an image 192 by 128 ("Base/16")
+                                # Suffix [2] produces an image 384 by 256 ("Base/4")
+                                # Suffix [3] produces an image 768 by 512 ("Base")
+                                # Suffix [4] produces an image 1536 by 1024 ("4 Base")
+                                # Suffix [5] produces an image 3072 by 2048 ("16 Base")
+                                # Suffix [6] produces an image 6144 by 4096 ("64 Base")
+                                #
+                                # Poznámka: Když použijete číslo 7 a vyšší tak
+                                # to má stejný efekt jako když se použije 6
+                                #
+                                # Při konverzi vychází obrázek moc tmavý
+                                # to lze pořešit buď nastavením barevného profilu,
+                                # nebo gammy
+                                # Resolutin
+                                # Contrast
+                                # Saturation
+                                # Red
+                                # Green
+                                # Nepodporuje více stránek
+                                # 
+                                # https://en.wikipedia.org/wiki/Photo_CD
+                                    case ${CHARSTRING} in
+                                        meta) ${EXIFTOOL} "${FILE}"
+                                        ;;
+                                        pages) echo "1"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            echo "${INFO[@]}"
+                                        ;;
+                                    esac
+                                ;;
+                                psd|psb) # Proprietární formát Photoshopu
+                                # Proprietární formát
+                                # PSB je PSD rozšířené na podporu obrázků
+                                # o velikosti 300 tis. pixelů. Standardní
+                                # PSD podporuje max. 30 tis. pixelů
+                                # Pracuje s vrstvami
+                                # .psd .psb
+                                ;;
+                                pdf) # PDF - portable document format, je
+                                # do učité míry alternativou k DjVu. Nebyl
+                                # ale navržen pro rychlé prohlížení (jako
+                                # DjVu) ale pro lepší přenositelnost mezi
+                                # operačními systémy. Z toho plynou i jeho
+                                # nevýhody - především zdlouhavá dekomprese
+                                #
+                                # Z principu má podporu pro více stránek
+                                    case ${CHARSTRING} in
+                                        meta) pdfinfo -box "${FILE}"
+                                        ;;
+                                        *)
+                                            local INFO=($(cat "${FILE}"|infoitem))
+                                            local SUMPAGES=$(${EXIFTOOL} -s3 -PageCount "${FILE}")
+                                            echo "${INFO[@]} ${SUMPAGES}"
+                                        ;;
+                                    esac
+                                ;;
+                                sgi) #
+                                # https://en.wikipedia.org/wiki/Silicon_Graphics_Image
+                                ;;
+                                tga) # 
+                                # https://en.wikipedia.org/wiki/Truevision_TGA
+                                ;;
+                                webp) #
+                                # https://en.wikipedia.org/wiki/WebP
+                                ;;
+                                xbm) #
+                                # https://en.wikipedia.org/wiki/X_BitMap
+                                ;;
+                                xpm) #
+                                # https://en.wikipedia.org/wiki/X_PixMap
+                                ;;
+                                xwd) # Formát do kterého ukládá screenshoty
+                                # obrazovky X Windows systems
+                                # https://en.wikipedia.org/wiki/Xwd
+                                ;;
+                                tar|zip) # Nejde o grafické formáty, ale 
+                                # kontejnery, co můohou obsahovat
+                                # různé typy souborů.
+                                # Na serveru archive.org se využívají pro
+                                # zabalení souborů skenů ve formátu jp2, jpeg aj.
+                                    case ${CHARSTRING} in
+                                        meta*) #/ může být archiv s obrázky
+                                            local LISTPAGES=($(ziplist "${FILE}"))
+                                            local PAGE="${CHARSTRING#meta }"
+                                            case ${PAGE} in
+                                                meta) log info "main() Exif info for first file ${LISTPAGES[0]} from archive ${FILE}"
+                                                    echo $(zipitem "${FILE}" "${LISTPAGES[0]}" | infoitem)
+                                                ;;
+                                                *) if [ "${PAGE}" -ge "0" ] && [ "${PAGE}" -lt "${#LISTPAGES[@]}" ] ; then
+                                                        log info "main() Exif info for ${PAGE} file: ${LISTPAGES[${PAGE}]} from archive ${FILE}"
+                                                        zipitem "${FILE}" "${LISTPAGES[${PAGE}]}" | ${EXIFTOOL} -
+                                                    else
+                                                        echo "Ivalid value ${PAGE}" >> /dev/stderr
+                                                        return 1
+                                                    fi
+                                                ;;
+                                            esac
+                                        ;;
+                                        pages*) local SUMPAGES=$(ziplist "${FILE}" | wc -l)
+                                            echo "${SUMPAGES}"
+                                        ;;
+                                        *) # zjistit jakého typu jsou obrázky v archivu
+                                        local SUMPAGES=$(ziplist "${FILE}" | wc -l)
+                                        echo "${FILETYPE^^} ${SUMPAGES}"
+                                        ;;
+                                    esac
+                                ;;
+                        esac
+                        ;;
+                    convert) log info "main() From bitmap file ${FILE} –> ${CHARSTRING}"
+                        case ${1:0:1} in
+                            [0-9]) #/ Range page
+                                log info "main() Convert range ${1}"
+                                if [ -n "${2}" ] ; then
+                                    NEWSUFIX="${1##*.}"
+                                    case "${NEWSUFIX}" in
+                                        djvu) log info "main() Convert range ${1} from ${FILE} into DjVu ${2}"
+                                            case ${3} in
+                                                view) VIEW="yes" ;;
+                                            esac
+                                            ;;
+                                        *) echo "Konverze rozsahu do jiných formátů?" && exit 1
+                                            ;;
+                                    esac
+                                else
+                                    #/ Konvertuji do DjVu a použiju jméno původního souboru
+                                    log info "main() Convert range ${1} from ${FILE} into DjVu"
+                                fi
+                                ;;
+                            *) #/ Name nebo nic
+                                case "${1}" in
+                                    view) VIEW="yes"
+                                        todjvu "${FILE}" "${FILE%.*}.djvu"
+                                        ;;
+                                    *)#/ použiju nové jméno
+                                        NEWSUFIX="${1##*.}"
+                                        case "${NEWSUFIX}" in
+                                            djvu) log info "main() Convert ${FILE} into DjVu ${1}"
+                                                case ${2} in
+                                                    view) VIEW="yes" ;;
+                                                esac
+                                                todjvu "${FILE}" "${1}"
+                                                ;;
+                                            jpg|jpeg) #/ Konverze do formátu jpeg
+                                                ;;
+                                            jp2) #/ Konverze jedné stránky do jp2 formátu (JPEG-2000)
+                                                ;;
+                                            pdf) #/ Konverze souboru do PDF souboru - může být single- i multi-page 
+                                                ;;
+                                            png) #/ convertovergimp ${1} konverze do png - více stránkové soubory jako (A)PNG
+                                                echo "Konverze do formátu (A)PNG"
+                                                ;;
+                                            pnm) #/ konverze do pnm formátu
+                                                ;;
+                                            tiff) #/ Konverze souboru do TIFF souboru - může být single- i multi-page 
+                                                ;;
+                                            *) if [ -n "${1}" ] ; then
+                                                    echo "main() Konverze ${FILE} do formátu ${NEWSUFIX} TODO" >> /dev/stderr
+                                                else
+                                                    log info "main() Convert ${FILE} into DjVu"
+                                                    todjvu "${FILE}" "${FILE%.*}.djvu"
+                                                fi
+                                                ;;
+                                        esac
+                                        ;;
+                                esac
+                                ;;
+                        esac
+                            ;;
+                    view) log info "main() open –> ${FILE}"
+                            case ${FILETYPE} in
+                                gif) #/ může být mít více vrstev 'Animation frames
+                                    local SUMPAGES=$(${EXIFTOOL} -s3 -FrameCount "${FILE}")
+                                    ;;
+                                mng) #/ může být mít více vrstev 'Animation frames'
+                                    local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
+                                    ;;
+                                png) #/ může být mít více vrstev 'Animation frames'
+                                    local SUMPAGES=$(${EXIFTOOL} -s3 -AnimationFrames "${FILE}")
+                                    ;;
+                                gimp|xcf) #/může mít více vrstev
+                                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                                    ;;
+                                tiff) #/ může mít více stránek
+                                    local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
+                                    ;;
+                                pdf) #/ může mít více stránek
+                                    ${PDFVIEW} "${FILE}"
+                                    ;;
+                                *) echo "File ${FILETYPE} isn't in a multipage format" >> /dev/stderr
+                                    ;;
+                            esac
+                            ;;
+                    set) log info "main() set exif tag in img ${FILE} –> ToDo"
+                            ;;
+                    unset) log info "main() unset exif tag in ${FILE} –> ToDo"
+                            ;;
+                    rotate) log info "main() rotate ${FILE}"
+                            ;;
+                    rename) log info "main() rename ${FILE}"
+                            ;;
+                    import) echo '''Pokud následuje djvu soubor'''
+                echo '''Pokud následuje adresář'''
+                echo '''to je existující soubor typu bundle a:
+- nenásleduje žádný další existující soubor typu djvu, nebo adresář
+    a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
+    - pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
+    - djvu soubor, má se připojit
+    - xml soubor, má se vložit
+    - soubor typu dsed má se zpracovat
+    - jiný soubor - obrázek, který se má převést a vložit
+    '''
 
-						 # Je-li předán rozsah - vytvoření číselné řady..
-								#xcf2pnm $SOURCE -o ${TARGETNAME%\.*}-$i.pnm $i
-
-						 # Je-li předán rozsah, tak se provede rekonverze..
-								#echo ${${RANGE[@]}//\ /,}
-									#tiffcp -c none $FILE,${RANGE//\n/,} temporary.tiff
-									#tiffsplit temporary.tiff
-									 # není-li předán rozsah...
-									#tiffsplit source.tiff
-
-						;;
-						*) help keywords-convert
-						;;
-					esac
-						echo "Nápověda pro akci convert"
-#						help keywords-convert
-#						exit 0
-#						echo "Jako druhý parametr je soubor ve vícevrstvém bitmapovém formátu. Zpracování těchto souborů není zatím implementováno" >> /dev/stderr
-#						echo "Povolené akce: info, convert, import" >> /dev/stderr
-#						echo ${@} >> /dev/stderr
-#						convertimg ${FILE} ${2}
-					exit 0
-				else
-					echo "Sem by se neměl dostat v případě že je předaný soubor typu multipage" >> /dev/stderr
-					exit 0
-				fi
-			;;
-			xml|XML) echo "má-li první soubor příponu xml"
-				echo "ToDo"
-				exit 1
-			;;
-			unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
-				exit 1
-			;;
-			*) if [ ! "${2}" ] ; then
-					echo '''Není předaný jiný parametr, bude se zpracovávat soubor podle typu ''' >> /dev/stderr
-					echo "${FILE} : $(testfile ${FILE})" >> /dev/stderr
-				else
-					echo "Zpracování souborů jako je $2 zatím není implementováno" >> /dev/stderr
-				fi
-				echo '''Pokud následuje djvu soubor'''
-				echo '''Pokud následuje adresář'''
-				echo '''to je existující soubor typu bundle a:
-				- nenásleduje žádný další existující soubor typu djvu, nebo adresář
-				a zároveň existuje $DIRECTORY, pak to znamená že se má rozbalit
-				- pokud následuje další soubor, pak to znamená že se má nějakým způsobem s tímto dalším souborem naložit. Je-li to:
-				- djvu soubor, má se připojit
-				- xml soubor, má se vložit
-				- soubor typu dsed má se zpracovat
-				- jiný soubor - obrázek, který se má převést a vložit
-				'''
-				exit 1
-			;;
-		esac
-	else
-		#echo "Tady se dostane pokud ${FILE} neexistuje" >> /dev/stderr
-		help
-		exit 0
-	fi
+                    log info "main() import ${FILE} into DjVu"
+                        case ${FILETYPE} in
+                                djvu) echo "Konvertovat vstupní soubor a vložit do předchozeného DjVu souboru - TODO" >> /dev/stderr
+                                    #/ Sestavit z nich soubor typu bundle
+                                    ;;
+                                gif) #/ může být mít více vrstev 'Animation frames
+                                    ;;
+                                mng) #/ může být mít více vrstev 'Animation frames'
+                                    ;;
+                                png) #/ může být mít více vrstev 'Animation frames'
+                                    ;;
+                                gimp|xcf) #/může mít více vrstev
+                                    ;;
+                                tiff) #/ může mít více stránek
+                                    ;;
+                                pdf) #/ může mít více stránek
+                                    ;;
+                                xml|XML) #/ imporuji soubor s textovou vrstvou
+                                    ;;
+                                unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
+                                    exit 1
+                                    ;;
+                                *) echo "Záleží na typu " >> /dev/stderr
+                                ;;
+                        esac
+                        ;;
+                esac
+                ;;
+        esac
+    else
+        log err "Bez předaného souboru to nedává smysl"
+        help
+        exit 0
+    fi
 }
 
-main $@
+main "$@"
 
 exit 0
