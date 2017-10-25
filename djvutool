@@ -182,45 +182,91 @@ JP2IN=$(which opj_compress)
 ZIP=$(which 7z)
 [ ! -x "${ZIP}" ] && echo exit 29
 
+# ## Akceptované formáty bitmapových souborů
+#
+# Neztrátové formáty 
+FORMATS_FULL=(
+    bmp
+    pnm
+    png
+    tif
+)
+# Formáty, které mohou mít ztrítovou kompresi
+FORMATS_MISS=(
+    jpg
+    xcf
+    jp2
+)
+# Kontejnerové formáty
+FORMATS_CONT=(
+    pdf
+    zip
+    tar
+)
+FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]})
 
-NETPBM=0
-PNMSCALE=$(which pnmscale)
-[ ! -x "${PNMSCALE}" ] && NETPBM=1
-if (( $NETPBM == 0 )); then
-    VERSION=($(${PNMSCALE} -version 2>&1 | head -1))
-    case ${VERSION[$((${#VERSION[@]} - 1))]} in
-	9*) echo "WARNING: Version Netpbm pnmscale don't support filters. I must use imagemagick convert" >> /dev/stderr
-	    NETPBM=1
-	    ;;
-	*)  NETPBM=0
-	    BMPTOPNM=$(which bmptopnm)
-	    [ ! -x "${BMPTOPNM}" ] && exit 23
-	    JPEGTOPNM=$(which jpegtopnm)
-	    [ ! -x "${JPEGTOPNM}" ] && exit 23
-	    GIFTOPNM=$(which giftopnm)
-	    [ ! -x "${GIFTOPNM}" ] && exit 23
-	    PNGTOPNM=$(which pngtopnm)
-	    [ ! -x "${PNGTOPNM}" ] && exit 23
-	    PNMTOJPEG=$(which pnmtojpeg)
-	    [ ! -x "${PNMTOJPEG}" ] && exit 23
-	    TIFFTOPNM=$(which tifftopnm)
-	    [ ! -x "${TIFFTOPNM}" ] && exit 23
-	    PNMTOPNG=$(which pnmtopng)
-	    [ ! -x "${PNMTOPNG}" ] && exit 23
-	    PNMTOPLAINPNM=$(which pnmtoplainpnm)
-	    [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
-	    PPMTOPGM=$(which ppmtopgm)
-	    [ ! -x "${PPMTOPGM}" ] && exit 23
-	    PGMTOPBM=$(which pgmtopbm)
-	    [ ! -x "${PGMTOPBM}" ] && exit 23
-	    ;;
-    esac
+NETPBMSCALE=$(which pamscale)
+if [ -x "${NETPBMSCALE}" ] ; then
+    # Akceptované škálovací filtry
+    FILTERS=(
+    point
+    box
+    triangle
+    quadratic 
+    cubic 
+    catrom 
+    mitchell 
+    gauss 
+    sinc 
+    bessel 
+    hanning 
+    hamming 
+    blackman 
+    kaiser 
+    normal 
+    hermite 
+    lanczos
+    )
+    NETPBM=0
+else
+    NETPBMPSCALE=$(which pnmscale)
+    if [ -x "${NETPBMSCALE}" ] ; then
+        VERSION=($(${PNMSCALE} -version 2>&1 | head -1))
+        case ${VERSION[$((${#VERSION[@]} - 1))]} in
+            9*) echo "WARNING: Version Netpbm pamscale don't support filters. I must use imagemagick convert" >> /dev/stderr
+                NETPBM=1
+                ;;
+            *)  NETPBM=0
+                BMPTOPNM=$(which bmptopnm)
+                [ ! -x "${BMPTOPNM}" ] && exit 23
+                JPEGTOPNM=$(which jpegtopnm)
+                [ ! -x "${JPEGTOPNM}" ] && exit 23
+                GIFTOPNM=$(which giftopnm)
+                [ ! -x "${GIFTOPNM}" ] && exit 23
+                PNGTOPNM=$(which pngtopnm)
+                [ ! -x "${PNGTOPNM}" ] && exit 23
+                PNMTOJPEG=$(which pnmtojpeg)
+                [ ! -x "${PNMTOJPEG}" ] && exit 23
+                TIFFTOPNM=$(which tifftopnm)
+                [ ! -x "${TIFFTOPNM}" ] && exit 23
+                PNMTOPNG=$(which pnmtopng)
+                [ ! -x "${PNMTOPNG}" ] && exit 23
+                PNMTOPLAINPNM=$(which pnmtoplainpnm)
+                [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
+                PPMTOPGM=$(which ppmtopgm)
+                [ ! -x "${PPMTOPGM}" ] && exit 23
+                PGMTOPBM=$(which pgmtopbm)
+                [ ! -x "${PGMTOPBM}" ] && exit 23
+            ;;
+        esac
+    else
+        NETPBM=1
+    fi
 fi
 if (( $NETPBM == 1 )) ; then
     CONVERT=$(which convert)
     [ ! -x "${CONVERT}" ] && echo exit 24
 fi
-
 #=== konec testu závislostí ===
 
 ## Pomocné funkce...
@@ -1873,23 +1919,10 @@ function splitxcf {
 	popd
 }
 
-#/ NEPOUŽITÁ FUNKCE
-function splittiff {
-	# vrátí seznam
-	echo nic
-}
-
-
-# ### <span id="orezat">orezat()</span> ([top](#FUNCTIONS))
-# Funkce ořezává řetězec předaný jako $2 o řetězec předaný jako $1
-orezat() {
-    echo ${2#*${1}}
-}
-
-# ### <span id="targets">targets()</span> ([top](#FUNCTIONS))
+# ### <span id="istarget">istarget()</span> ([top](#FUNCTIONS))
 # Funkce nastavuje TARGETDIR a TARGETSAMPLE
-targets() {
-    log goto "targets() –> $1"
+istarget() {
+    log goto "istarget() –> $1"
     case "${1:$((${#1}-1)):1}" in
         /) TARGETSAMPLE="ORIGINAL"
             TARGETDIR=$(${REALPATH} -m -P "${1}")
@@ -1914,277 +1947,340 @@ targets() {
     return 0
 }
 
-# ### <span id="filters">filters()</span> ([top](#FUNCTIONS))
-# Funkce přijme řetězec __$1__ a pokud obsahuje nastavení pro škálování
-# tak přenastaví SCALE
-filters() {
-    log goto "filters() –> $1"
-    case "${TEMPORAR}" in
-        -filter*) echo "následuje filtr pro resize, nutno přilepit do SCALE"
-            echo "TODO"
-        ;;
-        *) targets "${1}"
-        ;;
+# ### <span id="isrange">isrange()</span> ([top](#FUNCTIONS))
+# Nastavuje proměnnou RANGE a vrací ořezaný řetězec
+isrange() {
+    log goto "isrange() input –> $1"
+    local PARAMS=($1)
+    case "${PARAMS[0]}" in
+        +([0-9\-,]))
+            log value "isrange() OK –> ${PARAMS[0]}"
+            echo "${PARAMS[0]}"
+            ;;
+        *) return 1
+            ;;
     esac
     return 0
 }
 
-# ### <span id="extractionpage">extractionpage()</span> ([top](#FUNCTIONS))
-# Funkce se volá již s předžvýkanými parametry
-extractionpage() {
-    log goto "extractionpage() From $1 –> $2"
-    local PARAMS=(${2})
-    # První položka je rozsah
-    local RANGE="${PARAMS[0]}"
-    echo "RANGE ${RANGE}"
-    if [ -n "${PARAMS[1]}" ] ; then
-        SCALE="1"
-        if [ "${PARAMS[1]}" == "${SCALE}" ] || [ "${PARAMS[1]}" == "ORIGINAL" ] ; then
-            if [ "${#PARAMS[@]}" -eq "2" ] ; then
-                [ "${PARAMS[1]}" == "1" ] && SCALE="ORIGINAL"
-                #/ už žádné další parametry
-                targets "$(pwd)/"
-            else
-                # následuje cílový adresář, a možná i vzorek pro přejmenování
-                if [ "${PARAMS[1]}" == "ORIGINAL" ] ; then
-                    targets "${2##* ORIGINAL }"
-                else
-                    [ "${PARAMS[1]}" == "1" ] && SCALE="ORIGINAL"
-                    targets "${2##* 1 }"
-                fi
-            fi
-        elif [[ ${PARAMS[1]} =~ [1-9][0-9]{2,}x[1-9][0-9]{2,} ]] ; then
-            log info "extractionpage() Nastavení fixním poměrem cols x rows"
-            # musí následovat parametr buď: -xyfit -xyfill nebo -xysize
-            if [[ "${2}" =~ "-xyfit" ]] ; then
-                SCALE="-xyfit ${PARAMS[1]/x/ }"
-                local TEMPORAR="${2#*xyfit}"
-            elif [[ "${2}" =~ "-xyfill" ]] ; then
-                SCALE="-xyfill ${PARAMS[1]/x/ }"
-                local TEMPORAR="${2#*xyfill}"
-            elif [[ "${2}" =~ "-xysize" ]] ; then
-                SCALE="-xysize ${PARAMS[1]/x/ }"
-                local TEMPORAR="${2#*xysize}"
-            else
-                return 1
-            fi
-            #/ může následovat filtr
-            filters "${TEMPORAR}"
-        elif [[ ${PARAMS[1]} =~ [0-9].[0-9]{1,2}x ]] ; then
-            log info "extractionpage() Nastavení velikosti násobkem scalefactor –> ${PARAMS[1]}"
-            # přepočítat na číslo
-            SCALE="${PARAMS[1]%x}"
-            #/ může následovat filtr
-            filters "${2#*${RANGE} ${PARAMS[1]}}"
-        elif [[ ${PARAMS[1]} =~ [0-9]+[.x] ]] ; then
-            echo "Invalid resize parameter –> ${PARAMS[1]}"
-            return 1
-        elif [[ ${PARAMS[1]} =~ [1-9][0-9]{1,2}% ]] ; then
-            log info "extractionpage() Nastavení výstupní velikosti procentuální ${PARAMS[1]}"
-            local NUMBER=$((${PARAMS[1]%\%}/100))
-            local MODULO=$((${PARAMS[1]%\%}-${NUMBER}*100))
-            SCALE="${NUMBER}.${MODULO}"
-            #/ může následovat filtr
-            filters "${2#*${PARAMS[1]}}"
-        else
-            echo "Další parametr"
-            # následuje adresář, či sample
-            targets "${2##*${RANGE} }"
-        fi
-        echo "SCALE –> ${SCALE}"
-        echo "TARGETDIR –> ${TARGETDIR}"
-        echo "TARGETSAMPLE –> ${TARGETSAMPLE}"
-    else
-        echo "není tam - je uveden pouze rozsah. Budu exportovat příslušné stránky v původním formátu do lokálního adresáře"
-    fi
-    # Druhá typ cílového souboru
-    local TARGETTYPE="${PARAMS[1]}"
-    # Pokud to není známý typ souboru, je to považováno za bug!!!
-    echo "TARGETYPE ${TARGETTYPE}"
-    # Sem přijde kontrola...
-    # a teprve za ní jedeme dál...
-    local TEMPORAR="${TEMPORAR#${TARGETTYPE} }"
-    # tady může být velikost - číslo, případně rozměny...
-    echo "TEMPORAR ${TEMPORAR}"
-    echo "${FORMATS[@]}"
-    # a zbytek je cesta..
-    return 0
-    local PAGES=($(range "${PARAMS[0]}"))
-    case ${FILETYPE} in
-        tar|zip) local LISTPAGES=($(ziplist "${FILE}"))
-            if [ "${#PAGES[@]}" -gt "0" ] && [ "${PAGES[$((${#PAGES[@]}-1))]}" -le "${#LISTPAGES[@]}" ] && [ "${PAGES[0]}" -gt "0" ]; then
-                #/ echo "${LISTPAGES[-1]}"
-                #/ echo "${PAGES[@]}"
-                for i in ${PAGES[@]} ; do
-                    local PAGE="${LISTPAGES[$((i-1))]}"
-                    if [[ "${PARAMS[1]}"  == "" ]] ; then
-                        #/ pokud PARAMS[1] nic neobsahuje, exportuje soubor pod původním názvem
-                        log info "Extrakce ${FILE} ${PAGE}"
-                        log info "Ukládám do souboru: $(pwd)/${PAGE#*/}"
-                        if [ -f "$(pwd)/${PAGE#*/}" ] ; then
-                            anone "Soubor ${PAGE#*/} již existuje, mám pokračovat a ten soubor přepsat?"
-                            [ $? -eq 1 ] && return 1
-                        else
-                            log info "Jedu bez ptaní"
-                        fi
-                        $(zipitem "${FILE}" "${PAGE}" > "${PAGE#*/}")
-                        echo $(pwd)
-                    elif [[ "${PARAMS[1]}"  =~ "%" ]] ; then
-                        #/ pokud PARAMS[1] obsahuje znak %, exportuje soubor do původního formátu, ale zmenšený dle příslušné hodnoty
-                        echo "Zmenšuji na 30% původního souboru"
-                        local TARGETTYPE=${PAGE##*.}
-                        local TEMPORARY=${PAGE#*/}
-                        echo "A ukládám do souboru: ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}.${TARGETTYPE}"
-                    elif [[ ${FORMATS[@]}  =~ ${PARAMS[1]} ]] ; then
-                        #/ pokud PARAMS[1] obsahuje některý z podporovaných formátů, provádí konverzi
-                        local TARGETTYPE=${PAGE##*.}
-                        local TEMPORARY=${PAGE#*/}
-                        echo "Konvertuji z formátu ${TARGETTYPE} do souboru ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
-                        if [ -f "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}" ] ; then
-                            anone "Soubor ${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]} již existuje, mám pokračovat a ten soubor přepsat?"
-                            [ $? -eq 1 ] && return 1
-                        else
-                            log info "Jedu bez ptaní"
-                        fi
-                        local TEMPFILE=$(tempfile)
-                        $(zipitem "${FILE}" "${PAGE}" > "${TEMPFILE}")
-                        if [ $? -eq 0 ] ; then
-                            local TEMPTYPE=$(testfile "${TEMPFILE}")
-                            if [[ "${FORMATS_FULL[@]}" =~ "${PARAMS[1]}" ]] ; then
-                                case ${TEMPTYPE} in
-                                    jpeg-2000)  jp2to "${TEMPFILE}" "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
-                                    ;;
-                                esac
-                            elif [[ "${FORMATS_MISS[@]}" =~ "${PARAMS[1]}" ]] ; then
-                                case ${TEMPTYPE} in
-                                    jpeg-2000)  jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
-                                        ${CONVERT} "${TEMPFILE}.pnm" "$(pwd)/${TEMPORARY%.${TARGETTYPE}}.${PARAMS[1]}"
-                                        if [ $? -eq 0 ] ; then
-                                            rm "${TEMPFILE}"
-                                            rm "${TEMPFILE}.pnm"
-                                        fi
-                                    ;;
-                                esac
-                            else
-                                echo "Format ${PARAMS[1]} is not supported for conversion"
-                                exit 1
-                            fi
-                        fi
-                    else
-                    #/ PARAMS[1] zbytek řádku je sample pro pojmenování souborů
-                        local SAMPLE="${CHARSTRING#${PARAMS[0]}}"
-                        echo "Přejmenovávám dle vzoru: $SAMPLE"
-                    fi
-                done
-                return 0
-            else
-                echo "Pages are numbered from 1 and last page is ${#LISTPAGES[@]}. You have invalid value in range: ${CHARSTRING}" >> /dev/stderr
-                return 1
-            fi
-        ;;
-        *) echo "Formát ${FILETYPE^^} obsahuje pouze jednu stránku"
-            return 0
-        ;;
+# ### <span id="isscale">isscale()</span> ([top](#FUNCTIONS))
+# Zjišťuje, zda-li předaný řetězec začíná kódem podporovaného formátu
+isformat() {
+    log goto "isformat() string –> $1"
+    local PARAMS=($1)
+    case "${PARAMS[0]}" in
+        txt|text) #/ výstup se prožene přes OCR
+            ;;
+        image*) #/ akceptováno pouze u PDF
+            ;;
+        orig*) #/ původní formát
+            ;;
+        jpg|jpeg)
+            ;;
+        pnm|pam)
+            ;;
+        xcf|gimp)
+            ;;
+        *) return 1
+            ;;
     esac
+    log value "isformat() OK –> ${PARAMS[0]}"
+    echo "${PARAMS[0]}"
+    return 0
 }
 
-# ### <span id="fromfile">fromfile()</span> ([top](#FUNCTIONS))
-# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
-# __$1__ je cesta k souboru ze kterého se exportuje stránka
-# __$2__ obsahuje parametry
-#
-# Tato funkce umožňuje zpracovávat i parametry předané funkci exportimg
-# prostřednictvím souboru
-fromfile() {
-    log goto "fromfile() $1 –> ${CHARSTRING}"
-    local FILE="${1}"
-    local PARAMS=(${2})
-    if [ "${#PARAMS[@]}" -eq "0" ] ; then
-        log info "fromfile() All pages exported as original file format"
-        local PAGES=$($0 "${FILE}" info pages)
-        CHARSTRING="1-${PAGES} ${FILETYPE} $(pwd)/"
-    else
-        local FORMATS_FULL=(
-            bmp
-            pnm
-            png
-            tif
-        )
-        local FORMATS_MISS=(
-            jpg
-            xcf
-            jp2
-        )
-        local FORMATS=( ${FORMATS_FULL[@]} ${FORMATS_MISS[@]} )
-        if [[ "${FORMATS[@]}"  =~ "${PARAMS[0]}" ]] ; then
-            log info "fromfile() All pages exported as –> ${PARAMS[0]}"
-            # zjistit počet stránek ve vstupním souboru
-            local PAGES=$($0 "${FILE}" info pages)
-            if [[ "${PAGES}" -eq "1" ]] ; then
-                log info "fromfile() Input file has only one page"
-                CHARSTRING="1 ${FILETYPE} $(pwd)/"
-            else
-                log info "fromfile() Input file has ${PAGES} pages"
-                CHARSTRING="1-${PAGES} ${FILETYPE} $(pwd)/"
-            fi
-        elif [[ "${PARAMS[0]}"  =~ "%" ]] ; then
-            log info "fromfile() All pages exported as original file format, resized to –> ${PARAMS[0]}"
-            local PAGES=$($0 "${FILE}" info pages)
-            if [[ "${PAGES}" -eq "1" ]] ; then
-                log info "fromfile() Input file has only one page"
-                if [ "${#PARAMS[@]}" -eq "1" ] ; then
-                    CHARSTRING="1 ${FILETYPE} ${PARAMS[0]} $(pwd)/"
-                else
-                    CHARSTRING="1 ${FILETYPE} ${PARAMS[0]} ${CHARSTRING#${PARAMS[0]} }"
-                fi
-            else
-                log info "fromfile() Input file has ${PAGES} pages"
-                if [ "${#PARAMS[@]}" -eq "1" ] ; then
-                    CHARSTRING="1-${PAGES} ${FILETYPE} ${PARAMS[0]} $(pwd)/"
-                else
-                    CHARSTRING="1-${PAGES} ${FILETYPE} ${PARAMS[0]} ${CHARSTRING#${PARAMS[0]} }"
-                fi
-            fi
-        else
-            case "${PARAMS[0]:0:1}" in
-                [[:digit:]]) log info "fromfile() Range –> ${PARAMS[0]}"
-                    #/ Call main function for extraction
-                    extractionpage "${FILE}" "${CHARSTRING}"
-                    return $?
+# ### <span id="isscale">isscale()</span> ([top](#FUNCTIONS))
+# Nastavuje proměnnou SCALE a vrací ořezaný řetězec
+isscale() {
+    log goto "isscale() string –> $1"
+    local PARAMS=($1)
+    log info "vysledek ${PARAMS[0]}"
+    case "${PARAMS[0]}" in
+        [1-9]+([0-9])x[1-9]+([0-9]))
+            case "${PARAMS[1]}" in
+                -xyfit|-xyfill|-xysize)
+                    SCALE="${PARAMS[1]} ${PARAMS[0]/x/ }"
+                    local TEMPORAR=${1#*${PARAMS[1]}}
                 ;;
-                *) case "${CHARSTRING:$((${#CHARSTRING}-1)):1}" in
-                    /) log info "fromfile() All pages exported as original file format into dir –> ${PARAMS[0]}"
-                        local TARGETDIR=$(${REALPATH} -m -P "${CHARSTRING}")
-                        [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
-                        local PAGES=$($0 "${FILE}" info pages)
-                        if [[ "${PAGES}" -eq "1" ]] ; then
-                            log info "fromfile() Input file has only one page"
-                            CHARSTRING="1 ${FILETYPE} ${TARGETDIR}/"
-                        else
-                            log info "fromfile() Input file has ${PAGES} pages"
-                            CHARSTRING="1-${PAGES} ${FILETYPE} ${TARGETDIR}/"
-                        fi
-                    ;;
-                    *) log info "fromfile() All pages exported as original file format named by sample –> ${PARAMS[0]}"
-                        local TARGETSAMPLE=$(${REALPATH} -m -P "${CHARSTRING}")
-                        local TARGETDIR="${TARGETSAMPLE%/*}"
-                        [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
-                        local PAGES=$($0 "${FILE}" info pages)
-                        if [[ "${PAGES}" -eq "1" ]] ; then
-                            log info "fromfile() Input file has only one page"
-                            CHARSTRING="1 ${FILETYPE} ${TARGETSAMPLE}"
-                        else
-                            log info "fromfile() Input file has ${PAGES} pages"
-                            CHARSTRING="1-${PAGES} ${FILETYPE} ${TARGETSAMPLE}"
-                        fi
-                    ;;
-                esac
+                *) echo """Při škálování na fixní rozmět musí být nastaven jeden z následujících parametrů: 
+  -xyfit
+  -xyfill
+  -xysize
+                """
+                    echo false
                 ;;
             esac
+        ;;
+        0.|0.0|0.00) echo "Chybně nastavena hodnota škálování: ${PARAMS[0]}" >> /dev/stderr
+            echo false
+        ;;
+        [1-9]+([0-9])x|x[1-9]+([0-9])) echo "Chybně nastavený škálovací box: ${PARAMS[0]}" >> /dev/stderr
+            echo false
+        ;;
+        [0-9].[0-9]?([0-9])|+([0-9]))
+            SCALE="${PARAMS[0]}"
+            local TEMPORAR=${1#*${PARAMS[0]}}
+        ;;
+        *) return 1
+            ;;
+    esac
+    if [[ "${TEMPORAR}" =~ "-filter=" ]] ; then
+        local PARAMS=(${TEMPORAR#*-filter=})
+        if [[ "${FILTERS[@]}" =~ "${PARAMS[0]}" ]] ; then
+            echo "${SCALE} -filter=${PARAMS[0]}"
+        else
+            echo "Neplatný škálovací filtr: ${PARAMS[0]}" >> /dev/stderr
+            echo false
         fi
+    else
+        echo "${SCALE}"
     fi
-    fromfile ${FILE} ${CHARSTRING}
-    return $?
+}
+
+# ### <span id="fromcontainer">fromcontainer()</span> ([top](#FUNCTIONS))
+# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
+# __$2__ obsahuje parametry
+#
+# Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
+# Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
+fromcontainer() {
+    log goto "fromcontainer() ${FILETYPE} $1 –> $2"
+    local RANGE=$(isrange "${2}")
+    if [ -n "${RANGE}" ] ; then
+        local TEMPORAR="${2#*${RANGE}}"
+    else
+        local TEMPORAR="${2}"
+    fi
+    local INTO=$(isformat "${TEMPORAR}")
+    if [ -n "${INTO}" ] ; then
+        local TEMPORAR="${TEMPORAR#*${INTO}}"
+    fi
+    local SCALE=$(isscale "${TEMPORAR}")
+    if [ -n "${SCALE}" ] ; then
+        [ "${SCALE}" == "false" ] && return 1
+        local PARAM=(${SCALE})
+        case "${PARAM[$((${#PARAM[@]}-1))]}" in
+            -filter=*) log info "fromcontainer() Scale use any resize filter –> ${PARAM[$((${#PARAM[@]}-1))]}"
+                local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
+            ;;
+            [0-9]*) case ${#PARAM[@]} in
+                1) log info "fromcontainer() Only resize scale –> ${PARAM[$((${#PARAM[@]}-1))]}"
+                    local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
+                ;;
+                2) echo "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
+                    return 1
+                ;;
+                *) #/ 3 a více položek
+                    case "${PARAM[0]}" in
+                        -xy*) local TEMPORAR="${TEMPORAR#*${PARAM[0]}}"
+                        ;;
+                        *) echo "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
+                            return 1
+                        ;;
+                    esac
+                ;;
+            esac
+            ;;
+            *) echo "${PARAM[$((${#PARAM[@]}-1))]}"
+            ;;
+        esac
+    fi
+    case "${TEMPORAR:$((${#TEMPORAR}-1)):1}" in
+        /) TARGETDIR=$(${REALPATH} -m -P "${TEMPORAR## }")
+            log info "targets() Export pages with a original names into –> ${TARGETDIR}"
+            [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+        ;;
+        *) if [[ "${TEMPORAR}" =~ "/" ]] ; then
+                #/ obsahuje cestu
+                local TEMPORARY=$(${REALPATH} -m -P "${TEMPORAR## }")
+                TARGETDIR="${TEMPORARY%/*}"
+                TARGETSAMPLE="${TEMPORARY##*/}"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} –> ${TARGETDIR}"
+                [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+            else
+                #/ jde o vzorek
+                TARGETDIR="$(pwd)"
+                TARGETSAMPLE="${TEMPORAR## }"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} into actual directory"
+            fi
+        ;;
+    esac
+    echo "RANGE ${RANGE}"
+    echo "INTO ${INTO}"
+    echo "SCALE ${SCALE}"
+    echo "TARGETDIR ${TARGETDIR}"
+    echo "TARGETSAMPLE ${TARGETSAMPLE}"
+    echo "TEMPORAR ${TEMPORAR}"
+    echo "Můžeme přikročit k akci ${FILETYPE}"
+    case ${FILETYPE} in
+        gimp|xcf) log info "fromcontainer() Export from XCF"
+            case "${INTO}" in
+                images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
+                    return 1
+                ;;
+                ocr) echo "TODO Aplikace OCR na konverovaný originální soubor" >> /dev/stderr
+                ;;
+                txt|text) echo "Parametr použitelný pouze u PDF - exportují se text místo stránky" >> /dev/stderr
+                    return 1
+                ;;
+                *)
+                    log info "fromcontainer() Original file is exported from container without conversion"
+                    local PAGES=($(range "${RANGE}"))
+                    local LISTPAGES=($(listxcf "${FILE}"))
+                    #/ echo "${LISTPAGES[-1]}"
+                    #/ echo "${PAGES[@]}"
+                    for i in ${PAGES[@]} ; do
+                        local PAGE="${LISTPAGES[$((i-1))]}"
+                        case "${INTO}" in
+                            xcf|orig*)
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    # jedu podle vzorku
+                                    local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                    local TARGET="${TARGETDIR}/${TEMPORAR// /0}.xcf"
+                                else
+                                    local TARGET="${TARGETDIR}/${PAGE}.xcf"
+                                fi
+                                local TEMPFILE=$(tempfile)
+                                if [ -n "${SCALE}" ] ; then
+                                    local FORSCALE=$(tempfile)
+                                    $(itemxcf "${FILE}" "${PAGE}" > "${FORSCALE}")
+                                    pamscale ${SCALE} ${FORSCALE} > ${TEMPFILE}
+                                    rm ${FORSCALE}
+                                else
+                                    $(itemxcf "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                fi
+                                convertovergimp xcf "${TEMPFILE}"
+                                mv -i "${TEMPFILE}.xcf" "${TARGET}"
+                                [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                            ;;
+                                pnm|pam)
+                                    if [ -n "${TARGETSAMPLE}" ] ; then
+                                        # jedu podle vzorku
+                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${INTO}"
+                                    else
+                                        local TARGET="${TARGETDIR}/${PAGE}.${INTO}"
+                                    fi
+                                    local TEMPFILE=$(tempfile)
+                                    if [ -n "${SCALE}" ] ; then
+                                        local FORSCALE=$(tempfile)
+                                        $(itemxcf "${FILE}" "${PAGE}" > "${FORSCALE}")
+                                        pamscale ${SCALE} ${FORSCALE} > ${TEMPFILE}
+                                        rm ${FORSCALE}
+                                    else
+                                        $(itemxcf "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                    fi
+                                    case "${INTO}" in
+                                        pnm|pam)
+                                            mv -i "${TEMPFILE}" "${TARGET}"
+                                        ;;
+                                        *) echo "Unsupported format –> ${INTO}"
+                                            return 1
+                                        ;;
+                                    esac
+                                    [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                                ;;
+                                *) echo "U XCF souborů je třeba uvést typ cílového souboru"
+                                    return 1
+                                ;;
+                            esac
+                        done
+                ;;
+            esac
+        ;;
+        zip|tar) log info "fromcontainer() Export from archive"
+            case "${INTO}" in
+                images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
+                    return 1
+                ;;
+                ocr) echo "TODO Aplikace OCR na konverovaný originální soubor" >> /dev/stderr
+                ;;
+                txt|text) echo "Parametr použitelný pouze u PDF - exportují se text místo stránky" >> /dev/stderr
+                    return 1
+                ;;
+                *)
+                    if [ -n "${SCALE}" ] ; then
+                        echo "Škáluji soubory do formátu ${INTO} - TODO"
+                    else
+                        log info "fromcontainer() Original file is exported from container without conversion"
+                        local PAGES=($(range "${RANGE}"))
+                        local LISTPAGES=($(listzip "${FILE}"))
+                        #/ echo "${LISTPAGES[-1]}"
+                        #/ echo "${PAGES[@]}"
+                        for i in ${PAGES[@]} ; do
+                            local PAGE="${LISTPAGES[$((i-1))]}"
+                            case "${INTO}" in
+                                orig*) local SUFFIX="${PAGE##*.}"
+                                    if [ -n "${TARGETSAMPLE}" ] ; then
+                                        # jedu podle vzorku
+                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${SUFFIX}"
+                                    else
+                                        local TARGET="${TARGETDIR}/${PAGE#*/}"
+                                    fi
+                                    if [ -n "${SCALE}" ] ; then
+                                        anone "Při přeškálování do původního formátu dojde k degradaci kvality obrazu mám pokračovat?"
+                                        [ $? -eq 1 ] && return 1
+                                        local TEMPFILE=$(tempfile)
+                                        local FORSCALE=$(tempfile)
+                                        $(itemzip "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                        case "${SUFFIX}" in
+                                            jp2) jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
+                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > ${FORSCALE}
+                                                jp2in "${FORSCALE}" > ${TARGET}
+                                            ;;
+                                            *) echo "Suffix ${SUFFIX} není implementován" >> /dev/stderr
+                                            ;;
+                                        esac
+                                        [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                                        [ -f "${TEMPFILE}.pnm" ] && rm "${TEMPFILE}.pnm"
+                                        [ -f "${FORSCALE}" ] && rm "${FORSCALE}"
+                                    else
+                                        $(itemzip "${FILE}" "${PAGE}" > "${TARGET}")
+                                        echo "Page $i saved as ${TARGET}"
+                                    fi
+                                ;;
+                                pnm|pam)
+                                    if [ -n "${TARGETSAMPLE}" ] ; then
+                                        # jedu podle vzorku
+                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.pnm"
+                                    else
+                                        local TEMPORAR="${PAGE#*/}"
+                                        local TARGET="${TARGETDIR}/${TEMPORAR%.*}.pnm"
+                                    fi
+                                    local TEMPFILE=$(tempfile)
+                                    $(itemzip "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                    case "${INTO}" in
+                                        pnm|pam)
+                                            local TARGET="${TARGETDIR}/${TEMPORAR%.*}.pnm"
+                                            jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
+                                            if [ -n "${SCALE}" ] ; then
+                                                local FORSCALE=$(tempfile)
+                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > ${FORSCALE}
+                                                mv -f ${FORSCALE} "${TEMPFILE}.pnm"
+                                            fi
+                                            mv -i "${TEMPFILE}.pnm" "${TARGET}"
+                                        ;;
+                                        *) echo "Unsupported format –> ${INTO}"
+                                            return 1
+                                        ;;
+                                    esac
+                                    [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                                ;;
+                                *) echo "TODO –> ${INTO}"
+                                    return 1
+                                ;;
+                            esac
+                            
+                        done
+                    fi
+                ;;
+            esac
+        ;;
+    esac
+    return 0
 }
 
 # ### <span id="exportimg">exportimg()</span> ([top](#FUNCTIONS))
@@ -2211,20 +2307,25 @@ fromfile() {
 #
 exportimg() {
     log goto "exportimg() ${FILE} –> ${CHARSTRING}"
-    if [[ "${CHARSTRING}" =~ ".list" ]] ; then
+    if [[ "${CHARSTRING}" =~ "?" ]] ||\
+        [[ "${CHARSTRING}" =~ "-h" ]] ||\
+        [[ "${CHARSTRING}" =~ "help" ]]
+        then
+        help bitmapexport
+    elif [[ "${CHARSTRING}" =~ ".list" ]] ; then
         local SOURCE=$(${REALPATH} -m -P "${CHARSTRING%.list*}.list" 2>/dev/null)
         if [ -f "${SOURCE}" ] ; then
             log info "exportimg() Read params from –> ${SOURCE}"
             local TARGET="${CHARSTRING#*.list}"
             while read line ; do
                 CHARSTRING="$line ${TARGET}"
-                fromfile "${FILE}" "${CHARSTRING}"
+                fromcontainer "${FILE}" "${CHARSTRING}"
             done < "${SOURCE}"
         else
             return 1
         fi
     else
-        fromfile "${FILE}" "${CHARSTRING}"
+        fromcontainer "${FILE}" "${CHARSTRING}"
     fi
     return $?
 }
@@ -2288,7 +2389,45 @@ jp2in() {
     return $?
 }
 
-# ### <span id="ziplist">ziplist()</span> ([top](#FUNCTIONS))
+# ### <span id="listxcf">listxcf()</span> ([top](#FUNCTIONS))
+# Funkce vrací seznam vrstev v XCF souboru.
+#
+# Ovšem tento vstupní XCF soubor musí být připraven ke konverzi a to tak,
+# že vrstvy, které mají být považovány za stránky, musí být typu Normal a
+# viditelné. 
+#
+#     + 2451x3363+0+0 RGB-alpha Normal 46
+#
+# 1, položka viditelnost vrstvy (+|-)
+# 2, položka rozměry vrstvy
+# 3, 
+# 4, typ vrstvy - by měly být typu Normal 
+# 5, jméno vrstvy
+#
+# Pokud se u některé z viditelných vrstev vyskytuje jiný typ, než Normal,
+# pak se vrací upozornění, že jde o rozpracovaný soubor a výsledek nemusí
+# odpovídat požadovku
+#
+# Pořadové číslo souboru tak odpovídá číslu stránky
+listxcf() {
+    local TEST=$( ${XCFINFO} "${1}" | grep ^+ | awk '{print $4}' | grep -v Normal )
+    ${XCFINFO} -u "${1}" | while read line ; do
+        case "${line:0:1}" in
+            +) echo "${line#*RGB* Normal }"
+            ;;
+        esac
+    done
+    [ -n "${TEST}" ] && return 1 || return 0
+}
+
+# ### <span id="itemxcf">itemxcf()</span> ([top](#FUNCTIONS))
+# Funkce vyblije na standardní výstup z XCF __$1__ vrstvu __$2__
+itemxcf() {
+    log goto "itemxcf() From $1 flush –> $2"
+    ${XCF2PNM} "${1}" "${2}"
+}
+
+# ### <span id="listzip">listzip()</span> ([top](#FUNCTIONS))
 # Vrací setříděný seznam souborů v ZIP archivu - je založen na syntaxi
 # používané u souborů archive.org, kdy číslování stránek je před příponou
 # souboru, oddělené od jména adresáře podtržítkem
@@ -2296,15 +2435,15 @@ jp2in() {
 #         pg35600_jp2/pg35600_0158.jp2
 #
 # Pořadové číslo souboru tak odpovídá číslu stránky
-ziplist() {
+listzip() {
     ${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
 }
 
-# ### <span id="zipitem">zipitem()</span> ([top](#FUNCTIONS))
+# ### <span id="itemzip">itemzip()</span> ([top](#FUNCTIONS))
 # Funkce vyblije na standardní výstup ze zazipovaného archívu __$1__
 # soubor __$2__
-zipitem() {
-    log goto "zipitem() From $1 flush –> $2"
+itemzip() {
+    log goto "itemzip() From $1 flush –> $2"
     ${ZIP} e -so "${1}" "${2}"
 }
 
@@ -2331,7 +2470,7 @@ def convert(filename):
     pdb.gimp_file_save(img, layer, new_name, new_name)
     pdb.gimp_image_delete(img)
 
-convert('${FILE}')
+convert('${2}')
 
 pdb.gimp_quit(1)
 EOF
@@ -3405,6 +3544,103 @@ white-rohrer
 Výchozí nastavení algoritmů lze upravit 
 		"""
 		;;
+		bitmapexport) echo """
+U bitmapových souborů, které mají podporu pro více stránek (či vrstev)
+lze využít export k jejich extrakci a případně i jejich transormaci na
+jiný rozměr či konverzi do jiného formátu, včetně DjVu. Viz příklad:
+
+    ${APP} soubor.jpg export 1 jpg 30%
+
+Vygeneruje JPEG obrázek s názvem soubor_30%.jpg jehož obsahem bude původní
+obrázek ze souboru soubor.jpg, zmenšený na 30% původní velikosti.
+
+U kontejnerů typu zip či tar, které mohou obsahovat obrázky v různých formátech,
+lze provést export pouze s uvedením rozsahu. Cílové soubory se pak budou
+jmenovat stejně, jako ty v archívu:
+
+    ${APP} soubor.zip export 2-7
+
+U bitmapových formátů s podporou více stránek, které mají v sobě uložen
+také název vrstvy či stránky, bude mít vyexportovaný soubor stejné jméno
+jako byl název příslušné vrstvy či stránky.
+
+    ${APP} soubor.xcf export 2-7
+
+V tomto případě tedy bude výsledkem série šesti souborů ve formátu .xcf,
+vytvořených z druhé až sedmé vrstvy souboru soubor.xcf pojmenovaných podle
+jejich názvů.
+
+Pokud se mají soubory jmenovat podle jiného vzoru, musí být uveden výchozí
+vzorek. Viz příklad:
+
+    ${APP} soubor.xcf export 2-7 soubor
+
+V takovém případě se budou vyexportované soubory jmenovat soubor_00002.xcf
+až soubor_00007.xcf
+
+Akci export lze využít i ke konverzi do jiného formátu:
+
+    ${APP} soubor.pdf export 1 jpg
+
+V případě PDF souborů, které mohou obsahovat mix textu a obrázků bude v tomto
+případě výstupem jako bitmapový obrázek celá stránka. Pokud však chcete,
+aby výstupem byly pouze vložené obrázky (nebo text), je třeba jako výstupní
+formát uvést co chcete:
+
+    ${APP} soubor.pdf export 1 images
+
+Není-li řečeno jinak, jsou výsledné soubory v původním rozlišení. Ovšem
+při konverzi lze velikost cílového obrázku rovnou přeškálovat:
+
+    ${APP} soubor.pdf export 1 jpg 0.5 example
+
+Tímto způsobem zvolíte, že cílová velikost bude obrázku bude 50% původní
+velikosti.
+
+Velikost výsledného souboru také můžete uvést uvedením rozměru cílového
+obrázku. V takovém případě ale musíte použít i jeden z následujících
+parametrů, kterým určíte jak se má při škálování postupovat:
+
+-xysize přeškáluje obrázek tím způsebem, že použije kratší rozměr a ten
+        co bude přesahovat ořízne tak aby výsledek odpovídal velikosti
+        vymezeného prostoru a zároveň zůstal zachován poměr stran výchozího
+        obrázku
+-xyfit  roztáhne obrázek tak aby vyplnil celý uvedený rozměr, poměr stran
+        tedy nebude zachován
+-xyfill přeškáluje obrázek podle většího rozměru, tak aby se vešel do
+        vymezeného prostoru celý a poměr stran při tom zůstal zachován.
+
+Viz příklad:
+
+    ${APP} soubor.pdf export 1 jpg 250x300 -xysize example
+
+Při škálování se automaticky použije volba -nomix, můžete ji ale zaměnit
+za konkrétní škálovací filtr. Viz příklad:
+
+    ${APP} soubor.pdf export 1 jpg 250x300 -filter=box example
+"""
+        echo "Seznam použitelných škálovacích filtrů:"
+        printf "\t%s\n" ${FILTERS[@]}
+echo """
+Ve všech uvedených příkladech jsou výsledné soubory uloženy do adresáře,
+ve kterém se ${APP} spouští. Pokud se mají uložit jinam, je třeba uvést
+i cílovou  cestu:
+
+    djvutool soubor.pdf export 1 jpg 0.33 example/
+
+V tomto případě se vyexportované stránky nasypou do podadresáře example.
+Pokud neexistuje, tak se vytvoří. Pokud se mají soubory při exportu také
+přejmenovat, je třeba za lomítkem uvést také příslušný vzor:
+
+    djvutool soubor.pdf export 1 jpg 0.33 example/example
+
+V tomto případě by se tedy výsledný soubor jmenoval example_30%_00001.jpg
+
+Pokud má být číslování jiné než výchozí pětimístné, vypadá vzorek takto:
+
+    djvutool soubor.pdf export 1 jpg 30% example/example_XX
+"""
+		;;
 		bundle) echo """Nápověda pro volbu typu svazku.. ToDo
 		"""
 		;;
@@ -3709,8 +3945,19 @@ Options:
 		keywords-export) echo """
   ACTION: [1mexport[0m
 
-  Export pages , meta attributes from DjVu svazku. O tom co bude předmětem exportu rozhodují další 
-  volby. Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
+  O tom co bude předmětem exportu rozhoduje typ vstupního souboru, a další 
+  volby.
+
+  Je-li je vstupním souborem jiný formát souboru než DjVu, umožňuje export:
+  * u vícestránkových dokumentů extrakci jednotlivých stránek
+  * jejich konverzi do jiných bitmapových formátů, včetně přeškálování
+  * i konverzi do DjVu
+  
+  Je-li vstupním souborem DjVu dokument, jsou výsledkem exportu soubory,
+  které lze po úpravě importovat zpět a tak provádět kupř. textovou korekturu
+  jeho původního obsahu, či doplňovat obsah a další metadata.
+  
+  Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
   se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
   při volbě [3m-p[23m.
 
@@ -5234,16 +5481,18 @@ esac
                                 # Na serveru archive.org se využívají pro
                                 # zabalení souborů skenů ve formátu jp2, jpeg aj.
                                     case ${CHARSTRING} in
+                                        list) listzip "${FILE}"
+                                        ;;
                                         meta*) #/ může být archiv s obrázky
-                                            local LISTPAGES=($(ziplist "${FILE}"))
+                                            local LISTPAGES=($(listzip "${FILE}"))
                                             local PAGE="${CHARSTRING#meta }"
                                             case ${PAGE} in
                                                 meta) log info "main() Exif info for first file ${LISTPAGES[0]} from archive ${FILE}"
-                                                    echo $(zipitem "${FILE}" "${LISTPAGES[0]}" | infoitem)
+                                                    echo $(itemzip "${FILE}" "${LISTPAGES[0]}" | infoitem)
                                                 ;;
                                                 *) if [ "${PAGE}" -ge "0" ] && [ "${PAGE}" -lt "${#LISTPAGES[@]}" ] ; then
                                                         log info "main() Exif info for ${PAGE} file: ${LISTPAGES[${PAGE}]} from archive ${FILE}"
-                                                        zipitem "${FILE}" "${LISTPAGES[${PAGE}]}" | ${EXIFTOOL} -
+                                                        itemzip "${FILE}" "${LISTPAGES[${PAGE}]}" | ${EXIFTOOL} -
                                                     else
                                                         echo "Ivalid value ${PAGE}" >> /dev/stderr
                                                         return 1
@@ -5251,11 +5500,11 @@ esac
                                                 ;;
                                             esac
                                         ;;
-                                        pages*) local SUMPAGES=$(ziplist "${FILE}" | wc -l)
+                                        pages*) local SUMPAGES=$(listzip "${FILE}" | wc -l)
                                             echo "${SUMPAGES}"
                                         ;;
                                         *) # zjistit jakého typu jsou obrázky v archivu
-                                        local SUMPAGES=$(ziplist "${FILE}" | wc -l)
+                                        local SUMPAGES=$(listzip "${FILE}" | wc -l)
                                         echo "${FILETYPE^^} ${SUMPAGES}"
                                         ;;
                                     esac
