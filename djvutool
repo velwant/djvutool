@@ -2061,21 +2061,27 @@ fromcontainer() {
         [ "${SCALE}" == "false" ] && return 1
         local PARAM=(${SCALE})
         case "${PARAM[$((${#PARAM[@]}-1))]}" in
-            -filter=*) log info "fromcontainer() Scale use any resize filter –> ${PARAM[$((${#PARAM[@]}-1))]}"
+            -filter=*)
+                log info "fromcontainer()" \
+                "Scale use any resize filter –> ${PARAM[$((${#PARAM[@]}-1))]}"
                 local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
             ;;
-            [0-9]*) case ${#PARAM[@]} in
-                1) log info "fromcontainer() Only resize scale –> ${PARAM[$((${#PARAM[@]}-1))]}"
+            [0-9]*)
+                case ${#PARAM[@]} in
+                1) log info "fromcontainer()" \
+                    "Only resize scale –> ${PARAM[$((${#PARAM[@]}-1))]}"
                     local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
                 ;;
-                2) echo "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
+                2) echo \
+                    "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
                     return 1
                 ;;
                 *) #/ 3 a více položek
                     case "${PARAM[0]}" in
                         -xy*) local TEMPORAR="${TEMPORAR#*${PARAM[0]}}"
                         ;;
-                        *) echo "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
+                        *) echo \
+                            "Někde je chyba v nastavení škálování –> ${SCALE}" >> /dev/stderr
                             return 1
                         ;;
                     esac
@@ -5361,8 +5367,21 @@ esac
                                     case ${CHARSTRING} in
                                         meta)  ${EXIFTOOL} "${FILE}"
                                         ;;
-                                        pages*) local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
-                                            echo "${SUMPAGES}"
+                                        pages\ +([0-9])|pages\ all|pages)
+                                            local TEMPORAR=(${CHARSTRING})
+                                            case ${TEMPORAR[1]} in
+                                                all)
+                                                    ${XCFINFO} -u "${FILE}"
+                                                ;;
+                                                +([0-9]))
+                                                    ${XCFINFO} -u "${FILE}" | \
+                                                    grep -m ${TEMPORAR[1]} '^+.*RGB.*Normal' | tail -1
+                                                ;;
+                                                *)
+                                                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                                                    echo "${SUMPAGES}"
+                                                ;;
+                                            esac
                                         ;;
                                         *)
                                             local INFO=($(cat "${FILE}"|infoitem))
@@ -5500,8 +5519,21 @@ esac
                                                 ;;
                                             esac
                                         ;;
-                                        pages*) local SUMPAGES=$(listzip "${FILE}" | wc -l)
-                                            echo "${SUMPAGES}"
+                                        pages\ +([0-9])|pages\ all|pages)
+                                            local TEMPORAR=(${CHARSTRING})
+                                            case ${TEMPORAR[1]} in
+                                                all) local LISTPAGES=($(listzip "${FILE}"))
+                                                    printf "%s\n" ${LISTPAGES[@]}
+                                                ;;
+                                                +([0-9])) local LISTPAGES=($(listzip "${FILE}"))
+                                                    printf "%s\n" ${LISTPAGES[@]} | \
+                                                    grep -m ${TEMPORAR[1]} -v /$ | tail -1
+                                                ;;
+                                                *)
+                                                    local SUMPAGES=$(listzip "${FILE}" | wc -l)
+                                                    echo "${SUMPAGES}"
+                                                ;;
+                                            esac
                                         ;;
                                         *) # zjistit jakého typu jsou obrázky v archivu
                                         local SUMPAGES=$(listzip "${FILE}" | wc -l)
