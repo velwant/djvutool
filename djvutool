@@ -71,6 +71,10 @@ trap '''CHYBA=$? ;
 case $CHYBA in
  10) echo "Žádná sdílená metadata"
  ;;
+ 20) echo "Není nainstalován balík poppler-utils"
+ ;;
+ 19) echo "Není nainstalován balík pdftk"
+ ;;
  20) echo "Není nainstalován balík djvu-tools"
  ;;
  21) echo "ERROR: mimetype - tool for detection type of image"
@@ -171,6 +175,11 @@ if [ ! -x "${PDFVIEW}" ] ; then
         fi
     fi
 fi
+PDFTK=$(which pdftk)
+[ ! -x "${PDFTK}" ] && echo exit 19
+PDFTOPPM=$(which pdftoppm)
+[ ! -x "${PDFTOPPM}" ] && echo exit 18
+
 # Konverze z formátu JPEG2000 (jp2)
 JP2TO=$(which opj_decompress)
 [ ! ${JP2TO} ] && exit 28
@@ -576,20 +585,6 @@ anttodsed() {
 		done
 		echo "Soubory jsou uloženy v adresáři ${TEMPDIR}"
 	fi
-}
-
-# ### <span id="imginfo">imginfo()</span> ([top](#FUNCTIONS))
-# Zobrazení informací o bitmapových souborech
-#
-# $1 - soubor
-imginfo() {
-    local FILETYPE=$(testfile "${1}")
-    case ${FILETYPE} in
-        xcf) ${XCFINFO} -i ${1}
-            ;;
-        tiff) tiffinfo ${1}
-            ;;
-    esac
 }
 
 function important {
@@ -1838,7 +1833,8 @@ identifybundle() {
 	local FILE="${SOURCE##*/}"
 	if [ -n "${SOURCE}" ] ; then
         if [ $(testfile "${SOURCE}") == "djvu" ] ; then
-            ${DJVM} -l "${SOURCE}" &>/dev/null && [ $? ] && return 0 || return 2
+            ${DJVM} -l "${SOURCE}" &>/dev/null
+            [ $? -eq 1 ] && return 2
 		else
 			log err "identifybundle() Is NOT DjVu file –> ${1}"
 			return 1
@@ -1847,6 +1843,7 @@ identifybundle() {
 		log err "identifybundle() Invalid path –> ${1}"
 		return 1
 	fi
+    return 0
 }
 
 function comparedjvu {
@@ -2120,6 +2117,41 @@ fromcontainer() {
     echo "TEMPORAR ${TEMPORAR}"
     echo "Můžeme přikročit k akci ${FILETYPE}"
     case ${FILETYPE} in
+        pdf)  log info "fromcontainer() Export from PDF"
+            case "${INTO}" in
+                images) log info "exportuji pouze obrázky z ředaného rozsahu"
+                ;;
+                ocr) log info "exportuji stránku jako obrázek a aplikuji OCR"
+                ;;
+                txt|text) log info "exportuji stránku jako text"
+                ;;
+                pdf) 
+                    if [ -n "${TARGETSAMPLE}" ] ; then
+                        # jedu podle vzorku
+                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                        local TARGET="${TARGETDIR}/${TARGETSAMPLE}_${RANGE}.pdf"
+                    else
+                        local TARGET="${TARGETDIR}/${FILE##*/}"
+                        pdftopdf "${FILE}" "${TARGET/.pdf/${RANGE}}.pdf"
+                    fi
+                ;;
+                *) if [ "${INTO}" == "" ] ; then
+                        echo "Neuvedený formát. " >> /dev/stderr
+                        if [ -n "${TARGETSAMPLE}" ] ; then
+                            # jedu podle vzorku
+                            local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                            local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${INTO}"
+                        else
+                            local TARGET="${TARGETDIR}/${FILE##*/}"
+                            pdftopdf "${FILE}" "${TARGET/.pdf/_${RANGE}}.pdf"
+                        fi
+                    else
+                        echo "Unsupported format –> ${INTO}" >> /dev/stderr
+                        return 1
+                    fi
+                ;;
+            esac
+        ;;
         gimp|xcf) log info "fromcontainer() Export from XCF"
             case "${INTO}" in
                 images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
@@ -2181,13 +2213,13 @@ fromcontainer() {
                                         pnm|pam)
                                             mv -i "${TEMPFILE}" "${TARGET}"
                                         ;;
-                                        *) echo "Unsupported format –> ${INTO}"
+                                        *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
                                             return 1
                                         ;;
                                     esac
                                     [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
                                 ;;
-                                *) echo "U XCF souborů je třeba uvést typ cílového souboru"
+                                *) echo "U XCF souborů je třeba uvést typ cílového souboru" >> /dev/stderr
                                     return 1
                                 ;;
                             esac
@@ -2206,9 +2238,6 @@ fromcontainer() {
                     return 1
                 ;;
                 *)
-                    if [ -n "${SCALE}" ] ; then
-                        echo "Škáluji soubory do formátu ${INTO} - TODO"
-                    else
                         log info "fromcontainer() Original file is exported from container without conversion"
                         local PAGES=($(range "${RANGE}"))
                         local LISTPAGES=($(listzip "${FILE}"))
@@ -2233,8 +2262,8 @@ fromcontainer() {
                                         $(itemzip "${FILE}" "${PAGE}" > "${TEMPFILE}")
                                         case "${SUFFIX}" in
                                             jp2) jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
-                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > ${FORSCALE}
-                                                jp2in "${FORSCALE}" > ${TARGET}
+                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > "${FORSCALE}.pnm"
+                                                jp2in "${FORSCALE}.pnm" "${TARGET}"
                                             ;;
                                             *) echo "Suffix ${SUFFIX} není implementován" >> /dev/stderr
                                             ;;
@@ -2242,9 +2271,10 @@ fromcontainer() {
                                         [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
                                         [ -f "${TEMPFILE}.pnm" ] && rm "${TEMPFILE}.pnm"
                                         [ -f "${FORSCALE}" ] && rm "${FORSCALE}"
+                                        [ -f "${FORSCALE}.pnm" ] && rm "${FORSCALE}.pnm"
                                     else
                                         $(itemzip "${FILE}" "${PAGE}" > "${TARGET}")
-                                        echo "Page $i saved as ${TARGET}"
+                                        echo "Page $i saved as ${TARGET}" >> /dev/stderr
                                     fi
                                 ;;
                                 pnm|pam)
@@ -2269,7 +2299,7 @@ fromcontainer() {
                                             fi
                                             mv -i "${TEMPFILE}.pnm" "${TARGET}"
                                         ;;
-                                        *) echo "Unsupported format –> ${INTO}"
+                                        *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
                                             return 1
                                         ;;
                                     esac
@@ -2281,7 +2311,6 @@ fromcontainer() {
                             esac
                             
                         done
-                    fi
                 ;;
             esac
         ;;
@@ -2393,6 +2422,51 @@ jp2in() {
     log goto "jp2in() $1 –> $2"
     ${JP2IN} -i "${1}" -o "${2}"
     return $?
+}
+
+
+# ### <span id="listpdf">listpdf()</span> ([top](#FUNCTIONS))
+# Funkce vrací seznam stránek v PDF souboru.
+#
+# pdftk soubor.pdf dump_data | grep PageMedia
+#
+# PageMediaNumber: 5
+# PageMediaRotation: 0
+# PageMediaRect: 0 0 533 838
+# PageMediaDimensions: 533 838
+#
+# Důležité jsou rozměry, rotace a číslo
+#     + 2451x3363+0+0 RGB-alpha Normal 46
+#
+# 1, položka viditelnost vrstvy (+|-)
+# 2, položka rozměry vrstvy
+# 3, 
+# 4, typ vrstvy - by měly být typu Normal 
+# 5, jméno vrstvy
+#
+# Pokud se u některé z viditelných vrstev vyskytuje jiný typ, než Normal,
+# pak se vrací upozornění, že jde o rozpracovaný soubor a výsledek nemusí
+# odpovídat požadovku
+#
+# Pořadové číslo souboru tak odpovídá číslu stránky
+listpdf() {
+    log goto "listpdf() From "
+    ${PDFTK} "${1}" dump_data | awk '/^PageMediaNumber/ {print $2}'
+}
+
+# ### <span id="pdftopdf">pdftopds()</span> ([top](#FUNCTIONS))
+# Export rozsahu ${RANGE} stránek z pdf souboru $1 do nového pdf souboru $2
+pdftopdf() {
+    log goto "pdftopdf() From pdf $1 range ${RANGE}"
+    local TEMPORAR=(${RANGE//,/ })
+    local RANGE=$(printf "A%s " ${TEMPORAR[@]})
+    ${PDFTK} A="${1}" cat ${RANGE} output "${2}"
+}
+
+# ### <span id="itemxcf">itemxcf()</span> ([top](#FUNCTIONS))
+# Funkce vyblije na standardní výstup stránku __$2__ z PDF souboru __$1__
+itempdf() {
+    ${PDFTOPPM} -f ${2} -l ${2} < "${1}"
 }
 
 # ### <span id="listxcf">listxcf()</span> ([top](#FUNCTIONS))
@@ -3398,6 +3472,38 @@ EOF
 		done  1>/dev/null
 	fi
 	return 0
+}
+
+djvuinfo1() {
+    case ${CHARSTRING} in
+        meta)  ${EXIFTOOL} "${FILE}"
+        ;;
+        pages\ +([0-9])|pages\ all|pages)
+            local TEMPORAR=(${CHARSTRING})
+            case ${TEMPORAR[1]} in
+                all)
+                if identifybundle ${SOURCE} ; then
+                    ${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
+                else
+                    ${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
+                fi
+                ;;
+                +([0-9]))
+                    ${XCFINFO} -u "${FILE}" | \
+                    grep -m ${TEMPORAR[1]} '^+.*RGB.*Normal' | tail -1
+                ;;
+                *)
+                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                    echo "${SUMPAGES}"
+                ;;
+                    esac
+        ;;
+        *)
+            local INFO=($(cat "${FILE}"|infoitem))
+            local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+            echo "${INFO[@]} ${SUMPAGES}"
+        ;;
+    esac
 }
 
 # ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
