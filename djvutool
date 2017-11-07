@@ -828,7 +828,7 @@ function djvuimport {
 	fi
 
 	if [ -d "${FROM}" ] ; then
-		local LIST=$(djvuinfo "${SOURCE}" pages)
+		local LIST=$(djvuinfo "${SOURCE}" list)
 		local IFS_BAK=$IFS
 		local IFS=$'\n'
 		for i in  ${LIST} ; do
@@ -888,7 +888,7 @@ function djvuimport {
 				local FROMFILE="${FROM##*/}"
 				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
 				log info "djvuimport() Importuji data do stránky ${FROMFILE}"
-				local LIST=$(djvuinfo "${SOURCE}" pages)
+				local LIST=$(djvuinfo "${SOURCE}" list)
 				local IFS_BAK=$IFS
 				local IFS=$'\n'
 				for i in  ${LIST} ; do
@@ -3494,33 +3494,61 @@ EOF
 	return 0
 }
 
-djvuinfo1() {
-    case ${CHARSTRING} in
-        meta)  ${EXIFTOOL} "${FILE}"
+djvuinfo() {
+    log goto "djvuinfo() $1 –> $2"
+    case ${2} in
+        ant*)
         ;;
-        pages\ +([0-9])|pages\ all|pages)
-            local TEMPORAR=(${CHARSTRING})
-            case ${TEMPORAR[1]} in
-                all)
-                if identifybundle ${SOURCE} ; then
-                    ${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
-                else
-                    ${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
-                fi
+        list) identifybundle ${1}
+            case $? in
+                0) ${DJVM} -l "${1}" | grep PAGE\ # | cut -d'#' -f2 | while read line
+                do
+                    local PAGENUM="${line%% *}"
+                    local TEMPORAR="${line#${PAGENUM}}"
+                    echo "[P${PAGENUM}]:${TEMPORAR##+([[:blank:]])}"
+                done
+#                ${DJVM} -l "${1}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
                 ;;
-                +([0-9]))
-                    ${XCFINFO} -u "${FILE}" | \
-                    grep -m ${TEMPORAR[1]} '^+.*RGB.*Normal' | tail -1
+                2) ${DJVUSED} "${1}" -e dump | grep FORM:DJVU | while read line
+                do
+                    local TEMPORAR="${line%\]*}"
+                    local PAGENAME="${line%%\}*}"
+                    echo "[${TEMPORAR##*\[}]:${PAGENAME##*\{}"
+                done
                 ;;
                 *)
-                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
-                    echo "${SUMPAGES}"
                 ;;
-                    esac
+            esac
+        ;;
+        exif*) ${EXIFTOOL} "${1}"
+        ;;
+        meta*) printmeta ${1} ${2#meta+([[:blank:]])}
+        ;;
+        outline)
+        ;;
+        pages) identifybundle ${1}
+            case $? in
+                0) ${DJVM} -l "${1}" | grep PAGE\ # | wc -l
+                ;;
+                2) echo 1
+                ;;
+                *) echo error
+                ;;
+            esac
+        ;;
+        text*)
         ;;
         *)
-            local INFO=($(cat "${FILE}"|infoitem))
-            local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+            local INFO=($(cat "${1}"|infoitem))
+            identifybundle ${1}
+            case $? in
+                0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
+                ;;
+                2) local SUMPAGES=1
+                ;;
+                *) local SUMPAGES=error
+                ;;
+            esac
             echo "${INFO[@]} ${SUMPAGES}"
         ;;
     esac
@@ -3531,7 +3559,7 @@ djvuinfo1() {
 #
 # $1 - soubor
 # $2 - parametry
-djvuinfo() {
+djvuinfo1() {
     log goto "djvuinfo() $1 –> $2"
     local SOURCE=$(${REALPATH} -m -P "${1}")
     local FILE="${SOURCE##*/}"
@@ -4980,6 +5008,44 @@ do
                     ;;
             esac
             ;;
+            *.[dD][jJ][vV][uU]|\
+            *.[gG][iI][fF]|\
+            *.[jJ][pP][gG]|\
+            *.[jJ][pP]2|\
+            *.[zZ][iI][pP]|\
+            *.[pP][nN][gG]|\
+            *.[pP][nN][mM]|\
+            *.[pP][cC][dD]|\
+            *.[mM][nN][gG]|\
+            *.[pP][dD][fF]|\
+            *.[tT][aA][rR]|\
+            *.[tT][iI][fF][fF]|\
+            *.[tT][iI][fF]|\
+            *.[xX][cC][fF])
+                local FILE=$(realpath -P "${1}")
+                [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
+                shift
+                if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
+                    ACTION=${1}
+                    shift
+                    local CHARSTRING="$@"
+                    log info "main() ACTION –> ${ACTION}"
+                    log info "main() CHARSTRING –> ${CHARSTRING}"
+                    break
+                else
+                    case ${1} in
+                        -h|--help|help|?) help actions
+                            printf "\t"
+                            printf "%s " ${ACTIONS[@]}
+                            help keywords
+                            return 0
+                        ;;
+                        *) echo "Neimplementovaný parametr" >> /dev/stderr
+                            return 1
+                        ;;
+                    esac
+                fi
+                ;;
         *) if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
                 ACTION=${1}
                 shift
@@ -5051,21 +5117,21 @@ case "${CHARSTRING}" in
     ;;
 esac
 
-        case ${FILETYPE} in
-            djvu) #/ Pracuji se souborem v DjVu formátu
-                log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
-                case "${ACTION}" in
-                    delete) #/ Odstraňuji stránk, či stránky z DjVu svazku dle rozsahu, pořadí či jména
-                        deletepage "${FILE}" "${CHARSTRING}"
-                        case "$?" in
-                            1) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
-                            ;;
-                        esac
-                        return 0
+case ${FILETYPE} in
+    djvu) #/ Pracuji se souborem v DjVu formátu
+        log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
+        case "${ACTION}" in
+            delete) #/ Odstraňuji stránk, či stránky z DjVu svazku dle rozsahu, pořadí či jména
+                deletepage "${FILE}" "${CHARSTRING}"
+                case "$?" in
+                    1) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
                     ;;
-                    insert) #/ Vkládám soubor předaný jako parametr 
-                            # ToDo - zpracovat ${CHARSTRING}
-                        exit 1
+                esac
+                return 0
+            ;;
+            insert) #/ Vkládám soubor předaný jako parametr 
+                # ToDo - zpracovat ${CHARSTRING}
+                exit 1
                         if [ -f "${3}" ] ; then
                             if [ $(testfile ${3}) == "djvu" ] ; then
                                 log info "main() - insert: Soubor je typu djvu"
@@ -5099,105 +5165,106 @@ esac
                             return 1
                         fi
                         return 0
+            ;;
+            fore) #/ Přesouvám stránku kupředu
+                MOVE="fore"
+                djvumove "${FILE}" "${CHARSTRING}"
+                return 0
+            ;;
+            back) #/ Přesouvám stránku dozadu
+                MOVE="back"
+                djvumove "${FILE}" "${CHARSTRING}"
+                return 0
+            ;;
+            rotate) #/ Otáčím stránku
+                djvurotate "${FILE}" "${CHARSTRING}"
+                return 0
+            ;;
+            export) #/ Exportuji stránku
+                case "${CHARSTRING%% *}" in
+                    ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
+                        #anttodsed "${CHARSTRING#* }"
+                        echo nil
                     ;;
-                    fore) #/ Přesouvám stránku kupředu
-                        MOVE="fore"
-                        djvumove "${FILE}" "${CHARSTRING}"
+                    outline) # Exportuje obsah ve fromátu .outline
+                        printoutline "${FILE}" "${CHARSTRING#* }"
+                    ;;
+                    bookmark) # Exportuje obsah ve formátu .bookmarks
+                        outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
+                    ;;
+                    dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
+                        echo nil
+                    ;;
+                    xml) #exportuje obsah textové vrstvy ve formátu .xml
+                        echo nil
+                    ;;
+                    djvu) # exportuje celé stránky ve formátu DjVu
+                        echo nil
+                    ;;
+                    img) # exportuje náhledy stránek ve formátu PNG
+                        echo nil
+                    ;;
+                    *) djvuexport "${FILE}" "${CHARSTRING}"
+                    ;;
+                esac
+                return 0
+            ;;
+            convert) # Konvertuje obsah předhozeného souboru
+                case "${CHARSTRING%% *}" in
+                    ant) # Převede obsah .ant souboru do formátu pro dsed
+                        anttodsed "${CHARSTRING#* }"
+                    ;;
+                    outline) # Převede obsah .outline souboru do formátu pro dsed
+                        #outlinetodsed "${CHARSTRING#* }" | encode >> "${TARGET/.djvu/.outline}"
+                        local OUTLINE="${CHARSTRING#* }"
+                        outlinetodjvu "${FILE}" "${OUTLINE%%.outline*}.outline" "${OUTLINE#*outline}"
+                    ;;
+                    bookmark) # Převede obsah .outline souboru do formátu pro import
+                        outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
+                    ;;
+                    dsed) # Převede obsah .dsed souboru podle obsahu na soubor typu .outline a soubor typu .ant
+                        echo nil
+                    ;;
+                    -h) help keyword-import
+                    ;;
+                    *) djvuimport "${FILE}" "${CHARSTRING}"
+                    ;;
+                esac
+                return 0
+            ;;
+            import) #/ Import předhozeného souboru
+                case "${CHARSTRING%% *}" in
+                    ant) #/ Importuje obsah předhozeného .ant souboru
+                        local ANT=${CHARSTRING#* }
+                        if [ -f "${ANT%% *}" ] ; then
+                            echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
+                            #anttodsed "${CHARSTRING#* }"
+                            important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
+                        else
+                            echo "ERROR: ${ANT%% *} isn't .ant file!"
+                            return 1
+                        fi
                         return 0
                     ;;
-                    back) #/ Přesouvám stránku dozadu
-                        MOVE="back"
-                        djvumove "${FILE}" "${CHARSTRING}"
-                        return 0
+                    meta) echo "import from meta file to ${FILE}"
+                        echo nil
+                        ;;
+                    outline) #/ Importují se záložky
+                        if [ -f "${CHARSTRING#* }" ] ; then
+                            outlinetodjvu "${FILE}" "${CHARSTRING#* }"
+                        else
+                            echo "Import bokmarks is only from outline file"
+                        fi
                     ;;
-                    rotate) #/ Otáčím stránku
-                        djvurotate "${FILE}" "${CHARSTRING}"
-                        return 0
+                    *) djvuimport "${FILE}" "${CHARSTRING}"
                     ;;
-                    export) #/ Exportuji stránku
-                        case "${CHARSTRING%% *}" in
-                            ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
-                                #anttodsed "${CHARSTRING#* }"
-                                echo nil
-                            ;;
-                            outline) # Exportuje obsah ve fromátu .outline
-                                printoutline "${FILE}" "${CHARSTRING#* }"
-                            ;;
-                            bookmark) # Exportuje obsah ve formátu .bookmarks
-                                outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
-                            ;;
-                            dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
-                                echo nil
-                            ;;
-                            xml) #exportuje obsah textové vrstvy ve formátu .xml
-                            ;;
-                            djvu) # exportuje celé stránky ve formátu DjVu
-                                echo nil
-                            ;;
-                            img) # exportuje náhledy stránek ve formátu PNG
-                                echo nil
-                            ;;
-                            *) djvuexport "${FILE}" "${CHARSTRING}"
-                            ;;
-                        esac
-                        return 0
-                    ;;
-                    convert) # Konvertuje obsah předhozeného souboru
-                        case "${CHARSTRING%% *}" in
-                            ant) # Převede obsah .ant souboru do formátu pro dsed
-                                anttodsed "${CHARSTRING#* }"
-                            ;;
-                            outline) # Převede obsah .outline souboru do formátu pro dsed
-                                #outlinetodsed "${CHARSTRING#* }" | encode >> "${TARGET/.djvu/.outline}"
-                                local OUTLINE="${CHARSTRING#* }"
-                                outlinetodjvu "${FILE}" "${OUTLINE%%.outline*}.outline" "${OUTLINE#*outline}"
-                            ;;
-                            bookmark) # Převede obsah .outline souboru do formátu pro import
-                                outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
-                            ;;
-                            dsed) # Převede obsah .dsed souboru podle obsahu na soubor typu .outline a soubor typu .ant
-                            ;;
-                            -h) help keyword-import
-                            ;;
-                            *) djvuimport "${FILE}" "${CHARSTRING}"
-                            ;;
-                        esac
-                        return 0
-                    ;;
-                    import) #/ Import předhozeného souboru
-                        case "${CHARSTRING%% *}" in
-                            ant) #/ Importuje obsah předhozeného .ant souboru
-                                local ANT=${CHARSTRING#* }
-                                if [ -f "${ANT%% *}" ] ; then
-                                    echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
-                                    #anttodsed "${CHARSTRING#* }"
-                                    important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
-                                else
-                                    echo "ERROR: ${ANT%% *} isn't .ant file!"
-                                    return 1
-                                fi
-                                return 0
-                            ;;
-                            meta) echo "import from meta file to ${FILE}"
-                            ;;
-                            outline) #/ Importují se záložky
-                                if [ -f "${CHARSTRING#* }" ] ; then
-                                    outlinetodjvu "${FILE}" "${CHARSTRING#* }"
-                                else
-                                    echo "Import bokmarks is only from outline file"
-                                fi
-                            ;;
-                            -h) help keyword-import
-                            ;;
-                            *) djvuimport "${FILE}" "${CHARSTRING}"
-                            ;;
-                        esac
-                        return 33
-                    ;;
-                    info) #/ Info o DjVu svazku
-                        djvuinfo "${FILE}" "${CHARSTRING}"
-                        return 0
-                    ;;
+                esac
+                return 33
+            ;;
+            info) #/ Info o DjVu svazku
+                djvuinfo "${FILE}" "${CHARSTRING}"
+                return 0
+            ;;
                     print) #/ Zobrazení položky dle následujícího parametru
                         case "${CHARSTRING%% *}" in
                             ant) printant "${FILE}" "${CHARSTRING#* }"
@@ -5821,7 +5888,7 @@ esac
                         ;;
                 esac
                 ;;
-        esac
+esac
 }
 
 main "$@"
