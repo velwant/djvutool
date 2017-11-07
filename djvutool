@@ -191,6 +191,26 @@ JP2IN=$(which opj_compress)
 ZIP=$(which 7z)
 [ ! -x "${ZIP}" ] && echo exit 29
 
+# ## Implementované akce
+#
+ACTIONS=(
+    delete
+    fore
+    back
+    rotate
+    export
+    import
+    convert
+    edit
+    info
+    rename
+    insert
+    print
+    set
+    unset
+    view
+    )
+
 # ## Akceptované formáty bitmapových souborů
 #
 # Neztrátové formáty 
@@ -2346,7 +2366,7 @@ exportimg() {
         [[ "${CHARSTRING}" =~ "-h" ]] ||\
         [[ "${CHARSTRING}" =~ "help" ]]
         then
-        help bitmapexport
+        help bitmap-export
     elif [[ "${CHARSTRING}" =~ ".list" ]] ; then
         local SOURCE=$(${REALPATH} -m -P "${CHARSTRING%.list*}.list" 2>/dev/null)
         if [ -f "${SOURCE}" ] ; then
@@ -3611,6 +3631,8 @@ djvuinfo() {
 
 function help {
 	case "$1" in
+        actions) echo """Implementované akce: """
+        ;;
 		algorithm) echo """
 
 Binarizační algoritmy ovliňují vygenerování optimální černobílé masky
@@ -3656,7 +3678,10 @@ white-rohrer
 Výchozí nastavení algoritmů lze upravit 
 		"""
 		;;
-		bitmapexport) echo """
+        bitmap) echo """
+        """
+        ;;
+		bitmap-export) echo """
 U bitmapových souborů, které mají podporu pro více stránek (či vrstev)
 lze využít export k jejich extrakci a případně i jejich transormaci na
 jiný rozměr či konverzi do jiného formátu, včetně DjVu. Viz příklad:
@@ -3753,6 +3778,28 @@ Pokud má být číslování jiné než výchozí pětimístné, vypadá vzorek 
     djvutool soubor.pdf export 1 jpg 30% example/example_XX
 """
 		;;
+        bitmap-info) echo """
+  ACTION [1minfo[0m
+
+  If isn't subkey, return basic informations about file: Format, dimensions
+  of page and for file in multipage format summary count of pages.
+
+  [1m${0##*/}[0m info <file> [ pages | list | meta <num> ]
+
+         num  - order of page (or layer) in file
+
+  SUBKEYS:
+         [3mlist[23m - (only multipage file) return list names, or numbers of
+                pages from multipage file, or from container 
+         [3mmeta[23m - return exif info about page from container or file
+        [3mpages[23m - return only sumary count of pages as number
+
+[3mNotice:[23m
+  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
+  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
+  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
+        """
+        ;;
 		bundle) echo """Nápověda pro volbu typu svazku.. ToDo
 		"""
 		;;
@@ -3946,11 +3993,16 @@ Použitelné parametry:
 """
 		;;
 		keywords) echo """
-Help for actions:
 
-  [1m${0##*/}[0m <DjVu file> {ACTIONS} -h
+  [1m${0##*/}[0m {ACTIONS} <DjVu file> {-h|--help}
 
 ACTIONS:
+   convert - conversion into another format file
+    export - export page from multipage file
+      info - view info about file or page
+      view - view file, or page from file
+
+ACTIONS for DjVu:
 
     delete - remove page from bundle
 fore, back - move, or insert pages into DjVu bundle
@@ -4928,74 +4980,77 @@ do
                     ;;
             esac
             ;;
-        *.[dD][jJ][vV][uU]|\
-        *.[gG][iI][fF]|\
-        *.[jJ][pP][gG]|\
-        *.[jJ][pP]2|\
-        *.[zZ][iI][pP]|\
-        *.[pP][nN][gG]|\
-        *.[pP][nN][mM]|\
-        *.[pP][cC][dD]|\
-        *.[mM][nN][gG]|\
-        *.[pP][dD][fF]|\
-        *.[tT][aA][rR]|\
-        *.[tT][iI][fF][fF]|\
-        *.[tT][iI][fF]|\
-        *.[xX][cC][fF])
-            local FILE=$(realpath -P "${1}")
-            [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
-            shift
-            ;;
-        *) ACTIONS=(
-            delete
-            fore
-            back
-            rotate
-            export
-            import
-            convert
-            edit
-            info
-            rename
-            insert
-            print
-            set
-            unset
-            view
-            )
-            
-            if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] ; then
+        *) if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
                 ACTION=${1}
                 shift
-                local CHARSTRING="$@"
-                log info "main() ACTION –> ${ACTION}"
-                break
+                case ${1} in
+                    *.[dD][jJ][vV][uU]|\
+                    *.[gG][iI][fF]|\
+                    *.[jJ][pP][gG]|\
+                    *.[jJ][pP]2|\
+                    *.[zZ][iI][pP]|\
+                    *.[pP][nN][gG]|\
+                    *.[pP][nN][mM]|\
+                    *.[pP][cC][dD]|\
+                    *.[mM][nN][gG]|\
+                    *.[pP][dD][fF]|\
+                    *.[tT][aA][rR]|\
+                    *.[tT][iI][fF][fF]|\
+                    *.[tT][iI][fF]|\
+                    *.[xX][cC][fF])
+                        local FILE=$(realpath -P "${1}")
+                        [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
+                        shift
+                        local CHARSTRING="$@"
+                        log info "main() ACTION –> ${ACTION}"
+                        log info "main() CHARSTRING –> ${CHARSTRING}"
+                        break
+                    ;;
+                    *) echo "${1} – Nepodporovaný typ souboru" >> /dev/stderr
+                        return 1
+                    ;;
+                esac
             else
 # Smyčka se přeruší, pokud není předaná žádná známá akce, ani parametr,
 # který by byl ošetřen pomocí voleb. Další paramtery jsou pak již číslovány
 # 1, 2, 3 atd..
-                break
+                case ${1} in
+                    -h|--help|help|?) help actions
+                        printf "\t"
+                        printf "%s " ${ACTIONS[@]}
+                        help keywords
+                        return 0
+                    ;;
+                    *) echo "Neimplementovaný parametr" >> /dev/stderr
+                        return 1
+                    ;;
+                esac
             fi
             ;;
     esac
 done
 
+
+#/ echo "${ACTION}" >> /dev/stderr
+#/ echo "$@" >> /dev/stderr
+
+FILETYPE=$(testfile "${FILE}")
 case "${CHARSTRING}" in
     *-h|*--help|-h*|--help*)
         if [ -z "${ACTION}" ] ; then
             help
         else
-            help "keywords-${ACTION}"
+            case ${FILETYPE} in
+                djvu) help "keywords-${ACTION}"
+                ;;
+                *) help "bitmap-${ACTION}"
+                ;;
+            esac
         fi
         exit 0
     ;;
 esac
 
-#/ echo "${ACTION}" >> /dev/stderr
-#/ echo "$@" >> /dev/stderr
-
-    if [ -f "${FILE}" ] ; then
-        FILETYPE=$(testfile "${FILE}")
         case ${FILETYPE} in
             djvu) #/ Pracuji se souborem v DjVu formátu
                 log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
@@ -5300,21 +5355,6 @@ esac
                     # jmenovat example_30%_001.jpg
                     export) exportimg
                     ;;
-                    # ### info
-                    # Operace info slouží v případě vstupních souborů
-                    # ke zjištění bližších informací potřebných při
-                    # konverzi do DjVu formátu
-                    #
-                    # Bez parametrů vrací formát vstupního souboru,
-                    # rozměry stránky a případně počet stran – vrstev,
-                    # skenů, snímků, či stránek v něm obsažených.
-                    #
-                    # __pages__ vrací celkový počet stránek jako číslo
-                    # __meta__ vrací informace uložené jako exif tagy
-                    #
-                    # Za parametrem __meta__ může následovat číslo stránky
-                    # Pokud není žádné uvedeno, vrací se u vícestránkových
-                    # formátů exif informace pro první stránku
                     info) case ${FILETYPE} in
                                 gif)  # GIF je grafický formát, s bezztrátovou
                                 # kompresí, který má podporu pro animace.
@@ -5335,7 +5375,7 @@ esac
                                 #
                                 # .gif
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "Zjistit počet vrstev"
                                         ;;
@@ -5349,7 +5389,7 @@ esac
                                 # kompresí, který podporuje pouze jednu vrstvu
                                 # .jpg, .jpeg, .jpe, .jif, .jfif, .jfi
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "1"
                                         ;;
@@ -5380,7 +5420,7 @@ esac
                                 #
                                 #
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "1"
                                         ;;
@@ -5390,7 +5430,7 @@ esac
                                         ;;
                                     esac
                                 ;;
-                                pnm) # Formát se kterým přišel projekt Netpbm.
+                                pnm|pgm) # Formát se kterým přišel projekt Netpbm.
                                 # Nepodporuje více vrstev!!!
                                 # PNM formát (portable anymap) zastupuje
                                 # následující formáty:
@@ -5413,7 +5453,7 @@ esac
                                 #
                                 # https://en.wikipedia.org/wiki/Netpbm_format
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "1"
                                         ;;
@@ -5430,7 +5470,7 @@ esac
                                 # .mng
                                 # https://en.wikipedia.org/wiki/Netpbm_format
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
                                             echo "${SUMPAGES}"
@@ -5458,7 +5498,7 @@ esac
                                 #
                                 # .png
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "Zjistit počet vrstev"
                                         ;;
@@ -5471,7 +5511,7 @@ esac
                                 gimp|xcf) # Nativní formát Gimpu
                                     # může mít více vrstev
                                     case ${CHARSTRING} in
-                                        meta)  ${EXIFTOOL} "${FILE}"
+                                        meta*)  ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages\ +([0-9])|pages\ all|pages)
                                             local TEMPORAR=(${CHARSTRING})
@@ -5499,7 +5539,7 @@ esac
                                 tiff) #
                                 # může mít více stránek
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
                                             echo "${SUMPAGES}"
@@ -5545,7 +5585,7 @@ esac
                                 # 
                                 # https://en.wikipedia.org/wiki/Photo_CD
                                     case ${CHARSTRING} in
-                                        meta) ${EXIFTOOL} "${FILE}"
+                                        meta*) ${EXIFTOOL} "${FILE}"
                                         ;;
                                         pages) echo "1"
                                         ;;
@@ -5572,7 +5612,7 @@ esac
                                 #
                                 # Z principu má podporu pro více stránek
                                     case ${CHARSTRING} in
-                                        meta) pdfinfo -box "${FILE}"
+                                        meta*) pdfinfo -box "${FILE}"
                                         ;;
                                         *)
                                             local INFO=($(cat "${FILE}"|infoitem))
@@ -5782,11 +5822,6 @@ esac
                 esac
                 ;;
         esac
-    else
-        log err "Bez předaného souboru to nedává smysl"
-        help
-        exit 0
-    fi
 }
 
 main "$@"
