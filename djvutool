@@ -64,7 +64,7 @@ INSERTTEXT="${INSERTTEXT=no}"
 ALG="${ALG=djvu}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
-ALGORITHM=( abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
+ALGORITHM=( none abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
 TABS="8"
 
 trap '''CHYBA=$? ;
@@ -160,6 +160,8 @@ IDENTIFY=$(which identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
 CONVERT=$(which convert)
 [ ! -x "${CONVERT}" ] && echo exit 24
+IMGVIEW=$(which display)
+[ ! -x "${IMGVIEW}" ] && echo exit 24
 XCFINFO=$(which xcfinfo)
 [ ! -x "${XCFINFO}" ] && echo exit 26
 XCF2PNM=$(which xcf2pnm)
@@ -1315,28 +1317,80 @@ encode() {
 	done
 }
 
+# ### <span id="encodefile_di">encodefile_di()</span> ([top](#FUNCTIONS))
+# Konvertuje bitmapový soubor, předaný jako __$2__ do DjVu souboru __$3__
+# s využitím binarizačního algoritmu __$1__
+encodefile_di() {
+    log goto "encodefile_di() Use $1 for $2 –> $3"
+    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
+        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+    fi
+    if [ -f "${2#.*}.png" ] ; then
+        ${DIDJVU} encode -o "${3}" --mask "${2#.*}.png" -d "${DPI-300}" ${LEVEL} "${2}"
+    else
+        log info "encode -o ${3} -d ${DPI-300} ${LEVEL} -m ${1} ${PARAMS} ${2}"
+        ${DIDJVU} encode -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
+    fi
+}
+
 # ### <span id="encodefile">encodefile()</span> ([top](#FUNCTIONS))
 # Konvertuje bitmapový soubor, předaný jako __$2__ do DjVu souboru __$3__
 # s využitím binarizačního algoritmu __$1__
 encodefile() {
-    log goto "encodefile() Use $1 for $2 –> $3"
-    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
-        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+    log goto "encodefile() Use $1 –> $2"
+    if [ -f "${1/.pam/.text}" ] ; then
+        ${CJB2} -lossy -clean "${1/.pam/.text}" "${1}.mask";
+    else
+        ${CJB2} -lossy -clean "${1/.pam/.fore}" "${1}.mask";
     fi
-    ${DIDJVU} encode -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
+    ${DJVUMAKE} "${2}" Sjbz="${1}.mask" PPM="${1}";
+}
+
+
+# ### <span id="separatemask_di">separatemask_di()</span> ([top](#FUNCTIONS))
+# Z bitmapového souboru, který je předán jako __$2__ generuje černobílou
+# masku __$3__ s využitím binarizačního algoritmu __$1__ a dalších předaných
+# algoritmů
+#
+# POZOR! Výstupem DIDJVU je maska ve formátu PNG, proto je třeba provést
+# konverzi na pnm.
+separatemask_di() {
+    log goto "separatemask_di() Use $3 for $1 –> $2"
+    if [ -f "${HOME}/.config/${NAME}/${3}.conf" ] ; then
+        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${3}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+    fi
+    log info "separate -o ${2} ${LEVEL} -m ${3} ${PARAMS} ${1}"
+    ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3}" ${PARAMS} "${1}"
+    while [ ! -f "${2}.png" ] ; do
+        sleep 0.1
+    done
+    log info "$(pngcheck ${2}.png)"
+    pngtopam "${2}.png" > "${2}"
     return $?
 }
 
 # ### <span id="separatemask">separatemask()</span> ([top](#FUNCTIONS))
 # Z bitmapového souboru, který je předán jako __$2__ generuje černobílou
-# masku __$3__ s využitím binarizačního algoritmu __$1__ a dalších předaných
-# algoritmů
+# masku __$3__ s nastavením prahu __$1__ 
+#
 separatemask() {
-    log goto "separatemask() Use $1 for $2 –> $3"
-    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
-        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
-    fi
-    ${DIDJVU} separate -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
+    log goto "separatemask() Use $3 for $1 –> $2"
+    case "${3}" in
+        none) pamtopnm ${1} | ppmtopgm | pgmtopbm -threshold -value 0.5 | pnmtoplainpnm > ${2}
+            while [ ! -f "${2}" ] ; do
+                sleep 0.1
+            done
+        ;;
+        *) if [ -f "${HOME}/.config/${NAME}/${3}.conf" ] ; then
+                local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${3}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
+            fi
+            ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3}" ${PARAMS} "${1}"
+            while [ ! -f "${2}.png" ] ; do
+                sleep 0.1
+            done
+            pngtopam "${2}.png" > "${2}"
+        ;;
+    esac
     return $?
 }
 
@@ -1986,6 +2040,8 @@ isformat() {
     log goto "isformat() string –> $1"
     local PARAMS=($1)
     case "${PARAMS[0]}" in
+        djvu) #/ Bitmapový soubor bude konvertován do djvu
+            ;;
         txt|text) #/ výstup se prožene přes OCR
             ;;
         image*) #/ akceptováno pouze u PDF
@@ -1996,6 +2052,8 @@ isformat() {
             ;;
         pnm|pam)
             ;;
+        mask)
+            ;;
         xcf|gimp)
             ;;
         *) return 1
@@ -2004,6 +2062,123 @@ isformat() {
     log value "isformat() OK –> ${PARAMS[0]}"
     echo "${PARAMS[0]}"
     return 0
+}
+
+# ### <span id="parsecut">parsecut()</span> ([top](#FUNCTIONS))
+parsecut() {
+    log goto "parsecut() $1"
+    case ${1} in
+                +([0-9])x+([0-9])|+([0-9])x+([0-9])[+]+([0-9])[+]+([0-9]))
+                    local W="${1%%x*}"
+                    local TEMPORAR="${1#*x}"
+                    local H="${TEMPORAR%%+*}"
+                    local TEMPORAR="${1#*+}"
+                    local X="${TEMPORAR%+*}"
+                    local Y="${1##*+}"
+                ;;
+                +([0-9]),+([0-9]),+([0-9]),+([0-9]))
+                    local TEMPORAR=( ${1//,/ } )
+                    local X="${TEMPORAR[0]}"
+                    local Y="${TEMPORAR[1]}"
+                    local W="${TEMPORAR[2]}"
+                    local H="${TEMPORAR[3]}"
+                ;;
+                *) echo "Neplatné nastavení pro cut –> ${1}" >> /dev/stderr
+                    return 1
+                ;;
+    esac
+    echo "$W $H $X $Y"
+}
+
+# ### <span id="imgcut">imgcut()</span> ([top](#FUNCTIONS))
+# Funkce zpracovává řetězec, kterým je identifikována oblast vyžadující
+# speciální ošetření. Ta může být nastavena dvěma možnými způsoby:
+# LEFT,TOP,SIRKA,VYSKA nebo SIRKAxVYSKA+LEFT+TOP
+# Za tímto řetězcem může následovat dvojtečka, která specifikuje typ rámce
+# T - text (černobílá kresba)
+# I - obrázek (fotka, malba)
+# G - grafika (čáry a linky)
+# bez specifikace typu rámce se předpokládá že se má "zamaskovat" obrázek
+#
+# Pro zjištění souřadnic lze použít kupř. geeqie Zobrazit –> Zobrazit informace o pixelech
+imgcut() {
+    log goto "imgcut() $1 –> $2"
+    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
+    local SIZE=(${1/:/ })
+    local W=($(parsecut ${SIZE[0]}))
+    [ $? -eq 1 ] && return 1
+    if [ "${W[0]}" -eq "0" ] || [ "${W[1]}" -eq "0" ] || [ "${W[0]:0:1}" == "-" ] || [ "${W[1]:0:1}" == "-" ] ; then
+        echo "${W[2]},${W[3]},[1m${W[0]}[0m,[1m${W[1]}[0m –> Šířka a výška plochy musí mít nenulovou velikost" >> /dev/stderr
+        return 1
+    fi
+    local Y="${W[3]}"
+    local X="${W[2]}"
+    local H="${W[1]}"
+    local W="${W[0]}"
+    log info "imgcut W $W H $H X $X Y $Y"
+    local FILENAME="${2%.*}"
+    case ${#SIZE[@]} in
+        1) #/ Vyjme vybranou oblast za černou plochu
+            pbmmake -black ${W} ${H} > ${TEMPFILE}
+            log info "imgcut() ${FILENAME}.fore –> ${FILENAME}.temp"
+            pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+            mv -f "${FILENAME}.temp" "${FILENAME}.fore"
+            rm -f ${TEMPFILE}
+            log info "imgcut() Plocha $1 byla zamaskována"
+        ;;
+        2) case ${SIZE[1]} in
+            M) #/ Nahradí oblast za bílou plochu (ve výsledku dojde k rozmazání
+                pbmmake -white ${W} ${H} > ${TEMPFILE}
+                pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                mv -f "${FILENAME}.temp" "${FILENAME}.fore"
+                log info "imgcut() Plocha $1 byla odmaskována"
+            ;;
+            T) #/ Text - vybraná plocha z fore je naklíčovaná na bílou plochu
+                #/ maska bude mít příponu text
+                pamtopnm "${FILENAME}.fore" | pamcut -left ${X} -top ${Y} -width ${W} -height ${H} > ${TEMPFILE}
+                [ ! -f "${FILENAME}.text" ] && pbmmake -white $(head -2 "${FILENAME}.fore" |tail -1) > "${FILENAME}.text"
+                pamtopnm "${FILENAME}.text" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                mv -f "${FILENAME}.temp" "${FILENAME}.text"
+                log info "imgcut() Plocha textu $1 byla vyseparovaná"
+            ;;
+            I) #/ Obrázek - vybraná plocha je na masce začerněná
+                pbmmake -black ${W} ${H} > ${TEMPFILE}
+                pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                mv -f "${FILENAME}.temp" "${FILENAME}.fore"
+                log info "imgcut() Plocha $1 byla zamaskována"
+            ;;
+            G) #/ Grafika - v rámci vybrané plochy zredukuje barvy a pak ji naklíčuje do barevného pozadí
+            ;;
+            *) echo "Neimplemnetováno {SIZE[1]}" >> /dev/stderr
+                return 1
+            ;;
+            esac
+            #pamtopnm "${FILENAME}.back" | pamcut "${X}" "${Y}" "${W}" "${H}" > ${TEMPFILE}
+            #pamcut ${X} ${Y} ${W} ${H} "${FILENAME}.back" > ${TEMPFILE}
+            #separatemask "${ALG}" "${TEMPFILE}" "${TEMPFILE/.pam/.fore}"
+            #pamtopnm "${TEMPFILE/.pam/.fore}" | pnmpaste "${TEMPFILE/.pam/.fore}" ${X} ${Y} > "${FILENAME}.temp"
+            #pnmpaste "${TEMPFILE/.pam/.fore}" ${X} ${Y} "${FILENAME}.fore" > "${FILENAME}.temp"
+            #mv -f "${FILENAME}.temp" "${FILENAME}.fore"
+            #rm -f ${TEMPFILE}
+            #rm -f ${TEMPFILE/.pam/.fore}
+        ;;
+        *) echo "Neplatné nastavení pro cut –> $1" >> /dev/stderr
+        ;;
+    esac
+}
+
+# ### <span id="iscut">iscut()</span> ([top](#FUNCTIONS))
+# Ověřuje, zda-li následuje řetězec pro specifikaci oblastí pro zvláštní
+# zacházení. Těchto oblastí může být specifikováno více, v takovém případě
+# však musí být odděleny středníkem a uzavřeny v uvozovkách
+iscut() {
+    log goto "iscut() string –> $1"
+    local PARAMS=($1)
+    log info "vysledek ${PARAMS[0]}"
+    case "${PARAMS[0]}" in
+        -cut) echo "${PARAMS[1]}"
+        ;;
+    esac
 }
 
 # ### <span id="isscale">isscale()</span> ([top](#FUNCTIONS))
@@ -2073,6 +2248,10 @@ fromcontainer() {
     if [ -n "${INTO}" ] ; then
         local TEMPORAR="${TEMPORAR#*${INTO}}"
     fi
+    local CUT=$(iscut "${TEMPORAR}")
+    if [ -n "${CUT}" ] ; then
+        local TEMPORAR="${TEMPORAR#*${CUT}}"
+    fi
     local SCALE=$(isscale "${TEMPORAR}")
     if [ -n "${SCALE}" ] ; then
         [ "${SCALE}" == "false" ] && return 1
@@ -2131,12 +2310,139 @@ fromcontainer() {
     esac
     echo "RANGE ${RANGE}"
     echo "INTO ${INTO}"
+    echo "CUT ${CUT}"
     echo "SCALE ${SCALE}"
     echo "TARGETDIR ${TARGETDIR}"
     echo "TARGETSAMPLE ${TARGETSAMPLE}"
     echo "TEMPORAR ${TEMPORAR}"
     echo "Můžeme přikročit k akci ${FILETYPE}"
+    echo "DPI ${DPI}"
+    echo "ALG ${ALG[@]}"
     case ${FILETYPE} in
+        pbm|pgm|ppm) log info "fromcontainer() Export from ${FILETYPE^^}"
+            if [ -n "${RANGE}" ] && [ ! ${RANGE} -eq 1 ] ; then
+                echo "Formát ${FILETYPE} podporuje pouze jednu stránku" >> /dev/stderr
+                return 1
+            fi
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
+            #/ Nejdřív je třeba obrázek nakopírovat do pracovního prostoru
+            cp "${FILE}" "${TEMPFILE}"
+            #/ Pak je třeba vyseparovat výchozí masku
+            #separatemask_di "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
+            separatemask "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
+            #cp "${TEMPFILE}" "${TEMPFILE/.pam/.back}"
+            if [ -n "${CUT}" ] ; then
+                #/ Na masku se aplikují vybrané rámečky
+                local BOX=( "${CUT//;/ }" )
+                echo "${CUT}" >> /dev/stderr
+                for i in ${BOX[@]} ; do
+                    imgcut "${i}" "${TEMPFILE}"
+                done
+            fi
+            #exit 33
+            if [ -n "${TARGETSAMPLE}" ] ; then
+                # jedu podle vzorku
+                local TARGET="${TARGETDIR}/${TARGETSAMPLE}.${INTO}"
+            else
+                local TARGET="${TARGETDIR}/${FILE##*/}.${INTO}"
+            fi
+            case "${INTO}" in
+                djvu) #/ V tomto bodě se v případě DjVu provede konverze
+                    encodefile ${TEMPFILE} "${TARGET}"
+                    # na anglicke texty dává lepší výsledky cuneiform
+                ;;
+                mask|pbm) #/ Výsledkem je soubor s cílovým názvem, ale příponou pbm
+                    if [ -f "${TEMPFILE/.pam/.text}" ] ; then
+                        cp "${TEMPFILE/.pam/.text}" "${TARGET/.mask/.pbm}"
+                    else
+                        cp "${TEMPFILE/.pam/.fore}" "${TARGET/.mask/.pbm}"
+                    fi
+                ;;
+                *) echo "Konvertuji do výchozího formátu ${FILETYPE}" >> /dev/stderr
+                    if [ -n "${SCALE}" ] ; then
+                        pamtopnm ${TEMPFILE} | pamscale ${SCALE} > ${TARGET}
+                    else
+                        pamtopnm ${TEMPFILE} > ${TARGET}
+                    fi
+                    echo 33
+                ;;
+            esac
+        ;;
+        png)   log info "fromcontainer() Export from PNG"
+            case "${INTO}" in
+                images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
+                    return 1
+                ;;
+                ocr) echo "TODO Aplikace OCR na konverovaný originální soubor" >> /dev/stderr
+                ;;
+                txt|text) echo "Parametr použitelný pouze u PDF - exportují se text místo stránky" >> /dev/stderr
+                    return 1
+                ;;
+                *)
+                    log info "fromcontainer() Original file is exported from container without conversion"
+                    local PAGES=($(range "${RANGE}"))
+                    local LISTPAGES=($(listpng "${FILE}"))
+                    #/ echo "${LISTPAGES[-1]}"
+                    #/ echo "${PAGES[@]}"
+                    for i in ${PAGES[@]} ; do
+                        local PAGE="${LISTPAGES[$((i-1))]}"
+                        case "${INTO}" in
+                            png|orig*)
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    # jedu podle vzorku
+                                    local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                    local TARGET="${TARGETDIR}/${TEMPORAR// /0}.png"
+                                else
+                                    local TARGET="${TARGETDIR}/${PAGE}.png"
+                                fi
+                                local TEMPFILE=$(tempfile)
+                                if [ -n "${SCALE}" ] ; then
+                                    local FORSCALE=$(tempfile)
+                                    $(itempng "${FILE}" "${PAGE}" > "${FORSCALE}")
+                                    pamscale ${SCALE} ${FORSCALE} > ${TEMPFILE}
+                                    rm ${FORSCALE}
+                                else
+                                    $(itempng "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                fi
+                                convertovergimp png "${TEMPFILE}"
+                                mv -i "${TEMPFILE}.png" "${TARGET}"
+                                [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                            ;;
+                                pnm|pam)
+                                    if [ -n "${TARGETSAMPLE}" ] ; then
+                                        # jedu podle vzorku
+                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${INTO}"
+                                    else
+                                        local TARGET="${TARGETDIR}/${PAGE}.${INTO}"
+                                    fi
+                                    local TEMPFILE=$(tempfile)
+                                    if [ -n "${SCALE}" ] ; then
+                                        local FORSCALE=$(tempfile)
+                                        $(itempng "${FILE}" "${PAGE}" > "${FORSCALE}")
+                                        pamscale ${SCALE} ${FORSCALE} > ${TEMPFILE}
+                                        rm ${FORSCALE}
+                                    else
+                                        $(itempng "${FILE}" "${PAGE}" > "${TEMPFILE}")
+                                    fi
+                                    case "${INTO}" in
+                                        pnm|pam)
+                                            mv -i "${TEMPFILE}" "${TARGET}"
+                                        ;;
+                                        *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
+                                            return 1
+                                        ;;
+                                    esac
+                                    [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                                ;;
+                                *) echo "U XCF souborů je třeba uvést typ cílového souboru" >> /dev/stderr
+                                    return 1
+                                ;;
+                            esac
+                        done
+                ;;
+            esac
+        ;;
         pdf)  log info "fromcontainer() Export from PDF"
             case "${INTO}" in
                 images) log info "exportuji pouze obrázky z ředaného rozsahu"
@@ -2364,8 +2670,7 @@ exportimg() {
     log goto "exportimg() ${FILE} –> ${CHARSTRING}"
     if [[ "${CHARSTRING}" =~ "?" ]] ||\
         [[ "${CHARSTRING}" =~ "-h" ]] ||\
-        [[ "${CHARSTRING}" =~ "help" ]]
-        then
+        [[ "${CHARSTRING}" =~ "help" ]] ; then
         help bitmap-export
     elif [[ "${CHARSTRING}" =~ ".list" ]] ; then
         local SOURCE=$(${REALPATH} -m -P "${CHARSTRING%.list*}.list" 2>/dev/null)
@@ -2381,6 +2686,322 @@ exportimg() {
         fi
     else
         fromcontainer "${FILE}" "${CHARSTRING}"
+    fi
+    return $?
+}
+
+# ### <span id="infoimg">infoimg()</span> ([top](#FUNCTIONS))
+# Funkce vypisuje info o bitmapových souborech a případně vicestránkových
+# formátů i jejich stránkách.
+# Vstupními parametry jsou globální proměnné:
+# * FILE - Soubor ze kterého se stránka exportuje.
+# * CHARSTRING - Proměnná, která obsahuje další parametry:
+# ** typ zobrazované informace
+# ** a případně číslo konkrétní stránky (vrstvy)
+infoimg() {
+    log goto "infoimg() ${FILE} –> ${CHARSTRING}"
+    if [[ "${CHARSTRING}" =~ "?" ]] ||\
+        [[ "${CHARSTRING}" =~ "-h" ]] ||\
+        [[ "${CHARSTRING}" =~ "help" ]] ; then
+        help bitmap-info
+    else
+        case ${FILETYPE} in
+            gif) # GIF je grafický formát, s bezztrátovou kompresí, který
+                # má podporu pro animace.
+                # Je omezený především v tom, že má k dispozici pouze 256
+                # barev. Za určitých okolností může fungovat i jako
+                # kontejner pro více stránkové dokumenty (co vrstva, to stránka).
+                #
+                # Výhodou GIF formátu oproti MNG či (AP)NG je především
+                # to, že má širokou podporu u webových prohlížečů. Proto
+                # se vyžívá především pro náhledy vícestránkových dokumentů.
+                # Kdy se náhledy vybraných stránek, uložené jako jednotlivé
+                # snímky přehrávají v nekonečné smyčce.
+                # Počet snímků (stránek) udává exif tag 'Animation frames'
+                #
+                # .gif
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "Zjistit počet vrstev"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            jpg) # JPEG je grafický formát se ztrátovou kompresí, který
+                # podporuje pouze jednu vrstvu
+                #
+                # .jpg, .jpeg, .jpe, .jif, .jfif, .jfi
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "1"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            jpeg-2000) # JPEG 2000 je grafický formát, který pracuje se
+                # ztrátovou, ale i bezeztrátovou wavelet kompresí. To je
+                # klíčovým rozdílem oproti DjVu, protože u DjVu z principu
+                # vždy dojde k částečné ztrátě grafické informace.
+                # Oproti bezeztrátovému PNG má lepší kompresní poměr. A
+                # při ztrátové kompresi je výsledek po dekompresi vždy
+                # lepší než u JPEG formátu.
+                # Nevýhodou je zdlouhavá dekomprese a tím i pomalejší
+                # zobrazování v prohlížeči. Proto se využívá především
+                # pro archivaci původního skenu.
+                #
+                # Nepodporuje více vrstev! Proto se naskenované soubory
+                # obvykle zabalí do `.zip` kontejneru
+                #
+                # .jp2, .j2k, .jpf, .jpx, .jpm, .mj2
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "1"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            pnm|pgm|pbm|ppm) # Formát se kterým přišel projekt Netpbm.
+                # Nepodporuje více vrstev!!!
+                # PNM formát (portable anymap) zastupuje následující formáty:
+                # * PBM - portable bitmap (černobílé obrázky)
+                #   V hlavičce má P1 (P4 - binární formát)
+                # * PGM - portable graymap (obrázky ve stupních šedi)
+                #   V hlavičce má P2 (P5 - binární formát)
+                # * PPM - portable pixmap (RGB obrázky)
+                #   V hlavičce má P3 (P6 - binární formát)
+                # * PAM - portable anymap, zastupuje podobně jako PNM
+                #   všechny formáty a v má hlavičce P7. Je schopen zachytit
+                #   barvy stejně jako CMYK
+                #
+                # Rozdíly jsou především v popdpoře bitové hloubky barev:
+                # 48-bitů podporuje pouze PPM (rgb48be)
+                # 32-bitů podporuje plain PNM a plain PAM - binární verze nikoliv!!!
+                # 24-bitová podopora je u všech formátů
+                # 16-bitů PGM a PAM bez průhlednosti (grap16be)
+                #
+                # https://en.wikipedia.org/wiki/Netpbm_format
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "1"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            mng) # MNG je formát pro animace, založený na PNG, podobně
+                # jako (A)PNG. Není moc rozšířený.
+                # Počet vrstev udává v exifu 'Animation frames'
+                #
+                # .mng
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
+                        echo "${SUMPAGES}"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
+                        echo "${INFO[@]} ${SUMPAGES}"
+                    ;;
+                esac
+            ;;
+            png) # PNG je formát, u kterého se původně vůbec nepočítalo,
+                # že by mohl mít více než jednu vrstvu. Protože ale formát
+                # GIF, který animace podporuje, má svá omezení (nepodporuje
+                # průhlednost a má k dispozici pouze 256 barev), vzniklo
+                # jako alternativa APNG – což je svým způsobem video
+                # kontejner, který obsahuje řadu po sobě jdoucích PNG obrázků.
+                #
+                # Oproti podobnému MNG formátu však umožňuje zpětnou
+                # kompatibilitu, kdy se v prohlížečích co animace nepodporují,
+                # zobrazuje pouze první snímek. Soubory mají stejnou příponu
+                # .png, jako klasické PNG
+                #
+                # Počet vrstev udává exif tag 'Animation frames'
+                #
+                # .png
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "Zjistit počet vrstev"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            gimp|xcf) # Nativní formát Gimpu může mít více vrstev
+                case ${CHARSTRING} in
+                    meta*)  ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages\ +([0-9])|pages\ all|pages)
+                        local TEMPORAR=(${CHARSTRING})
+                        case ${TEMPORAR[1]} in
+                            all) ${XCFINFO} -u "${FILE}"
+                            ;;
+                            +([0-9])) ${XCFINFO} -u "${FILE}" | \
+                                grep -m ${TEMPORAR[1]} '^+.*RGB.*Normal' | \
+                                tail -1
+                            ;;
+                            *) local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                                echo "${SUMPAGES}"
+                            ;;
+                        esac
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
+                        echo "${INFO[@]} ${SUMPAGES}"
+                    ;;
+                esac
+            ;;
+            tiff) # Formát TIFF může mít více stránek
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
+                        echo "${SUMPAGES}"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
+                        echo "${INFO[@]} ${SUMPAGES}"
+                    ;;
+                esac
+            ;;
+            stl|pcd) # PCD je rastrový formát fy. Kodak
+                # Starší formát, pro jehož konverzi lze použít ImageMagick,
+                # ale lepší výsledky dává již delší dobu neudržovaná konverzní
+                # utilita pcdtojpeg.
+                # http://pcdtojpeg.sourceforge.net/Download.html
+                #
+                # Formát je podobný formátu Tiled Multi-Resolution TIFF
+                # …
+                # Obrázek je v kontejneru uložen v 6
+                # velikostech:
+                # Suffix [1] produces an image 192 by 128 ("Base/16")
+                # Suffix [2] produces an image 384 by 256 ("Base/4")
+                # Suffix [3] produces an image 768 by 512 ("Base")
+                # Suffix [4] produces an image 1536 by 1024 ("4 Base")
+                # Suffix [5] produces an image 3072 by 2048 ("16 Base")
+                # Suffix [6] produces an image 6144 by 4096 ("64 Base")
+                #
+                # Poznámka: Když použijete číslo 7 a vyšší tak to má stejný
+                # efekt jako když se použije 6
+                #
+                # Při konverzi vychází obrázek moc tmavý to lze pořešit buď
+                # nastavením barevného profilu, nebo gammy
+                # Resolutin
+                # Contrast
+                # Saturation
+                # Red
+                # Green
+                # Nepodporuje více stránek
+                #
+                # https://en.wikipedia.org/wiki/Photo_CD
+                case ${CHARSTRING} in
+                    meta*) ${EXIFTOOL} "${FILE}"
+                    ;;
+                    pages) echo "1"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        echo "${INFO[@]}"
+                    ;;
+                esac
+            ;;
+            psd|psb) # Proprietární formát Photoshopu
+                # PSB je PSD rozšířené na podporu obrázků o velikosti
+                # 300 tis. pixelů. Standardní PSD podporuje max. 30 tis.
+                # pixelů. Pracuje s vrstvami
+                # .psd .psb
+            ;;
+            pdf) # PDF - portable document format, je do učité míry
+                # alternativou k DjVu. Nebyl ale navržen pro rychlé
+                # prohlížení (jako DjVu) ale pro lepší přenositelnost mezi
+                # operačními systémy. Z toho plynou i jeho nevýhody.
+                # Především zdlouhavá dekomprese.
+                #
+                # Z principu má podporu pro více stránek
+                case ${CHARSTRING} in
+                    meta*) pdfinfo -box "${FILE}"
+                    ;;
+                    *) local INFO=($(cat "${FILE}"|infoitem))
+                        local SUMPAGES=$(${EXIFTOOL} -s3 -PageCount "${FILE}")
+                        echo "${INFO[@]} ${SUMPAGES}"
+                    ;;
+                esac
+            ;;
+            sgi) #
+                # https://en.wikipedia.org/wiki/Silicon_Graphics_Image
+            ;;
+            tga) # 
+                # https://en.wikipedia.org/wiki/Truevision_TGA
+            ;;
+            webp) #
+                # https://en.wikipedia.org/wiki/WebP
+            ;;
+            xbm) #
+                # https://en.wikipedia.org/wiki/X_BitMap
+            ;;
+            xpm) #
+                # https://en.wikipedia.org/wiki/X_PixMap
+            ;;
+            xwd) # Formát do kterého ukládá screenshoty obrazovky X Windows systems
+                # https://en.wikipedia.org/wiki/Xwd
+            ;;
+            tar|zip) # Nejde o grafické formáty, ale kontejnery, co můžou
+                # obsahovat různé typy souborů. Na serveru archive.org se
+                # využívají pro zabalení souborů skenů ve formátu jp2, jpeg aj.
+                case ${CHARSTRING} in
+                    list) listzip "${FILE}"
+                    ;;
+                    meta*) #/ může být archiv s obrázky
+                        local LISTPAGES=($(listzip "${FILE}"))
+                        local PAGE="${CHARSTRING#meta }"
+                        case ${PAGE} in
+                            meta) log info "main() Exif info for first file ${LISTPAGES[0]} from archive ${FILE}"
+                                echo $(itemzip "${FILE}" "${LISTPAGES[0]}" | infoitem)
+                            ;;
+                            *) if [ "${PAGE}" -ge "0" ] && [ "${PAGE}" -lt "${#LISTPAGES[@]}" ] ; then
+                                    log info "main() Exif info for ${PAGE} file: ${LISTPAGES[${PAGE}]} from archive ${FILE}"
+                                    itemzip "${FILE}" "${LISTPAGES[${PAGE}]}" | ${EXIFTOOL} -
+                                else
+                                    echo "Ivalid value ${PAGE}" >> /dev/stderr
+                                    return 1
+                                fi
+                            ;;
+                        esac
+                    ;;
+                    pages\ +([0-9])|pages\ all|pages) local TEMPORAR=(${CHARSTRING})
+                        case ${TEMPORAR[1]} in
+                            all) local LISTPAGES=($(listzip "${FILE}"))
+                                printf "%s\n" ${LISTPAGES[@]}
+                            ;;
+                            +([0-9])) local LISTPAGES=($(listzip "${FILE}"))
+                                printf "%s\n" ${LISTPAGES[@]} | \
+                                grep -m ${TEMPORAR[1]} -v /$ | tail -1
+                            ;;
+                            *) local SUMPAGES=$(listzip "${FILE}" | wc -l)
+                                echo "${SUMPAGES}"
+                            ;;
+                        esac
+                    ;;
+                    *) # zjistit jakého typu jsou obrázky v archivu
+                        local SUMPAGES=$(listzip "${FILE}" | wc -l)
+                        echo "${FILETYPE^^} ${SUMPAGES}"
+                    ;;
+                esac
+            ;;
+        esac
     fi
     return $?
 }
@@ -2525,6 +3146,21 @@ listxcf() {
 itemxcf() {
     log goto "itemxcf() From $1 flush –> $2"
     ${XCF2PNM} "${1}" "${2}"
+}
+
+# ### <span id="itempng">itempng()</span> ([top](#FUNCTIONS))
+# Funkce vyblije na standardní výstup z XCF __$1__ vrstvu __$2__
+itempng() {
+    log goto "itempng() From $1 flush –> $2"
+    # ${XCF2PNM} "${1}" "${2}"
+}
+
+# ### <span id="listpng">listpng()</span> ([top](#FUNCTIONS))
+# Vrací pořadové číslo vrstvy, které odpovídá číslu stránky
+qqlistpng() {
+    local TEMPORARY="${1##*/}"
+    mkdir ${TEMPORARY}
+    # ${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
 }
 
 # ### <span id="listzip">listzip()</span> ([top](#FUNCTIONS))
@@ -5014,7 +5650,7 @@ do
             *.[jJ][pP]2|\
             *.[zZ][iI][pP]|\
             *.[pP][nN][gG]|\
-            *.[pP][nN][mM]|\
+            *.[pP][nNpPgGaA][mM]|\
             *.[pP][cC][dD]|\
             *.[mM][nN][gG]|\
             *.[pP][dD][fF]|\
@@ -5056,7 +5692,7 @@ do
                     *.[jJ][pP]2|\
                     *.[zZ][iI][pP]|\
                     *.[pP][nN][gG]|\
-                    *.[pP][nN][mM]|\
+                    *.[pP][nNpPgGaA][mM]|\
                     *.[pP][cC][dD]|\
                     *.[mM][nN][gG]|\
                     *.[pP][dD][fF]|\
@@ -5422,340 +6058,8 @@ case ${FILETYPE} in
                     # jmenovat example_30%_001.jpg
                     export) exportimg
                     ;;
-                    info) case ${FILETYPE} in
-                                gif)  # GIF je grafický formát, s bezztrátovou
-                                # kompresí, který má podporu pro animace.
-                                # Je omezený především v tom, že má k dispozici
-                                # pouze 256 barev. Za určitých okolností
-                                # může fungovat i jako kontejner pro více
-                                # stránkové dokumenty (co vrstva, to stránka).
-                                #
-                                # Výhodou GIF formátu oproti MNG či (AP)NG
-                                # je především to, že má širokou podporu u
-                                # webových prohlížečů. Proto se vyžívá
-                                # především pro náhledy vícestránkových
-                                # dokumentů. Kdy se náhledy vybraných
-                                # stránek, uložené jako jednotlivé snímky
-                                # přehrávají v nekonečné smyčce.
-                                # Počet snímků (stránek) udává exif tag
-                                # 'Animation frames'
-                                #
-                                # .gif
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "Zjistit počet vrstev"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                jpg) # JPEG je grafický formát se ztrátovou
-                                # kompresí, který podporuje pouze jednu vrstvu
-                                # .jpg, .jpeg, .jpe, .jif, .jfif, .jfi
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "1"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                jpeg-2000) # JPEG 2000 je grafický formát, který
-                                # pracuje se ztrátovou, ale i bezeztrátovou
-                                # wavelet kompresí.
-                                # To je klíčovým rozdílem oproti DjVu, protože
-                                # u DjVu z principu vždy dojde k částečné
-                                # ztrátě grafické informace.
-                                # Oproti bezeztrátovému PNG má lepší kompresní
-                                # poměr. A při ztrátové kompresi je výsledek
-                                # po dekompresi vždy lepší než u JPEG formátu.
-                                # Nevýhodou je zdlouhavá dekomprese a tím i
-                                # pomalejší zobrazování v prohlížeči. Proto se
-                                # využívá především pro archivaci původního
-                                # skenu.
-                                #
-                                # Nepodporuje více vrstev! Proto se naskenované
-                                # soubory obvykle zabalí do `.zip` kontejneru
-                                #
-                                # .jp2, .j2k, .jpf, .jpx, .jpm, .mj2
-                                #
-                                #
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "1"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                pnm|pgm) # Formát se kterým přišel projekt Netpbm.
-                                # Nepodporuje více vrstev!!!
-                                # PNM formát (portable anymap) zastupuje
-                                # následující formáty:
-                                # * PBM - portable bitmap (černobílé obrázky)
-                                #   V hlavičce má P1 (P4 - binární formát)
-                                # * PGM - portable graymap (obrázky ve stupních šedi)
-                                #   V hlavičce má P2 (P5 - binární formát)
-                                # * PPM - portable pixmap (RGB obrázky)
-                                #   V hlavičce má P3 (P6 - binární formát)
-                                # * PAM - portable anymap, zastupuje podobně
-                                #   jako PNM všechny formáty a v má hlavičce P7
-                                #   Je schopen zachytit barvy stejně jako CMYK
-                                #
-                                # Rozdíly jsou především v popdpoře bitobvé
-                                # hloubky barev:
-                                # 48-bitů podporuje pouze PPM (rgb48be)
-                                # 32-bitů podporuje plain PNM a plain PAM - binární verze nikoliv!!!
-                                # 24-bitová podopora je u všech formátů
-                                # 16-bitů PGM a PAM bez průhlednosti (grap16be)
-                                #
-                                # https://en.wikipedia.org/wiki/Netpbm_format
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "1"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                mng) # MNG je formát pro animace, založený na PNG,
-                                # podobně jako (A)PNG. Není moc rozšířený.
-                                # Počet vrstev udává v exifu 'Animation frames'
-                                #
-                                # .mng
-                                # https://en.wikipedia.org/wiki/Netpbm_format
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
-                                            echo "${SUMPAGES}"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
-                                            echo "${INFO[@]} ${SUMPAGES}"
-                                        ;;
-                                    esac
-                                ;;
-                                png) # PNG je formát, u kterého se původně vůbec
-                                # nepočítalo, že by mohl mít více než jednu vrstvu.
-                                # Protože ale formát GIF, který animace podporuje,
-                                # má sná omezení (nepodporuje průhlednost a má k
-                                # dispozici pouze 256 barev) vzniklo jako alternativa
-                                # APNG – což je svým způsobem video kontejner, který
-                                # obsahuje řadu po sobě jdoucích PNG obrázků.
-                                #
-                                # Oproti podobnému MNG formátu však umožňuje zpětnou
-                                # kompatibilitu, kdy se v prohlížečích co animace
-                                # nepodporují, zobrazuje pouze první snímek. Soubory
-                                # mají stejnou příponu .png, jako klasické PNG
-                                # Počet vrstev udává exif tag 'Animation frames'
-                                #
-                                # .png
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "Zjistit počet vrstev"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                gimp|xcf) # Nativní formát Gimpu
-                                    # může mít více vrstev
-                                    case ${CHARSTRING} in
-                                        meta*)  ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages\ +([0-9])|pages\ all|pages)
-                                            local TEMPORAR=(${CHARSTRING})
-                                            case ${TEMPORAR[1]} in
-                                                all)
-                                                    ${XCFINFO} -u "${FILE}"
-                                                ;;
-                                                +([0-9]))
-                                                    ${XCFINFO} -u "${FILE}" | \
-                                                    grep -m ${TEMPORAR[1]} '^+.*RGB.*Normal' | tail -1
-                                                ;;
-                                                *)
-                                                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
-                                                    echo "${SUMPAGES}"
-                                                ;;
-                                            esac
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
-                                            echo "${INFO[@]} ${SUMPAGES}"
-                                        ;;
-                                    esac
-                                ;;
-                                tiff) #
-                                # může mít více stránek
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
-                                            echo "${SUMPAGES}"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
-                                            echo "${INFO[@]} ${SUMPAGES}"
-                                        ;;
-                                    esac
-                                ;;
-                                stl|pcd) # PCD je rastrový formát fy. Kodak
-                                # Starší formát, pro jehož konverzi lze
-                                # ImageMagick, ale lepší výsledky dává
-                                # již delší dobu neudržovaná konverzní
-                                # utilita pcdtojpeg.
-                                # http://pcdtojpeg.sourceforge.net/Download.html
-                                #
-                                # Formát je podobný formátu:
-                                # Tiled Multi-Resolution TIFF
-                                # …
-                                # Obrázek je v kontejneru uložen v 6
-                                # velikostech:
-                                # Suffix [1] produces an image 192 by 128 ("Base/16")
-                                # Suffix [2] produces an image 384 by 256 ("Base/4")
-                                # Suffix [3] produces an image 768 by 512 ("Base")
-                                # Suffix [4] produces an image 1536 by 1024 ("4 Base")
-                                # Suffix [5] produces an image 3072 by 2048 ("16 Base")
-                                # Suffix [6] produces an image 6144 by 4096 ("64 Base")
-                                #
-                                # Poznámka: Když použijete číslo 7 a vyšší tak
-                                # to má stejný efekt jako když se použije 6
-                                #
-                                # Při konverzi vychází obrázek moc tmavý
-                                # to lze pořešit buď nastavením barevného profilu,
-                                # nebo gammy
-                                # Resolutin
-                                # Contrast
-                                # Saturation
-                                # Red
-                                # Green
-                                # Nepodporuje více stránek
-                                # 
-                                # https://en.wikipedia.org/wiki/Photo_CD
-                                    case ${CHARSTRING} in
-                                        meta*) ${EXIFTOOL} "${FILE}"
-                                        ;;
-                                        pages) echo "1"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            echo "${INFO[@]}"
-                                        ;;
-                                    esac
-                                ;;
-                                psd|psb) # Proprietární formát Photoshopu
-                                # Proprietární formát
-                                # PSB je PSD rozšířené na podporu obrázků
-                                # o velikosti 300 tis. pixelů. Standardní
-                                # PSD podporuje max. 30 tis. pixelů
-                                # Pracuje s vrstvami
-                                # .psd .psb
-                                ;;
-                                pdf) # PDF - portable document format, je
-                                # do učité míry alternativou k DjVu. Nebyl
-                                # ale navržen pro rychlé prohlížení (jako
-                                # DjVu) ale pro lepší přenositelnost mezi
-                                # operačními systémy. Z toho plynou i jeho
-                                # nevýhody - především zdlouhavá dekomprese
-                                #
-                                # Z principu má podporu pro více stránek
-                                    case ${CHARSTRING} in
-                                        meta*) pdfinfo -box "${FILE}"
-                                        ;;
-                                        *)
-                                            local INFO=($(cat "${FILE}"|infoitem))
-                                            local SUMPAGES=$(${EXIFTOOL} -s3 -PageCount "${FILE}")
-                                            echo "${INFO[@]} ${SUMPAGES}"
-                                        ;;
-                                    esac
-                                ;;
-                                sgi) #
-                                # https://en.wikipedia.org/wiki/Silicon_Graphics_Image
-                                ;;
-                                tga) # 
-                                # https://en.wikipedia.org/wiki/Truevision_TGA
-                                ;;
-                                webp) #
-                                # https://en.wikipedia.org/wiki/WebP
-                                ;;
-                                xbm) #
-                                # https://en.wikipedia.org/wiki/X_BitMap
-                                ;;
-                                xpm) #
-                                # https://en.wikipedia.org/wiki/X_PixMap
-                                ;;
-                                xwd) # Formát do kterého ukládá screenshoty
-                                # obrazovky X Windows systems
-                                # https://en.wikipedia.org/wiki/Xwd
-                                ;;
-                                tar|zip) # Nejde o grafické formáty, ale 
-                                # kontejnery, co můohou obsahovat
-                                # různé typy souborů.
-                                # Na serveru archive.org se využívají pro
-                                # zabalení souborů skenů ve formátu jp2, jpeg aj.
-                                    case ${CHARSTRING} in
-                                        list) listzip "${FILE}"
-                                        ;;
-                                        meta*) #/ může být archiv s obrázky
-                                            local LISTPAGES=($(listzip "${FILE}"))
-                                            local PAGE="${CHARSTRING#meta }"
-                                            case ${PAGE} in
-                                                meta) log info "main() Exif info for first file ${LISTPAGES[0]} from archive ${FILE}"
-                                                    echo $(itemzip "${FILE}" "${LISTPAGES[0]}" | infoitem)
-                                                ;;
-                                                *) if [ "${PAGE}" -ge "0" ] && [ "${PAGE}" -lt "${#LISTPAGES[@]}" ] ; then
-                                                        log info "main() Exif info for ${PAGE} file: ${LISTPAGES[${PAGE}]} from archive ${FILE}"
-                                                        itemzip "${FILE}" "${LISTPAGES[${PAGE}]}" | ${EXIFTOOL} -
-                                                    else
-                                                        echo "Ivalid value ${PAGE}" >> /dev/stderr
-                                                        return 1
-                                                    fi
-                                                ;;
-                                            esac
-                                        ;;
-                                        pages\ +([0-9])|pages\ all|pages)
-                                            local TEMPORAR=(${CHARSTRING})
-                                            case ${TEMPORAR[1]} in
-                                                all) local LISTPAGES=($(listzip "${FILE}"))
-                                                    printf "%s\n" ${LISTPAGES[@]}
-                                                ;;
-                                                +([0-9])) local LISTPAGES=($(listzip "${FILE}"))
-                                                    printf "%s\n" ${LISTPAGES[@]} | \
-                                                    grep -m ${TEMPORAR[1]} -v /$ | tail -1
-                                                ;;
-                                                *)
-                                                    local SUMPAGES=$(listzip "${FILE}" | wc -l)
-                                                    echo "${SUMPAGES}"
-                                                ;;
-                                            esac
-                                        ;;
-                                        *) # zjistit jakého typu jsou obrázky v archivu
-                                        local SUMPAGES=$(listzip "${FILE}" | wc -l)
-                                        echo "${FILETYPE^^} ${SUMPAGES}"
-                                        ;;
-                                    esac
-                                ;;
-                        esac
-                        ;;
+                    info) infoimg
+                    ;;
                     convert) log info "main() From bitmap file ${FILE} –> ${CHARSTRING}"
                         case ${1:0:1} in
                             [0-9]) #/ Range page
@@ -5836,7 +6140,19 @@ case ${FILETYPE} in
                                 pdf) #/ může mít více stránek
                                     ${PDFVIEW} "${FILE}"
                                     ;;
-                                *) echo "File ${FILETYPE} isn't in a multipage format" >> /dev/stderr
+                                *) echo "File ${FILETYPE} isn't in a multipage format ${CHARSTRING}" >> /dev/stderr
+                                    case ${CHARSTRING} in
+                                        +([0-9])x+([0-9])|+([0-9])x+([0-9])[+]+([0-9])[+]+([0-9]))
+                                            ${IMGVIEW} -geometry ${CHARSTRING} ${FILE}
+                                        ;;
+                                        +([0-9]),+([0-9]),+([0-9]),+([0-9]))
+                                            local TEMPORAR=( ${CHARSTRING//,/ } )
+                                            log info "${TEMPORAR[2]}x${TEMPORAR[3]}+${TEMPORAR[0]}+${TEMPORAR[1]}"
+                                            ${IMGVIEW} -geometry ${TEMPORAR[2]}x${TEMPORAR[3]}+${TEMPORAR[0]}+${TEMPORAR[1]} ${FILE}
+                                        ;;
+                                        *) ${IMGVIEW} ${FILE}
+                                        ;;
+                                    esac
                                     ;;
                             esac
                             ;;
