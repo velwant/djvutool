@@ -61,7 +61,7 @@ RENAME="no"
 EXTENSION=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INSERTTEXT=no}"
-ALG="${ALG=djvu}"
+ALG="${ALG=none}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
 ALGORITHM=( none abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
@@ -121,6 +121,10 @@ REALPATH=$(which realpath)
 [ ! ${REALPATH} ] && exit 1
 REALPATH="$REALPATH -e "
 
+FEH=$(which feh)
+[ ! ${FEH} ] && exit 18
+GEEQIE=$(which geeqie)
+[ ! ${GEEQIE} ] && exit 18
 DIDJVU=$(which didjvu)
 [ ! ${DIDJVU} ] && echo 'Není nainstalován balík didjvu, nebude možné aplikovat pokročilé algoritmy pro separaci popředí při konverzi do DjVu' >> /dev/stderr && DIDJVU=false
 OCRODJVU=$(which ocrodjvu)
@@ -236,6 +240,45 @@ FORMATS_CONT=(
 )
 FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]})
 
+PGMTOPBM=$(which pgmtopbm)
+[ ! -x "${PGMTOPBM}" ] && exit 23
+                BMPTOPNM=$(which bmptopnm)
+                [ ! -x "${BMPTOPNM}" ] && exit 23
+                JPEGTOPNM=$(which jpegtopnm)
+                [ ! -x "${JPEGTOPNM}" ] && exit 23
+                GIFTOPNM=$(which giftopnm)
+                [ ! -x "${GIFTOPNM}" ] && exit 23
+                PNGTOPNM=$(which pngtopnm)
+                [ ! -x "${PNGTOPNM}" ] && exit 23
+                PNMTOJPEG=$(which pnmtojpeg)
+                [ ! -x "${PNMTOJPEG}" ] && exit 23
+                TIFFTOPNM=$(which tifftopnm)
+                [ ! -x "${TIFFTOPNM}" ] && exit 23
+                PNMTOPNG=$(which pnmtopng)
+                [ ! -x "${PNMTOPNG}" ] && exit 23
+PAMTOJPEG2K=$(which pamtojpeg2k)
+[ ! -x "${PAMTOJPEG2K}" ] && exit 23
+PNMTOJPEG=$(which pnmtojpeg)
+[ ! -x "${PNMTOJPEG}" ] && exit 23
+                PNMTOPLAINPNM=$(which pnmtoplainpnm)
+                [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
+                #/ Konvertuje barvy na stupně šedi
+                PPMTOPGM=$(which ppmtopgm)
+                #/ Konvertuje stupně šedi na černobílou mmasku
+                [ ! -x "${PPMTOPGM}" ] && exit 23
+                #/ Konvertuje binární formát PAM do PNM
+                PAMTOPNM=$(which pamtopnm)
+                [ ! -x "${PAMTOPNM}" ] && exit 23
+                #/ Vysekne oblast z obrázku dle souřadnic
+                PAMCUT=$(which pamcut)
+                [ ! -x "${PAMCUT}" ] && exit 23
+                #/ generátor prázdných ploch pro masku
+PBMMAKE=$(which pbmmake)
+[ ! -x "${PBMMAKE}" ] && exit 23
+                #/ integruje plochy do masky
+PNMPASTE=$(which pnmpaste)
+[ ! -x "${PNMPASTE}" ] && exit 23
+
 NETPBMSCALE=$(which pamscale)
 if [ -x "${NETPBMSCALE}" ] ; then
     # Akceptované škálovací filtry
@@ -268,26 +311,6 @@ else
                 NETPBM=1
                 ;;
             *)  NETPBM=0
-                BMPTOPNM=$(which bmptopnm)
-                [ ! -x "${BMPTOPNM}" ] && exit 23
-                JPEGTOPNM=$(which jpegtopnm)
-                [ ! -x "${JPEGTOPNM}" ] && exit 23
-                GIFTOPNM=$(which giftopnm)
-                [ ! -x "${GIFTOPNM}" ] && exit 23
-                PNGTOPNM=$(which pngtopnm)
-                [ ! -x "${PNGTOPNM}" ] && exit 23
-                PNMTOJPEG=$(which pnmtojpeg)
-                [ ! -x "${PNMTOJPEG}" ] && exit 23
-                TIFFTOPNM=$(which tifftopnm)
-                [ ! -x "${TIFFTOPNM}" ] && exit 23
-                PNMTOPNG=$(which pnmtopng)
-                [ ! -x "${PNMTOPNG}" ] && exit 23
-                PNMTOPLAINPNM=$(which pnmtoplainpnm)
-                [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
-                PPMTOPGM=$(which ppmtopgm)
-                [ ! -x "${PPMTOPGM}" ] && exit 23
-                PGMTOPBM=$(which pgmtopbm)
-                [ ! -x "${PGMTOPBM}" ] && exit 23
             ;;
         esac
     else
@@ -1317,25 +1340,17 @@ encode() {
 	done
 }
 
-# ### <span id="encodefile_di">encodefile_di()</span> ([top](#FUNCTIONS))
-# Konvertuje bitmapový soubor, předaný jako __$2__ do DjVu souboru __$3__
-# s využitím binarizačního algoritmu __$1__
-encodefile_di() {
-    log goto "encodefile_di() Use $1 for $2 –> $3"
-    if [ -f "${HOME}/.config/${NAME}/${1}.conf" ] ; then
-        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${1}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
-    fi
-    if [ -f "${2#.*}.png" ] ; then
-        ${DIDJVU} encode -o "${3}" --mask "${2#.*}.png" -d "${DPI-300}" ${LEVEL} "${2}"
-    else
-        log info "encode -o ${3} -d ${DPI-300} ${LEVEL} -m ${1} ${PARAMS} ${2}"
-        ${DIDJVU} encode -o "${3}" -d "${DPI-300}" ${LEVEL} -m "${1}" ${PARAMS} "${2}"
-    fi
-}
-
 # ### <span id="encodefile">encodefile()</span> ([top](#FUNCTIONS))
-# Konvertuje bitmapový soubor, předaný jako __$2__ do DjVu souboru __$3__
-# s využitím binarizačního algoritmu __$1__
+# Konvertuje bitmapový soubor v PAM formátu, předaný jako __$1__ do
+# DjVu souboru __$2__
+# Základním předpokladem je, že pro tento PAM soubor (s příponou `.pam`)
+# existuje minimálně jeden soubor ve formátu PBM pro vygenerování masky.
+#
+# Přednost má přitom soubor s příponou `.text`, který (pokud existuje)
+# obsahuje vyseparované textové bloky.
+#
+# V případě že neexistuje, je automaticky vyžadován soubor s příponou
+# `.fore`, který byl vygenerován funkcí [separatemask](#separatemask)
 encodefile() {
     log goto "encodefile() Use $1 –> $2"
     if [ -f "${1/.pam/.text}" ] ; then
@@ -1346,37 +1361,17 @@ encodefile() {
     ${DJVUMAKE} "${2}" Sjbz="${1}.mask" PPM="${1}";
 }
 
-
-# ### <span id="separatemask_di">separatemask_di()</span> ([top](#FUNCTIONS))
-# Z bitmapového souboru, který je předán jako __$2__ generuje černobílou
-# masku __$3__ s využitím binarizačního algoritmu __$1__ a dalších předaných
-# algoritmů
-#
-# POZOR! Výstupem DIDJVU je maska ve formátu PNG, proto je třeba provést
-# konverzi na pnm.
-separatemask_di() {
-    log goto "separatemask_di() Use $3 for $1 –> $2"
-    if [ -f "${HOME}/.config/${NAME}/${3}.conf" ] ; then
-        local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${3}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
-    fi
-    log info "separate -o ${2} ${LEVEL} -m ${3} ${PARAMS} ${1}"
-    ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3}" ${PARAMS} "${1}"
-    while [ ! -f "${2}.png" ] ; do
-        sleep 0.1
-    done
-    log info "$(pngcheck ${2}.png)"
-    pngtopam "${2}.png" > "${2}"
-    return $?
-}
-
 # ### <span id="separatemask">separatemask()</span> ([top](#FUNCTIONS))
-# Z bitmapového souboru, který je předán jako __$2__ generuje černobílou
-# masku __$3__ s nastavením prahu __$1__ 
+# Z bitmapového souboru ve formátu PAM, který je předán jako __$1__
+# generuje černobílou masku __$2__ ve formátu PBM.
+# Jako parametr __$3__ se předává buď algoritmus s parametry, nebo hodnota
+# `none` s nastavením prahové hodnoty
 #
 separatemask() {
     log goto "separatemask() Use $3 for $1 –> $2"
-    case "${3}" in
-        none) pamtopnm ${1} | ppmtopgm | pgmtopbm -threshold -value 0.5 | pnmtoplainpnm > ${2}
+    case "${3%:*}" in
+        none) log info "${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}"
+            ${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}
             while [ ! -f "${2}" ] ; do
                 sleep 0.1
             done
@@ -1384,7 +1379,11 @@ separatemask() {
         *) if [ -f "${HOME}/.config/${NAME}/${3}.conf" ] ; then
                 local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${3}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
             fi
-            ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3}" ${PARAMS} "${1}"
+            if [[ "${3}" =~ ":" ]] ; then
+                localhost TEMPORAR="${3#*:}"
+                localhost PARAMS=$(printf "xxx %s" ${TEMPORAR//,/ })
+            fi
+            ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3%:*}" ${PARAMS//xxx/-x} "${1}"
             while [ ! -f "${2}.png" ] ; do
                 sleep 0.1
             done
@@ -2048,11 +2047,11 @@ isformat() {
             ;;
         orig*) #/ původní formát
             ;;
-        jpg|jpeg)
+        jpg|jpeg|jp2)
             ;;
         pnm|pam)
             ;;
-        mask)
+        mask|back)
             ;;
         xcf|gimp)
             ;;
@@ -2065,6 +2064,16 @@ isformat() {
 }
 
 # ### <span id="parsecut">parsecut()</span> ([top](#FUNCTIONS))
+# Parsuje předaný řetězec, který můře být buď ve formě:
+# * LEFT,TOP,SIRKA,VYSKA
+# * SIRKAxVYSKA+LEFT+TOP
+#
+# a vrací hodnoty v daném pořadí: W H X Y
+#
+# * W - (weight) šířka boxu
+# * H - (height) výška boxu
+# * X - horizontální vzdálenost od levého okraje
+# * Y - vertikální vzdálenost od horního okraje
 parsecut() {
     log goto "parsecut() $1"
     case ${1} in
@@ -2095,8 +2104,9 @@ parsecut() {
 # speciální ošetření. Ta může být nastavena dvěma možnými způsoby:
 # LEFT,TOP,SIRKA,VYSKA nebo SIRKAxVYSKA+LEFT+TOP
 # Za tímto řetězcem může následovat dvojtečka, která specifikuje typ rámce
-# T - text (černobílá kresba)
-# I - obrázek (fotka, malba)
+# T - vymezená textová oblast se nakopíruje na prázdnou plochu `.text`
+# I - vymezená oblast bude na masce `.fore` začerněná
+# M - vymezená oblast bude na masce `.fore` zabílená
 # G - grafika (čáry a linky)
 # bez specifikace typu rámce se předpokládá že se má "zamaskovat" obrázek
 #
@@ -2119,31 +2129,32 @@ imgcut() {
     local FILENAME="${2%.*}"
     case ${#SIZE[@]} in
         1) #/ Vyjme vybranou oblast za černou plochu
-            pbmmake -black ${W} ${H} > ${TEMPFILE}
+            ${PBMMAKE} -black ${W} ${H} > ${TEMPFILE}
             log info "imgcut() ${FILENAME}.fore –> ${FILENAME}.temp"
-            pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+            ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
             mv -f "${FILENAME}.temp" "${FILENAME}.fore"
             rm -f ${TEMPFILE}
             log info "imgcut() Plocha $1 byla zamaskována"
         ;;
         2) case ${SIZE[1]} in
             M) #/ Nahradí oblast za bílou plochu (ve výsledku dojde k rozmazání
-                pbmmake -white ${W} ${H} > ${TEMPFILE}
-                pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                ${PBMMAKE} -white ${W} ${H} > ${TEMPFILE}
+                ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.fore"
                 log info "imgcut() Plocha $1 byla odmaskována"
             ;;
             T) #/ Text - vybraná plocha z fore je naklíčovaná na bílou plochu
                 #/ maska bude mít příponu text
-                pamtopnm "${FILENAME}.fore" | pamcut -left ${X} -top ${Y} -width ${W} -height ${H} > ${TEMPFILE}
-                [ ! -f "${FILENAME}.text" ] && pbmmake -white $(head -2 "${FILENAME}.fore" |tail -1) > "${FILENAME}.text"
-                pamtopnm "${FILENAME}.text" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                ${PAMTOPNM} "${FILENAME}.fore" | ${PAMCUT} -left ${X} -top ${Y} -width ${W} -height ${H} > ${TEMPFILE}
+                [ ! -f "${FILENAME}.text" ] && \
+                    ${PBMMAKE} -white $(head -2 "${FILENAME}.fore" |tail -1) > "${FILENAME}.text"
+                ${PAMTOPNM} "${FILENAME}.text" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.text"
                 log info "imgcut() Plocha textu $1 byla vyseparovaná"
             ;;
             I) #/ Obrázek - vybraná plocha je na masce začerněná
-                pbmmake -black ${W} ${H} > ${TEMPFILE}
-                pamtopnm "${FILENAME}.fore" | pnmpaste ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
+                ${PBMMAKE} -black ${W} ${H} > ${TEMPFILE}
+                ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.fore"
                 log info "imgcut() Plocha $1 byla zamaskována"
             ;;
@@ -2153,14 +2164,6 @@ imgcut() {
                 return 1
             ;;
             esac
-            #pamtopnm "${FILENAME}.back" | pamcut "${X}" "${Y}" "${W}" "${H}" > ${TEMPFILE}
-            #pamcut ${X} ${Y} ${W} ${H} "${FILENAME}.back" > ${TEMPFILE}
-            #separatemask "${ALG}" "${TEMPFILE}" "${TEMPFILE/.pam/.fore}"
-            #pamtopnm "${TEMPFILE/.pam/.fore}" | pnmpaste "${TEMPFILE/.pam/.fore}" ${X} ${Y} > "${FILENAME}.temp"
-            #pnmpaste "${TEMPFILE/.pam/.fore}" ${X} ${Y} "${FILENAME}.fore" > "${FILENAME}.temp"
-            #mv -f "${FILENAME}.temp" "${FILENAME}.fore"
-            #rm -f ${TEMPFILE}
-            #rm -f ${TEMPFILE/.pam/.fore}
         ;;
         *) echo "Neplatné nastavení pro cut –> $1" >> /dev/stderr
         ;;
@@ -2237,7 +2240,7 @@ isscale() {
 # Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
 # Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
 fromcontainer() {
-    log goto "fromcontainer() ${FILETYPE} $1 –> $2"
+    log goto "fromcontainer() ${PGMTOPBM} ${FILETYPE} $1 –> $2"
     local RANGE=$(isrange "${2}")
     if [ -n "${RANGE}" ] ; then
         local TEMPORAR="${2#*${RANGE}}"
@@ -2318,6 +2321,7 @@ fromcontainer() {
     echo "Můžeme přikročit k akci ${FILETYPE}"
     echo "DPI ${DPI}"
     echo "ALG ${ALG[@]}"
+    # exit 33
     case ${FILETYPE} in
         pbm|pgm|ppm) log info "fromcontainer() Export from ${FILETYPE^^}"
             if [ -n "${RANGE}" ] && [ ! ${RANGE} -eq 1 ] ; then
@@ -2328,9 +2332,7 @@ fromcontainer() {
             #/ Nejdřív je třeba obrázek nakopírovat do pracovního prostoru
             cp "${FILE}" "${TEMPFILE}"
             #/ Pak je třeba vyseparovat výchozí masku
-            #separatemask_di "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
             separatemask "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
-            #cp "${TEMPFILE}" "${TEMPFILE/.pam/.back}"
             if [ -n "${CUT}" ] ; then
                 #/ Na masku se aplikují vybrané rámečky
                 local BOX=( "${CUT//;/ }" )
@@ -2358,13 +2360,36 @@ fromcontainer() {
                         cp "${TEMPFILE/.pam/.fore}" "${TARGET/.mask/.pbm}"
                     fi
                 ;;
-                *) echo "Konvertuji do výchozího formátu ${FILETYPE}" >> /dev/stderr
-                    if [ -n "${SCALE}" ] ; then
-                        pamtopnm ${TEMPFILE} | pamscale ${SCALE} > ${TARGET}
+                back) #/ Výsledkem je PNG soubor pozadí s cílovým názvem, a příponou back.png
+                    if [ -f "${TEMPFILE/.pam/.text}" ] ; then
+                        ${PAMTOPNG} -alpha="${TEMPFILE/.pam/.text}" "${TEMPFILE}" > "${TARGET}.png"
                     else
-                        pamtopnm ${TEMPFILE} > ${TARGET}
+                        ${PAMTOPNG} -alpha="${TEMPFILE/.pam/.fore}" "${TEMPFILE}" > "${TARGET}.png"
                     fi
-                    echo 33
+                ;;
+                png) #/ konvertuji pozadí
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOPNG} > "${TARGET}"
+                    else
+                        ${PAMTOPNG} ${TEMPFILE} > "${TARGET}"
+                    fi
+                ;;
+                jpg|jpeg)
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PNMTOJPEG} > "${TARGET}"
+                    else
+                        ${PNMTOJPEG} ${TEMPFILE} > "${TARGET}"
+                    fi
+                ;;
+                jp2)
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOJPEG2K} > "${TARGET}"
+                    else
+                        ${PAMTOJPEG2K} ${TEMPFILE} > "${TARGET}"
+                    fi
+                ;;
+                *) log info "Konverze do výchozího formátu ${FILETYPE} není nutná"
+                    cp "${TEMPFILE}" "${TARGET%.}.pam"
                 ;;
             esac
         ;;
@@ -5344,15 +5369,15 @@ do
                 -h|--help) help algorithm
                     exit 0
                     ;;
-                *) for i in ${2//,/ } ; do
-                    if [[ ${ALGORITHM[@]} =~ (^|[^[:alpha:]])$i([^[:alpha:]]|$) ]] ; then
+                *) for i in ${2//;/ } ; do
+                    if [[ ${ALGORITHM[@]} =~ (^|[^[:alpha:]])${i%:*}([^[:alpha:]]|$) ]] ; then
                         log info "main() Verify algorithm $i –> OK"
                     else
                         printf "Algorithm %s isn't supported\n" "$i" 1>&2
                         exit 0
                     fi
                     done
-                    ALG=(${2//,/ })
+                    ALG=(${2//;/ })
                     log set "main() Compression algorithm –> ${ALG[@]}"
                     shift && shift
                     ;;
@@ -5650,7 +5675,8 @@ do
             *.[jJ][pP]2|\
             *.[zZ][iI][pP]|\
             *.[pP][nN][gG]|\
-            *.[pP][nNpPgGaA][mM]|\
+            *.[pP][nNpPgGaAbB][mM]|\
+            *.fore|\
             *.[pP][cC][dD]|\
             *.[mM][nN][gG]|\
             *.[pP][dD][fF]|\
@@ -5692,7 +5718,8 @@ do
                     *.[jJ][pP]2|\
                     *.[zZ][iI][pP]|\
                     *.[pP][nN][gG]|\
-                    *.[pP][nNpPgGaA][mM]|\
+                    *.[pP][nNpPgGaAbB][mM]|\
+                    *.fore|\
                     *.[pP][cC][dD]|\
                     *.[mM][nN][gG]|\
                     *.[pP][dD][fF]|\
@@ -6122,6 +6149,19 @@ case ${FILETYPE} in
                             ;;
                     view) log info "main() open –> ${FILE}"
                             case ${FILETYPE} in
+                                plain|pnm|ppm|pgm|pbm|pam) if [ -n "${FEH}" ] ; then
+                                        local TEMPORARY=($(parsecut $(xrandr | grep '[ ]connected' | head -1 | cut -d' ' -f3)))
+                                        echo "${TEMPORARY[@]}" >> /dev/stderr
+                                        local W=$(( ${TEMPORARY[0]} / 2 ))
+                                        local H=$(( ${TEMPORARY[1]} / 2 ))
+                                        local X=50
+                                        local Y=50
+                                        echo "${W}x${H}+${X}+${Y}" >> /dev/stderr
+                                        ${FEH} --scale-down --auto-zoom --geometry "${W}x${H}+${X}+${Y}" ${FILE}
+                                    else
+                                        ${GEEQIE} ${FILE}
+                                    fi
+                                ;;
                                 gif) #/ může být mít více vrstev 'Animation frames
                                     local SUMPAGES=$(${EXIFTOOL} -s3 -FrameCount "${FILE}")
                                     ;;
