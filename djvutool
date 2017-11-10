@@ -242,43 +242,42 @@ FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]})
 
 PGMTOPBM=$(which pgmtopbm)
 [ ! -x "${PGMTOPBM}" ] && exit 23
-                BMPTOPNM=$(which bmptopnm)
-                [ ! -x "${BMPTOPNM}" ] && exit 23
-                JPEGTOPNM=$(which jpegtopnm)
-                [ ! -x "${JPEGTOPNM}" ] && exit 23
-                GIFTOPNM=$(which giftopnm)
-                [ ! -x "${GIFTOPNM}" ] && exit 23
-                PNGTOPNM=$(which pngtopnm)
-                [ ! -x "${PNGTOPNM}" ] && exit 23
-                PNMTOJPEG=$(which pnmtojpeg)
-                [ ! -x "${PNMTOJPEG}" ] && exit 23
-                TIFFTOPNM=$(which tifftopnm)
-                [ ! -x "${TIFFTOPNM}" ] && exit 23
-                PNMTOPNG=$(which pnmtopng)
-                [ ! -x "${PNMTOPNG}" ] && exit 23
+BMPTOPNM=$(which bmptopnm)
+[ ! -x "${BMPTOPNM}" ] && exit 23
+JPEGTOPNM=$(which jpegtopnm)
+[ ! -x "${JPEGTOPNM}" ] && exit 23
+GIFTOPNM=$(which giftopnm)
+[ ! -x "${GIFTOPNM}" ] && exit 23
+PNGTOPNM=$(which pngtopnm)
+[ ! -x "${PNGTOPNM}" ] && exit 23
+PNMTOJPEG=$(which pnmtojpeg)
+[ ! -x "${PNMTOJPEG}" ] && exit 23
+TIFFTOPNM=$(which tifftopnm)
+[ ! -x "${TIFFTOPNM}" ] && exit 23
+PNMTOPNG=$(which pnmtopng)
+[ ! -x "${PNMTOPNG}" ] && exit 23
 PAMTOJPEG2K=$(which pamtojpeg2k)
 [ ! -x "${PAMTOJPEG2K}" ] && exit 23
 PNMTOJPEG=$(which pnmtojpeg)
 [ ! -x "${PNMTOJPEG}" ] && exit 23
-                PNMTOPLAINPNM=$(which pnmtoplainpnm)
-                [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
-                #/ Konvertuje barvy na stupně šedi
-                PPMTOPGM=$(which ppmtopgm)
-                #/ Konvertuje stupně šedi na černobílou mmasku
-                [ ! -x "${PPMTOPGM}" ] && exit 23
-                #/ Konvertuje binární formát PAM do PNM
-                PAMTOPNM=$(which pamtopnm)
-                [ ! -x "${PAMTOPNM}" ] && exit 23
-                #/ Vysekne oblast z obrázku dle souřadnic
-                PAMCUT=$(which pamcut)
-                [ ! -x "${PAMCUT}" ] && exit 23
-                #/ generátor prázdných ploch pro masku
+PNMTOPLAINPNM=$(which pnmtoplainpnm)
+[ ! -x "${PNMTOPLAINPNM}" ] && exit 23
+#/ Konvertuje barvy na stupně šedi
+PPMTOPGM=$(which ppmtopgm)
+#/ Konvertuje stupně šedi na černobílou mmasku
+[ ! -x "${PPMTOPGM}" ] && exit 23
+#/ Konvertuje binární formát PAM do PNM
+PAMTOPNM=$(which pamtopnm)
+[ ! -x "${PAMTOPNM}" ] && exit 23
+#/ Vysekne oblast z obrázku dle souřadnic
+PAMCUT=$(which pamcut)
+[ ! -x "${PAMCUT}" ] && exit 23
+#/ generátor prázdných ploch pro masku
 PBMMAKE=$(which pbmmake)
 [ ! -x "${PBMMAKE}" ] && exit 23
-                #/ integruje plochy do masky
+#/ integruje plochy do masky
 PNMPASTE=$(which pnmpaste)
 [ ! -x "${PNMPASTE}" ] && exit 23
-
 NETPBMSCALE=$(which pamscale)
 if [ -x "${NETPBMSCALE}" ] ; then
     # Akceptované škálovací filtry
@@ -303,24 +302,9 @@ if [ -x "${NETPBMSCALE}" ] ; then
     )
     NETPBM=0
 else
-    NETPBMPSCALE=$(which pnmscale)
-    if [ -x "${NETPBMSCALE}" ] ; then
-        VERSION=($(${PNMSCALE} -version 2>&1 | head -1))
-        case ${VERSION[$((${#VERSION[@]} - 1))]} in
-            9*) echo "WARNING: Version Netpbm pamscale don't support filters. I must use imagemagick convert" >> /dev/stderr
-                NETPBM=1
-                ;;
-            *)  NETPBM=0
-            ;;
-        esac
-    else
-        NETPBM=1
-    fi
+    exit 23
 fi
-if (( $NETPBM == 1 )) ; then
-    CONVERT=$(which convert)
-    [ ! -x "${CONVERT}" ] && echo exit 24
-fi
+
 #=== konec testu závislostí ===
 
 ## Pomocné funkce...
@@ -2588,80 +2572,127 @@ fromcontainer() {
                 txt|text) echo "Parametr použitelný pouze u PDF - exportují se text místo stránky" >> /dev/stderr
                     return 1
                 ;;
-                *)
-                        log info "fromcontainer() Original file is exported from container without conversion"
-                        local PAGES=($(range "${RANGE}"))
-                        local LISTPAGES=($(listzip "${FILE}"))
-                        #/ echo "${LISTPAGES[-1]}"
-                        #/ echo "${PAGES[@]}"
-                        for i in ${PAGES[@]} ; do
-                            local PAGE="${LISTPAGES[$((i-1))]}"
-                            case "${INTO}" in
-                                orig*) local SUFFIX="${PAGE##*.}"
-                                    if [ -n "${TARGETSAMPLE}" ] ; then
-                                        # jedu podle vzorku
-                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
-                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${SUFFIX}"
-                                    else
-                                        local TARGET="${TARGETDIR}/${PAGE#*/}"
-                                    fi
-                                    if [ -n "${SCALE}" ] ; then
-                                        anone "Při přeškálování do původního formátu dojde k degradaci kvality obrazu mám pokračovat?"
-                                        [ $? -eq 1 ] && return 1
-                                        local TEMPFILE=$(tempfile)
-                                        local FORSCALE=$(tempfile)
-                                        $(itemzip "${FILE}" "${PAGE}" > "${TEMPFILE}")
-                                        case "${SUFFIX}" in
-                                            jp2) jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
-                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > "${FORSCALE}.pnm"
-                                                jp2in "${FORSCALE}.pnm" "${TARGET}"
-                                            ;;
-                                            *) echo "Suffix ${SUFFIX} není implementován" >> /dev/stderr
-                                            ;;
-                                        esac
-                                        [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
-                                        [ -f "${TEMPFILE}.pnm" ] && rm "${TEMPFILE}.pnm"
-                                        [ -f "${FORSCALE}" ] && rm "${FORSCALE}"
-                                        [ -f "${FORSCALE}.pnm" ] && rm "${FORSCALE}.pnm"
-                                    else
-                                        $(itemzip "${FILE}" "${PAGE}" > "${TARGET}")
-                                        echo "Page $i saved as ${TARGET}" >> /dev/stderr
-                                    fi
+                *) local PAGES=($(range "${RANGE}"))
+                    local LISTPAGES=($(listzip "${FILE}"))
+                    #echo "${LISTPAGES[-1]}"
+                    #echo "${PAGES[@]}"
+                    for i in ${PAGES[@]} ; do
+                        local PAGE="${LISTPAGES[$((i-1))]}"
+                        case "${INTO}" in
+                            pnm|pam|png|jpg|tiff|jp2) local SUFFIX="${PAGE##*.}"
+                                case ${SUFFIX} in
+                                    jp2) $(itemzip "${FILE}" "${PAGE}" |\
+                                        ${JPEG2KTOPAM} > "${TEMPFILE}")
+                                    ;;
+                                    jpg) $(itemzip "${FILE}" "${PAGE}" |\
+                                        ${JPEGTOPNM} > "${TEMPFILE}")
+                                    ;;
+                                    png) $(itemzip "${FILE}" "${PAGE}" |\
+                                        ${PNGTOPNM} > "${TEMPFILE}")
+                                    ;;
+                                    tiff) $(itemzip "${FILE}" "${PAGE}" |\
+                                        ${TIFFTOPNM} > "${TEMPFILE}")
+                                    ;;
+                                    *) echo "Nepodporovaný formát ${SUFFIX}"
+                                        return 1
+                                    ;;
+                                esac
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    # jedu podle vzorku
+                                    local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                    local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${INTO}"
+                                else
+                                    local TEMPORAR="${PAGE#*/}"
+                                    local TARGET="${TARGETDIR}/${TEMPORAR%.*}.${INTO}"
+                                fi
+                                case ${INTO} in
+                                    jp2) if [ -n "${SCALE}" ] ; then
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMSCALE} ${SCALE} |\
+                                                ${PAMTOJPEG2K} > "${TARGET}")
+                                        else
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMTOJPEG2K} > "${TARGET}")
+                                        fi
+                                    ;;
+                                    jpg)if [ -n "${SCALE}" ] ; then
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMSCALE} ${SCALE} |\
+                                                ${PNMTOJPEG} > "${TARGET}")
+                                        else
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PNMTOJPEG} > "${TARGET}")
+                                        fi
+                                    ;;
+                                    tiff) if [ -n "${SCALE}" ] ; then
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMSCALE} ${SCALE} |\
+                                                ${PAMTOTIFF} > "${TARGET}")
+                                        else
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMTOTIFF} > "${TARGET}")
+                                        fi
+                                    ;;
+                                    png) if [ -n "${SCALE}" ] ; then
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMSCALE} ${SCALE} |\
+                                                ${PAMTOPNG} > "${TARGET}")
+                                        else
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMTOPNG} > "${TARGET}")
+                                        fi
+                                    ;;
+                                    pnm|pam) if [ -n "${SCALE}" ] ; then
+                                            $(${PAMTOPNM} ${TEMPFILE} |\
+                                                ${PAMSCALE} ${SCALE} > "${TARGET}")
+                                        else
+                                            $(${PAMTOPNM} ${TEMPFILE} > "${TARGET}")
+                                        fi
+                                    ;;
+                                esac
+                                echo "Page $i saved as ${TARGET}" >> /dev/stderr
                                 ;;
-                                pnm|pam)
-                                    if [ -n "${TARGETSAMPLE}" ] ; then
-                                        # jedu podle vzorku
-                                        local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
-                                        local TARGET="${TARGETDIR}/${TEMPORAR// /0}.pnm"
-                                    else
-                                        local TEMPORAR="${PAGE#*/}"
-                                        local TARGET="${TARGETDIR}/${TEMPORAR%.*}.pnm"
-                                    fi
-                                    local TEMPFILE=$(tempfile)
-                                    $(itemzip "${FILE}" "${PAGE}" > "${TEMPFILE}")
-                                    case "${INTO}" in
-                                        pnm|pam)
-                                            local TARGET="${TARGETDIR}/${TEMPORAR%.*}.pnm"
-                                            jp2to "${TEMPFILE}" "${TEMPFILE}.pnm"
-                                            if [ -n "${SCALE}" ] ; then
-                                                local FORSCALE=$(tempfile)
-                                                pamscale ${SCALE} "${TEMPFILE}.pnm" > ${FORSCALE}
-                                                mv -f ${FORSCALE} "${TEMPFILE}.pnm"
-                                            fi
-                                            mv -i "${TEMPFILE}.pnm" "${TARGET}"
+                            *) local SUFFIX="${PAGE##*.}"
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    # jedu podle vzorku
+                                    local TEMPORAR=$(printf "${TARGETSAMPLE}" $i)
+                                    local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${SUFFIX}"
+                                else
+                                    local TARGET="${TARGETDIR}/${PAGE#*/}"
+                                fi
+                                if [ -n "${SCALE}" ] ; then
+                                    anone "Při přeškálování do původního formátu dojde k degradaci kvality obrazu mám pokračovat?"
+                                    [ $? -eq 1 ] && return 1
+                                    case ${SUFFIX} in
+                                        jp2) $(itemzip "${FILE}" "${PAGE}" |\
+                                                ${JPEG2KTOPAM} |\
+                                                ${PAMSCALE} ${SCALE} |\
+                                            ${PAMTOJPEG2K} > "${TARGET}")
                                         ;;
-                                        *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
-                                            return 1
+                                        jpg) $(itemzip "${FILE}" "${PAGE}" |\
+                                            ${JPEGTOPNM} |\
+                                            ${PAMSCALE} ${SCALE} |\
+                                            ${PNMTOJPEG} > "${TARGET}")
+                                        ;;
+                                        png) $(itemzip "${FILE}" "${PAGE}" |\
+                                            ${PNGTOPNM} |\
+                                            ${PAMSCALE} ${SCALE} |\
+                                            ${PAMTOPNG} > "${TARGET}")
+                                        ;;
+                                        tiff) $(itemzip "${FILE}" "${PAGE}" |\
+                                            ${TIFFTOPNM} |\
+                                            ${PAMSCALE} ${SCALE} |\
+                                            ${PAMTOTIFF} > "${TARGET}")
                                         ;;
                                     esac
-                                    [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
-                                ;;
-                                *) echo "TODO –> ${INTO}"
-                                    return 1
-                                ;;
-                            esac
-                            
-                        done
+                            else
+                                log info "fromcontainer() Original file ${PAGE} is exported from container without conversion"
+                                $(itemzip "${FILE}" "${PAGE}" > "${TARGET}")
+                            fi
+                            echo "Page $i saved as ${TARGET}" >> /dev/stderr
+                            ;;
+                        esac
+                    done
                 ;;
             esac
         ;;
@@ -3031,33 +3062,6 @@ infoimg() {
     return $?
 }
 
-#/ NEPOUŽITÁ FUNKCE
-function convertimg_old {
-	# Function for splitting multilayer image format
-	# $1 Image in multilayer format (tiff, mng or xcf (gimp)
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	if [ "${2}" ] ; then 
-		#cíl bude jinde...
-		local TOPATH=$(${REALPATH} -m -P "${2}")
-	else
-		#cíl bude v adresáři kde jsem teď..
-		local TOPATH=$(pwd "${SOURCE}")
-	fi
-	if [ -d "${TOPATH}/${FILE%.*}" ] ; then
-		echo "convertimg: WARNING Dir ${TOPATH}/${FILE%.*} exists. Do rewrite files?" >> /dev/stderr
-		potvrdit || return 1
-	else
-		mkdir "${TOPATH}/${FILE%.*}"
-	fi
-	convert "${SOURCE}" "${TOPATH}/${FILE%.*}/${FILE%.*}.png"
-	pushd "${TOPATH}/${FILE%.*}"
-		for i in $(ls -cr -1 *.png) ; do
-			filetodjvu "${i}" "${i/.png/.djvu}"
-		done
-	popd
-}
-
 # ### <span id="jp2to">jp2to()</span> ([top](#FUNCTIONS))
 # Konvertuje obrázky z formátu JPEG-2000 do bitmapových formátů:
 # `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
@@ -3072,7 +3076,7 @@ function convertimg_old {
 # Stejný soubor nekomprimovaný zabral 33M a v PNG 21M
 jp2to() {
     log goto "jp2to() $1 –> $2"
-    ${JP2TO} -i "${1}" -o "${2}"
+    ${PAMTO} -i "${1}" -o "${2}"
     return $?
 }
 
@@ -3086,6 +3090,7 @@ jp2to() {
 # Konverze již zpracovaného obrázku už není tak dobrá jako z originálu 8-/
 jp2in() {
     log goto "jp2in() $1 –> $2"
+    
     ${JP2IN} -i "${1}" -o "${2}"
     return $?
 }
@@ -4686,8 +4691,7 @@ Použitelné parametry:
   [1m${0##*/}[0m {ACTIONS} <DjVu file> {-h|--help}
 
 ACTIONS:
-   convert - conversion into another format file
-    export - export page from multipage file
+    export - export and convert page into another format
       info - view info about file or page
       view - view file, or page from file
 
@@ -4905,35 +4909,6 @@ Options:
   * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
   * Subkey [3m'pages'[23m with an identificator of page return only item for this.
 """
-		;;
-		keywords-convert) echo """
-options:
-* není-li uvedeno -o tak se OCR nedělá!
-* je třeba přidat volbu, která dovolí upravit chování
-	c (color) barevná kresba na pozadí
-	b (black-white) černobílá kresba na popředí
-	n (na výstupu pouze xml soubor s výsledkem OCR)
-
-  ACTION [1mconvert[0m
-
-  Conversion input file.
-
-  [1m${0##*/}[0m <file> convert [<num>] [<name>]
-
-         num  - order or range layers
-         name - name output file with suffix
-
-  ALG:
-         [3mexif[23m - return exif info about DjVu file
-         [3mmeta[23m - return meta attribute keys from DjVu file
-        [3mpages[23m - return ordered list pages from DjVu bundle with names
-
-[3mNotice:[23m
-  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
-  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
-  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
-"""
-
 		;;
 		keywords-print) echo """
    Action [1mprint[0m
@@ -5872,6 +5847,7 @@ case ${FILETYPE} in
                 esac
                 return 0
             ;;
+            #/ Akce convert byla vyřazena..
             convert) # Konvertuje obsah předhozeného souboru
                 case "${CHARSTRING%% *}" in
                     ant) # Převede obsah .ant souboru do formátu pro dsed
@@ -6087,66 +6063,6 @@ case ${FILETYPE} in
                     ;;
                     info) infoimg
                     ;;
-                    convert) log info "main() From bitmap file ${FILE} –> ${CHARSTRING}"
-                        case ${1:0:1} in
-                            [0-9]) #/ Range page
-                                log info "main() Convert range ${1}"
-                                if [ -n "${2}" ] ; then
-                                    NEWSUFIX="${1##*.}"
-                                    case "${NEWSUFIX}" in
-                                        djvu) log info "main() Convert range ${1} from ${FILE} into DjVu ${2}"
-                                            case ${3} in
-                                                view) VIEW="yes" ;;
-                                            esac
-                                            ;;
-                                        *) echo "Konverze rozsahu do jiných formátů?" && exit 1
-                                            ;;
-                                    esac
-                                else
-                                    #/ Konvertuji do DjVu a použiju jméno původního souboru
-                                    log info "main() Convert range ${1} from ${FILE} into DjVu"
-                                fi
-                                ;;
-                            *) #/ Name nebo nic
-                                case "${1}" in
-                                    view) VIEW="yes"
-                                        todjvu "${FILE}" "${FILE%.*}.djvu"
-                                        ;;
-                                    *)#/ použiju nové jméno
-                                        NEWSUFIX="${1##*.}"
-                                        case "${NEWSUFIX}" in
-                                            djvu) log info "main() Convert ${FILE} into DjVu ${1}"
-                                                case ${2} in
-                                                    view) VIEW="yes" ;;
-                                                esac
-                                                todjvu "${FILE}" "${1}"
-                                                ;;
-                                            jpg|jpeg) #/ Konverze do formátu jpeg
-                                                ;;
-                                            jp2) #/ Konverze jedné stránky do jp2 formátu (JPEG-2000)
-                                                ;;
-                                            pdf) #/ Konverze souboru do PDF souboru - může být single- i multi-page 
-                                                ;;
-                                            png) #/ convertovergimp ${1} konverze do png - více stránkové soubory jako (A)PNG
-                                                echo "Konverze do formátu (A)PNG"
-                                                ;;
-                                            pnm) #/ konverze do pnm formátu
-                                                ;;
-                                            tiff) #/ Konverze souboru do TIFF souboru - může být single- i multi-page 
-                                                ;;
-                                            *) if [ -n "${1}" ] ; then
-                                                    echo "main() Konverze ${FILE} do formátu ${NEWSUFIX} TODO" >> /dev/stderr
-                                                else
-                                                    log info "main() Convert ${FILE} into DjVu"
-                                                    todjvu "${FILE}" "${FILE%.*}.djvu"
-                                                fi
-                                                ;;
-                                        esac
-                                        ;;
-                                esac
-                                ;;
-                        esac
-                            ;;
                     view) log info "main() open –> ${FILE}"
                             case ${FILETYPE} in
                                 plain|pnm|ppm|pgm|pbm|pam) if [ -n "${FEH}" ] ; then
