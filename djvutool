@@ -258,6 +258,8 @@ PNMTOPNG=$(which pnmtopng)
 [ ! -x "${PNMTOPNG}" ] && exit 23
 PAMTOJPEG2K=$(which pamtojpeg2k)
 [ ! -x "${PAMTOJPEG2K}" ] && exit 23
+JPEG2KTOPAM=$(which jpeg2ktopam)
+[ ! -x "${JPEG2KTOPAM}" ] && exit 23
 PNMTOJPEG=$(which pnmtojpeg)
 [ ! -x "${PNMTOJPEG}" ] && exit 23
 PNMTOPLAINPNM=$(which pnmtoplainpnm)
@@ -2744,6 +2746,57 @@ exportimg() {
         fromcontainer "${FILE}" "${CHARSTRING}"
     fi
     return $?
+}
+
+# ### <span id="viewimg">viewimg()</span> ([top](#FUNCTIONS))
+#
+viewimg() {
+    log info "viewimg() open –> ${FILE}"
+    case ${FILETYPE} in
+        pnm|ppm|pgm|pbm|pam|\
+        png|jpg|jpeg|bmp|gif|tiff) if [ -n "${FEH}" ] ; then
+                local TEMPORARY=($(parsecut $(xrandr | grep '[ ]connected' | head -1 | cut -d' ' -f3)))
+                echo "${TEMPORARY[@]}" >> /dev/stderr
+                local W=$(( ${TEMPORARY[0]} / 2 ))
+                local H=$(( ${TEMPORARY[1]} / 2 ))
+                local X=50
+                local Y=50
+                echo "${W}x${H}+${X}+${Y}" >> /dev/stderr
+                ${FEH} --scale-down --auto-zoom --geometry "${W}x${H}+${X}+${Y}" ${FILE}
+            else
+                ${GEEQIE} ${FILE}
+            fi
+        ;;
+        plain|jpeg-2000) local TEMPFILE="${TEMPDIR}/${FILE##*/}"
+            ${JPEG2KTOPAM} ${FILE} > ${TEMPFILE}
+            #opj_decompress -i ${FILE} -o ${TEMPFILE} -l 1
+            ls -alh ${TEMPFILE}
+            exiftool ${TEMPFILE}
+            $0 ${TEMPFILE} view
+        ;;
+        gimp|pdf|xcf|eps|psd|tga|ps)
+            ${GIMP} "${FILE}"
+        ;;
+        zip) isrange ${CHARSTRING}
+            if [ $? -eq 0 ] ; then
+                local PAGES=($(range "${CHARSTRING}"))
+                local LISTPAGES=($(listzip "${FILE}"))
+                #echo "${LISTPAGES[-1]}"
+                #echo "${PAGES[@]}"
+                for i in ${PAGES[0]} ; do
+                    local PAGE="${LISTPAGES[$((i-1))]}"
+                    $(itemzip "${FILE}" "${PAGE}" > "${TEMPDIR}/${PAGE##*/}")
+                    $0 view "${TEMPDIR}/${PAGE##*/}"
+                done
+            else
+                echo "V případě kontejneru musí být uvedeno číslo stránky" >> /dev/stderr
+                return 1
+            fi
+        ;;
+        *) echo "Nepodporovaný formát ${FILETYPE}" >> /dev/stderr
+            return 1
+        ;;
+    esac
 }
 
 # ### <span id="infoimg">infoimg()</span> ([top](#FUNCTIONS))
@@ -6063,55 +6116,8 @@ case ${FILETYPE} in
                     ;;
                     info) infoimg
                     ;;
-                    view) log info "main() open –> ${FILE}"
-                            case ${FILETYPE} in
-                                plain|pnm|ppm|pgm|pbm|pam) if [ -n "${FEH}" ] ; then
-                                        local TEMPORARY=($(parsecut $(xrandr | grep '[ ]connected' | head -1 | cut -d' ' -f3)))
-                                        echo "${TEMPORARY[@]}" >> /dev/stderr
-                                        local W=$(( ${TEMPORARY[0]} / 2 ))
-                                        local H=$(( ${TEMPORARY[1]} / 2 ))
-                                        local X=50
-                                        local Y=50
-                                        echo "${W}x${H}+${X}+${Y}" >> /dev/stderr
-                                        ${FEH} --scale-down --auto-zoom --geometry "${W}x${H}+${X}+${Y}" ${FILE}
-                                    else
-                                        ${GEEQIE} ${FILE}
-                                    fi
-                                ;;
-                                gif) #/ může být mít více vrstev 'Animation frames
-                                    local SUMPAGES=$(${EXIFTOOL} -s3 -FrameCount "${FILE}")
-                                    ;;
-                                mng) #/ může být mít více vrstev 'Animation frames'
-                                    local SUMPAGES=$(${IDENTIFY} "${FILE}" | wc -l)
-                                    ;;
-                                png) #/ může být mít více vrstev 'Animation frames'
-                                    local SUMPAGES=$(${EXIFTOOL} -s3 -AnimationFrames "${FILE}")
-                                    ;;
-                                gimp|xcf) #/může mít více vrstev
-                                    local SUMPAGES=$(${XCFINFO} "${FILE}" | wc -l)
-                                    ;;
-                                tiff) #/ může mít více stránek
-                                    local SUMPAGES=$(${TIFFINFO} "${FILE}" | grep "TIFF Directory" | wc -l)
-                                    ;;
-                                pdf) #/ může mít více stránek
-                                    ${PDFVIEW} "${FILE}"
-                                    ;;
-                                *) echo "File ${FILETYPE} isn't in a multipage format ${CHARSTRING}" >> /dev/stderr
-                                    case ${CHARSTRING} in
-                                        +([0-9])x+([0-9])|+([0-9])x+([0-9])[+]+([0-9])[+]+([0-9]))
-                                            ${IMGVIEW} -geometry ${CHARSTRING} ${FILE}
-                                        ;;
-                                        +([0-9]),+([0-9]),+([0-9]),+([0-9]))
-                                            local TEMPORAR=( ${CHARSTRING//,/ } )
-                                            log info "${TEMPORAR[2]}x${TEMPORAR[3]}+${TEMPORAR[0]}+${TEMPORAR[1]}"
-                                            ${IMGVIEW} -geometry ${TEMPORAR[2]}x${TEMPORAR[3]}+${TEMPORAR[0]}+${TEMPORAR[1]} ${FILE}
-                                        ;;
-                                        *) ${IMGVIEW} ${FILE}
-                                        ;;
-                                    esac
-                                    ;;
-                            esac
-                            ;;
+                    view) viewimg
+                    ;;
                     set) log info "main() set exif tag in img ${FILE} –> ToDo"
                             ;;
                     unset) log info "main() unset exif tag in ${FILE} –> ToDo"
