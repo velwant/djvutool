@@ -621,7 +621,46 @@ anttodsed() {
 	fi
 }
 
-function important {
+# ### 
+# $1 - DjVu
+# $2 - .ant file
+# $3 - select parameters
+important() {
+    if [ "$(head -1 -c1 ${2})" == "#" ] ; then
+        # jdu importovat položky...
+        local OBSAH=($(wc -l ${2}))
+        local ITEMS=($(grep -n '^#' ${2} | awk -F\: '{print $1}'))
+        local index=0
+        for i in ${ITEMS[@]} ; do
+            index=$(( $index + 1 ))
+            # soubor...
+            local SOUBOR=($(sed -n "${i}p" ${2}))
+            local ANTFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+            echo "${SOUBOR[@]}" >> /dev/stderr
+            if [ "${SOUBOR['1']%.*}" == "shared_anno" ] ; then
+                printf "create-shared-ant; select '%s'\nset-ant\n" "${SOUBOR['1']%.*}.iff" >> ${ANTFILE}
+            else
+                printf "select '%s'\nset-ant\n" "${SOUBOR['1']%.*}.djvu" >>  ${ANTFILE}
+            fi
+            if [ -z ${ITEMS["$index"]} ] ; then
+                sed -n "${i},${OBSAH['0']}p" ${2} >> ${ANTFILE}
+                createant ${ANTFILE} | encode >> ${TEMPFILE}
+            else
+                sed -n "${i},$((${ITEMS["$index"]} - 1))p" ${2} >> ${ANTFILE}
+                createant ${ANTFILE} | encode >> ${TEMPFILE}
+            fi
+            printf "\n\n.\n" >> ${TEMPFILE}
+            printf "Při importu budou stávající hyperlinky i meta atributy stránky ${SOUBOR['1']} v souboru '%s' přepsány. Mám pokračovat?\n" "${SOURCE}" >> /dev/stderr
+            echo "Importuji soubor ${TEMPFILE}" >> /dev/stderr
+        done
+    else
+        echo "File ${2} isn't not in .ant format!" >> /dev/stderr
+        return 1
+    fi
+}
+
+function important1 {
 	# $1 - DjVu
 	# $2 - .ant file
 	# $3 - select parameters
@@ -647,10 +686,10 @@ function important {
 				fi
 				if [ -z ${ITEMS["$index"]} ] ; then
 					sed -n "${i},${OBSAH['0']}p" ${ANT} >> ${TEMPFILE}
-					#createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
+					createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
 				else
 					sed -n "${i},$((${ITEMS["$index"]} - 1))p" ${ANT} >> ${TEMPFILE}
-					#createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
+					createant ${TEMPFILE} | encode >> ${TEMPFILE//.bak/.dsed}
 				fi
 				printf "\n\n.\n" >> ${TEMPFILE//.bak/.dsed}
 				if [ "${FORCE}" == "skip" ] ; then
@@ -1325,6 +1364,19 @@ function importmetaall {
 	${DJVUSED} "${1}" -e "select; set-meta ${2}; save"
 }
 
+# ### <span id="writefile">writefile()</span> ([top](#FUNCTIONS))
+# Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
+# Velmi důležitá funkce!!!
+writefile() {
+    if [ -t 0 ]; then
+        log info "writefile() Empty stdin"
+        return 1
+    else
+        tee $1 >> /dev/null
+        return 0
+    fi
+}
+
 # ### <span id="encode">encode()</span> ([top](#FUNCTIONS))
 # Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
 # Velmi důležitá funkce!!!
@@ -1573,35 +1625,16 @@ EOF
 # $1 - DjVu file
 # $2 - outline file nebo stream
 outlinetodjvu() {
-    local SOURCE=$(${REALPATH} -m -P "${1}")
-    local OUTLINE=$(${REALPATH} -m -P "${2}")
-    local FILE="${SOURCE##*/}"
+    log goto "outlinetodjvu() From $2 into $1"
     local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
-    if [ -z "${3}" ] ; then
-        if [ -f "${OUTLINE}" ] ; then
-			# zdrojem je outline soubor
-			outlinetodsed "${OUTLINE}" | encode > "${TEMPFILE}"
-			pushd ${TEMPDIR}
-				${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE##*/}; save"
-			popd
-		else
-			echo "outlinetodjvu: import only from outline file" >> /dev/stderr
-		fi
-	else
-		local BOOKMARKS=$(${REALPATH} -m -P ${3})
-		if [ -f "${BOOKMARKS}" ] ; then
-			echo "File for bookmarks in dsed format exist. Overwrite it?"
-			potvrdit
-			printf "set-outline\n" > "${BOOKMARKS}"
-			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}"
-			printf "\n\n.\n" >> "${BOOKMARKS}"
-		elif [ -d "${BOOKMARKS}" ] ; then
-			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}/${FILE//.djvu/.bookmarks}"
-		else
-			outlinetodsed "${OUTLINE}" | encode >> ${3}
-		fi
-	fi
-	return 0
+    if [ -f "${2}" ] ; then
+        outlinetodsed "${2}" | encode > "${TEMPFILE}"
+        ${DJVUSED}  "${1}" -e "set-outline ${TEMPFILE}; save"
+    else
+        log err "outlinetodjvu() Not any outline file"
+        return 1
+    fi
+    return $?
 }
 
 outlinetodjvu1() {
@@ -6191,7 +6224,7 @@ do
                         help keywords
                         return 0
                     ;;
-                    *) echo "Neimplementovaný parametr" >> /dev/stderr
+                    *) echo "Neimplementovaný parametr ${1}" >> /dev/stderr
                         return 1
                     ;;
                 esac
@@ -6243,7 +6276,8 @@ case ${FILETYPE} in
                 done
                 return 0
             ;;
-            insert) #/ Vkládám soubor předaný jako parametr 
+            insert) # OBSOLETE - nahrazuje akce import
+                #/ Vkládám soubor předaný jako parametr 
                 # ToDo - zpracovat ${CHARSTRING}
                 exit 1
                         if [ -f "${3}" ] ; then
@@ -6324,30 +6358,69 @@ case ${FILETYPE} in
                 return 0
             ;;
             import) #/ Import předhozeného souboru
-                case "${CHARSTRING%% *}" in
-                    ant) #/ Importuje obsah předhozeného .ant souboru
-                        local ANT=${CHARSTRING#* }
-                        if [ -f "${ANT%% *}" ] ; then
-                            echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
-                            #anttodsed "${CHARSTRING#* }"
-                            important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
+                case "${CHARSTRING}" in
+                    ant*) #/ Importuji obsah .ant souboru
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                        local ANTFILE=${CHARSTRING#ant}
+                        #/ ořezat mezery před a za
+                        if [ -f "${ANTFILE}" ] ; then
+                            cat "${ANTFILE}" > "${TEMPFILE}"
                         else
-                            echo "ERROR: ${ANT%% *} isn't .ant file!"
-                            return 1
+                            writefile "${TEMPFILE}"
+                            if [ $? -eq 1 ] ; then
+                                $0 "${FILE}" export ant > "${TEMPFILE}"
+                            fi
                         fi
+                        echo "Obsah byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
+                        case ${ACTION} in
+                            edit) echo "Edituji soubor ${TEMPFILE}" >> /dev/stderr
+                            ;;
+                        esac
+                        echo "Importuji soubor ${TEMPFILE}" >> /dev/stderr
+                        important "${FILE}" "${TEMPFILE}"
+#                        outlinetodjvu "${FILE}" "${TEMPFILE}"
+
+#                        local ANT=${CHARSTRING#* }
+#                        if [ -f "${ANT%% *}" ] ; then
+#                            echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
+#                            #anttodsed "${CHARSTRING#* }"
+#                            important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
+#                        else
+#                            echo "ERROR: ${ANT%% *} isn't .ant file!"
+#                            return 1
+#                        fi
                         return 0
                     ;;
-                    meta) echo "import from meta file to ${FILE}"
+                    meta*) echo "import from meta file to ${FILE}"
                         echo nil
                         ;;
-                    outline) #/ Importují se záložky
-                        if [ -f "${CHARSTRING#* }" ] ; then
-                            outlinetodjvu "${FILE}" "${CHARSTRING#* }"
+                    outline*) echo "Importuji záložky"
+                        echo "Přijato k importu ${CHARSTRING}"
+                        #/ Může být předaný i soubor
+                        #/ Není-li předaný soubor, zkus načíst stdin
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+                        local OUTLINEFILE=${CHARSTRING#outline}
+                        #/ ořezat mezery před a za
+                        if [ -f "${OUTLINEFILE}" ] ; then
+                            cat "${OUTLINEFILE}" > "${TEMPFILE}"
                         else
-                            echo "Import bokmarks is only from outline file"
+                            writefile "${TEMPFILE}"
+                            if [ $? -eq 1 ] ; then
+                                $0 "${FILE}" export outline > "${TEMPFILE}"
+                            fi
                         fi
+                        echo "Obsah byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
+                        case ${ACTION} in
+                            edit) echo "Edituji soubor ${TEMPFILE}" >> /dev/stderr
+                            ;;
+                        esac
+                        echo "Importuji soubor ${TEMPFILE}" >> /dev/stderr
+                        outlinetodjvu "${FILE}" "${TEMPFILE}"
+                        exit 33
                     ;;
-                    *) djvuimport "${FILE}" "${CHARSTRING}"
+                    page*) echo "Importuji do svazku DjVu stránku"
+                    ;;
+                    *) #djvuimport "${FILE}" "${CHARSTRING}"
                     ;;
                 esac
                 return 33
