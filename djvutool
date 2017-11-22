@@ -274,6 +274,9 @@ PAMTOPNM=$(which pamtopnm)
 #/ Vysekne oblast z obrázku dle souřadnic
 PAMCUT=$(which pamcut)
 [ ! -x "${PAMCUT}" ] && exit 23
+#/ Odseparuje masku
+PAMARITH=$(which pamarith)
+[ ! -x "${PAMARITH}" ] && exit 23
 #/ generátor prázdných ploch pro masku
 PBMMAKE=$(which pbmmake)
 [ ! -x "${PBMMAKE}" ] && exit 23
@@ -693,7 +696,9 @@ function formatdsed {
 	done  | sed 's/) )/)/ ; /^$/d '
 }
 
-function printant {
+# ### <span id="printant">printant()</span> ([top](#FUNCTIONS))
+# Nahrazeno přímo ve funkci fromdjvu
+function printant1 {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	TEMPFILE=$(tempfile -d ${TEMPDIR} -s .txt)
@@ -718,7 +723,7 @@ function printant {
 			# zkontrolovat jestli range není seznam stránek
 			# tj. obsahuje písmena
 			for i in ${RANGE//,/ } ; do
-				local PAGE=$(identifyname ${SOURCE} ${i})
+				local PAGE=$(identifypage name "${SOURCE}" ${i})
 				if  [ ! -z "${PAGE}" ] ; then
 					printf "# '%s'\n" "${PAGE#*:}"
 					${DJVUSED} ${SOURCE} -e "select '${PAGE#*:}'; print-ant" 2>/dev/null | formatdsed
@@ -739,7 +744,7 @@ function printant {
 		fi
 	else
 		# Single page
-		local PAGE=$(identifyname 1)
+		local PAGE=$(identifypage name "${SOURCE}" 1)
 		printf "# '%s'\n" "${PAGE}"
 		${DJVUSED} ${SOURCE} -e "select 1; print-ant" | formatdsed
 	fi
@@ -763,7 +768,7 @@ printmeta() {
 				echo -e "\n."
 			fi
 			for i in $(seq $(lastpage ${SOURCE})) ; do
-				local PAGENAME=$(identifyname "${SOURCE}" "${i}")
+				local PAGENAME=$(identifypage name "${SOURCE}" "${i}")
 				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
 				if [ -n "${META}" ] ; then
 					echo "#$i '${PAGENAME}'"
@@ -781,9 +786,9 @@ printmeta() {
 			fi
 		;;
 		+([[:digit:]])|*.djvu) printf "printmeta: Meta attributes for page %s from %s\n" "${2}" "${FILE}" >> ${LOG}
-			local PAGENAME=$(identifyname "${SOURCE}" "${2}")
+			local PAGENAME=$(identifypage name "${SOURCE}" "${2}")
 			if [ ! -z "${PAGENAME}" ] ; then
-				local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
+				local IDPAGE=$(identifypage order "${SOURCE}" "${PAGENAME}")
 				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
 				if [ ! -z "${META}" ] ; then
 					echo "#${IDPAGE} '${PAGENAME}'"
@@ -797,7 +802,20 @@ printmeta() {
 	esac
 }
 
-function printoutline {
+# ### <span id="printoutline">printoutline()</span> ([top](#FUNCTIONS))
+# V původní podobě byl výsledek zapsán do souboru s příponou .outline
+# V tomto příoa
+printoutline() {
+    log goto "printoutline() $1 –> $2"
+	# $1 - DjVu file
+	# $2 - cíl
+    bookmarktooutline "${1}"
+    return 0
+    # bookmarktooutline "${1}" | awk '{print i++ "\t|" $0}'
+}
+
+function printoutline1 {
+    log goto "fromcontainer() ${PGMTOPBM} ${FILETYPE} $1 –> $2"
 	# $1 - DjVu file
 	# $2 - cíl
 	local SOURCE=$(${REALPATH} -m -P "${1}")
@@ -1032,7 +1050,7 @@ function djvuexport {
 			return 0
 		else
 			log info "djvuexport() Export page identificated by ${PAGENAME} from ${FILE} into aktual directory - do set TARGETDIR"
-			local IDPAGE=$(identifypage "${SOURCE}" "${PAGENAME}")
+			local IDPAGE=$(identifypage order "${SOURCE}" "${PAGENAME}")
 			if [ -z "${IDPAGE}" ] ; then
 				case "${PAGENAME%%\ *}" in
 					meta) printmeta "${SOURCE}" "${PAGENAME#* }"
@@ -1042,7 +1060,7 @@ function djvuexport {
 					;;
 				esac
 			else
-				local NAMEPAGE=$(identifyname "${SOURCE}" "${PAGENAME}")
+				local NAMEPAGE=$(identifypage name "${SOURCE}" "${PAGENAME}")
 				local TARGETDIR=$(targetdir $(pwd))
 			fi
 		fi
@@ -1073,7 +1091,7 @@ function djvuexport {
 					return 0
 				;;
 				*) log info "djvuexport() Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
-					local NAMEPAGE=$(identifyname "${SOURCE}" "${IDPAGE}")
+					local NAMEPAGE=$(identifypage name "${SOURCE}" "${IDPAGE}")
 					if [ -z "${NAMEPAGE}" ] ; then
 						# djvutool bundle.djvu export
 						if [ -e "${IDPAGE}" ] ; then
@@ -1094,7 +1112,7 @@ function djvuexport {
 			local NAMEPAGE=${PAGENAME##+([[:blank:]])}
 			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
 			log info "djvuexport() Export page identificated by name -${NAMEPAGE}- from ${FILE} into -${TARGETDIR}-"
-			local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+			local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
 			[ -z "${IDPAGE}" ] && echo "export: In ${FILE} is not any page with name ${NAMEPAGE}" >> /dev/stderr &&  exit 1
 			local TARGETDIR=$(targetdir "${TARGETDIR}")
 		fi
@@ -1137,7 +1155,7 @@ function exportdjvuall {
 	local PAGES=$(lastpage "${SOURCE}")
 	local NUMPAGE=1
 	while [ ${PAGES} -gt "0" ] ; do
-		local NAMEPAGE=$(identifyname "${SOURCE}" "${NUMPAGE}")
+		local NAMEPAGE=$(identifypage name "${SOURCE}" "${NUMPAGE}")
 		log info "exportdjvuall() Exportuji stránku ${NAMEPAGE}"
 
 		[[ $EXPORTDJVU =~ $EXPORTVALUE ]] && exportdjvupage "${1}" "${NAMEPAGE}" "${2}"
@@ -1221,6 +1239,8 @@ function exportxmlbundle {
 	popd
 }
 
+#/ OBSOLETE
+#/ nahrazeno funkcí fromdjvu
 function exportpage2img {
 	# $1 - DjVu file - full path
 	# $2 - identificator - page name
@@ -1237,7 +1257,7 @@ function exportpage2img {
 	echo "$EXPORT" >> /dev/stderr
 	echo "$PNMTOPNG" >> /dev/stderr
 	if [ "${IMG}" != "no" ] ; then
-		local PAGE=$(identifypage "${1}" "${2}")
+		local PAGE=$(identifypage order "${1}" "${2}")
 		local TARGET="${2/.djvu/.png}"
 		if [ -f "${TARGET}" ] ; then
 			if [ "${FORCE}" == "yes" ] ; then
@@ -1272,7 +1292,7 @@ function exportxmlpage {
 		;;
 	esac
 	if [ "${XML}" != "no" ] ; then
-		local PAGE=$(identifypage "${1}" "${2}")
+		local PAGE=$(identifypage order "${1}" "${2}")
 		local TARGET="${2/.djvu/.xml}"
 		if [ -f "${TARGET}" ] ; then
 			if [ "${FORCE}" == "yes" ] ; then
@@ -1353,11 +1373,20 @@ encodefile() {
 # Jako parametr __$3__ se předává buď algoritmus s parametry, nebo hodnota
 # `none` s nastavením prahové hodnoty
 #
+# shading-subtraction - k od 3 (málo šumu) do 12 (hodně šumu),
+# šum lze odstranit nastavením prahu (hodnota float)
+# Výsledek je přesně opačný než při nastavení prahu - čím vyšší hodnota,
+# tím míň toho proleze
 separatemask() {
     log goto "separatemask() Use $3 for $1 –> $2"
     case "${3%:*}" in
-        none) log info "${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}"
-            ${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}
+        none) if [ "${3#*:}" == "none" ] ; then
+                log info "${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}"
+                ${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.5 | ${PNMTOPLAINPNM} > ${2}
+            else
+                log info "${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.${3#*:} | ${PNMTOPLAINPNM} > ${2}"
+                ${PAMTOPNM} ${1} | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.${3#*:} | ${PNMTOPLAINPNM} > ${2}
+            fi
             while [ ! -f "${2}" ] ; do
                 sleep 0.1
             done
@@ -1366,10 +1395,10 @@ separatemask() {
                 local PARAMS=$(grep -v '^#' "${HOME}/.config/${NAME}/${3}.conf" | awk '{print "--param", $1}' | tr '\n' ' ')
             fi
             if [[ "${3}" =~ ":" ]] ; then
-                localhost TEMPORAR="${3#*:}"
-                localhost PARAMS=$(printf "xxx %s" ${TEMPORAR//,/ })
+                local TEMPORAR="${3#*:}"
+                local PARAMS=$(printf "xxx %s" ${TEMPORAR//,/ })
             fi
-            ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3%:*}" ${PARAMS//xxx/-x} "${1}"
+            ${DIDJVU} separate -o "${2}.png" ${LEVEL} -m "${3%:*}" ${PARAMS//xxx/ -x} "${1}"
             while [ ! -f "${2}.png" ] ; do
                 sleep 0.1
             done
@@ -1538,17 +1567,50 @@ EOF
 	${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE/.outline/.temp}; save"
 }
 
-function outlinetodjvu {
-	# Funkce převádí obsah .outline souboru na formát .dsed
-	# a výsledek zapisuje do djvu souboru
-	# $1 - DjVu file
-	# $2 - outline file nebo stream
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local OUTLINE=$(${REALPATH} -m -P "${2}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
-	if [ -z "${3}" ] ; then
-		if [ -f "${OUTLINE}" ] ; then
+# ### <span id="outlinetodjvu">outlinetodjvu()</span> ([top](#FUNCTIONS))
+# Funkce převádí obsah .outline souboru na formát .dsed
+# a výsledek zapisuje do djvu souboru
+# $1 - DjVu file
+# $2 - outline file nebo stream
+outlinetodjvu() {
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    local OUTLINE=$(${REALPATH} -m -P "${2}")
+    local FILE="${SOURCE##*/}"
+    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
+    if [ -z "${3}" ] ; then
+        if [ -f "${OUTLINE}" ] ; then
+			# zdrojem je outline soubor
+			outlinetodsed "${OUTLINE}" | encode > "${TEMPFILE}"
+			pushd ${TEMPDIR}
+				${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE##*/}; save"
+			popd
+		else
+			echo "outlinetodjvu: import only from outline file" >> /dev/stderr
+		fi
+	else
+		local BOOKMARKS=$(${REALPATH} -m -P ${3})
+		if [ -f "${BOOKMARKS}" ] ; then
+			echo "File for bookmarks in dsed format exist. Overwrite it?"
+			potvrdit
+			printf "set-outline\n" > "${BOOKMARKS}"
+			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}"
+			printf "\n\n.\n" >> "${BOOKMARKS}"
+		elif [ -d "${BOOKMARKS}" ] ; then
+			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}/${FILE//.djvu/.bookmarks}"
+		else
+			outlinetodsed "${OUTLINE}" | encode >> ${3}
+		fi
+	fi
+	return 0
+}
+
+outlinetodjvu1() {
+    local SOURCE=$(${REALPATH} -m -P "${1}")
+    local OUTLINE=$(${REALPATH} -m -P "${2}")
+    local FILE="${SOURCE##*/}"
+    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
+    if [ -z "${3}" ] ; then
+        if [ -f "${OUTLINE}" ] ; then
 			# zdrojem je outline soubor
 			outlinetodsed "${OUTLINE}" | encode > "${TEMPFILE}"
 			pushd ${TEMPDIR}
@@ -1660,7 +1722,7 @@ function importmeta {
 		echo "$line" >> /dev/stderr
 		local NAMEPAGE=( $line )
 		case "${#NAMEPAGE[@]}" in
-			2) local PAGENAME=$(identifyname "${SOURCE}" "${NAMEPAGE[1]//\'/}")
+			2) local PAGENAME=$(identifypage name "${SOURCE}" "${NAMEPAGE[1]//\'/}")
 				if [ -z "${PAGENAME}" ] ; then
 					echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[1]} not valid" >> /dev/stderr
 				else
@@ -1672,7 +1734,7 @@ function importmeta {
 					awk "/^#$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
 					${DJVUSED} "${1}" -e "select ; set-meta ${TEMPFILE}" -s
 				else
-					local PAGENAME=$(identifyname "${SOURCE}" "${NAMEPAGE[0]:1}")
+					local PAGENAME=$(identifypage name "${SOURCE}" "${NAMEPAGE[0]:1}")
 					if [ -z "${PAGENAME}" ] ; then
 						echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[0]:1} not valid" >> /dev/stderr
 					else
@@ -1749,6 +1811,7 @@ function exportmetabundle {
 	popd
 }
 
+# OBSOLETE
 # TODO - meta - Nepoužitá funkce
 function exportmetapage {
 	# $1 - DjVu file - full path
@@ -1884,24 +1947,17 @@ function targetdir {
 }
 
 # ### <span id="identifybundle">identifybundle()</span> ([top](#FUNCTIONS))
-# Function testing DjVu file if is (0) or not (1) bundle
-# $1 - DjVu file
+# Function for test type file. For DjVu bundle (0), single (1), or another (1)
+# $1 - file path
 identifybundle() {
-    log goto "identifybundle() –> $1"
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	if [ -n "${SOURCE}" ] ; then
-        if [ $(testfile "${SOURCE}") == "djvu" ] ; then
-            ${DJVM} -l "${SOURCE}" &>/dev/null
-            [ $? -eq 1 ] && return 2
-		else
-			log err "identifybundle() Is NOT DjVu file –> ${1}"
-			return 1
-		fi
-	else
-		log err "identifybundle() Invalid path –> ${1}"
-		return 1
-	fi
+    log goto "identifybundle() $1"
+    if [ $(testfile "${1}") == "djvu" ] ; then
+        ${DJVM} -l "${1}" &>/dev/null
+        [ $? -eq 1 ] && return 2
+    else
+        log err "identifybundle() ${1} –> NOT DjVu file"
+        return 1
+    fi
     return 0
 }
 
@@ -2025,11 +2081,31 @@ isformat() {
     log goto "isformat() string –> $1"
     local PARAMS=($1)
     case "${PARAMS[0]}" in
+        all)  #/ Volba pro DjVu
+            #/ Vyexportuje všechno
+            ;;
+        ant) #/ Volba pro DjVu
+            #/ Poznámky
+            ;;
+        outline) #/ Volba pro DjVu
+            #/ Obsah
+            ;;
+        bookmark) #/ Volba pro DjVu
+            #/ Záložky
+            ;;
+        dsed) #/ Volba pro DjVu
+            #/ Export textové vrstvy v dsed formátu
+            ;;
         djvu) #/ Bitmapový soubor bude konvertován do djvu
+            #/ U DjVu souboru budou vyexportované stránky složené opět
+            #/ do DjVu souboru
             ;;
-        txt|text) #/ výstup se prožene přes OCR
+        txt|text) #/ V případě DjVu či PDF souborů bude exportován text
+            #/ V ostatních případech se stránka prožene přes OCR
             ;;
-        image*) #/ akceptováno pouze u PDF
+        image*) #/ akceptováno u PDF a DjVu
+            #/ Výsledkem exporu bude obrázek stránky (u DjVu) nebo extrahované
+            #/ obrázky z PDF
             ;;
         orig*) #/ původní formát
             ;;
@@ -2037,9 +2113,15 @@ isformat() {
             ;;
         pnm|pam)
             ;;
-        mask|back)
+        mask|black|back|fore|full) #/ Typ exportované obrazové vrstvy
             ;;
         xcf|gimp)
+            ;;
+        xml-*) #/ Volba pro DjVu
+            #/ export XML vrstvy
+            #/ xml-ant
+            #/ xml-all
+            #/ xml-txt
             ;;
         *) return 1
             ;;
@@ -2097,6 +2179,10 @@ parsecut() {
 # bez specifikace typu rámce se předpokládá že se má "zamaskovat" obrázek
 #
 # Pro zjištění souřadnic lze použít kupř. geeqie Zobrazit –> Zobrazit informace o pixelech
+#
+# Pro nastavení oblastí lze použít i nástroj djvusmooth, ale souřadnice se musí přepočítat
+# rect 225 0 804 61
+#     LEFT,BOTTOM, LEFT+WIDTH,HEIGHT
 imgcut() {
     log goto "imgcut() $1 –> $2"
     local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
@@ -2218,6 +2304,232 @@ isscale() {
     fi
 }
 
+# ### <span id="fromdjvu">fromdjvu()</span> ([top](#FUNCTIONS))
+# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
+# __$2__ obsahuje parametry
+#
+# Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
+# Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
+fromdjvu() {
+    log goto "fromdjvu() ${FILETYPE} $1 –> $2"
+    local INTO=$(isformat "${2}")
+    if [ -n "${INTO}" ] ; then
+        local TEMPORAR="${2#*${INTO}}"
+    else
+        echo "Cílový formát musí být vždy uveden!" >> /dev/stderr
+        return 1
+    fi
+
+    local RANGE=$(isrange "${TEMPORAR}")
+    if [ -n "${RANGE}" ] ; then
+        local TEMPORAR="${TEMPORAR#*${RANGE}}"
+    fi
+
+    case "${TEMPORAR:$((${#TEMPORAR}-1)):1}" in
+        /) TARGETDIR=$(${REALPATH} -m -P "${TEMPORAR## }")
+            log info "targets() Export pages with a original names into –> ${TARGETDIR}"
+            [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+        ;;
+        *) if [[ "${TEMPORAR}" =~ "/" ]] ; then
+                #/ obsahuje cestu
+                local TEMPORARY=$(${REALPATH} -m -P "${TEMPORAR## }")
+                TARGETDIR="${TEMPORARY%/*}"
+                TARGETSAMPLE="${TEMPORARY##*/}"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} –> ${TARGETDIR}"
+                [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
+            else
+                #/ jde o vzorek
+                TARGETDIR="$(pwd)"
+                TARGETSAMPLE="${TEMPORAR## }"
+                log info "targets() Export pages a named by sample ${TARGETSAMPLE} into actual directory"
+            fi
+        ;;
+    esac
+    echo '''
+    echo "RANGE ${RANGE}"
+    echo "INTO ${INTO}"
+    echo "TARGETDIR ${TARGETDIR}"
+    echo "TARGETSAMPLE ${TARGETSAMPLE}"
+    echo "TEMPORAR ${TEMPORAR}"
+    echo "Můžeme přikročit k akci"
+    ''' >> /dev/null
+    case "${INTO}" in
+        ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
+            #anttodsed "${CHARSTRING#* }"
+            if [ -n "${RANGE}" ] ; then
+                # Vybraný rozsah
+                local PAGES=($(range "${RANGE}"))
+                local LISTPAGES=($($0 "${1}" info list))
+                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
+                for i in ${PAGES[@]} ; do
+                    case "$i" in
+                        0) if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+                            printf "# 'shared_anno.iff'\n"
+                            ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                            fi
+                        ;;
+                        *) local PAGE="${LISTPAGES[$((i-1))]}"
+                            printf "# '%s'\n" "${PAGE##*:}"
+                            ${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed
+                        ;;
+                    esac
+                done
+            else
+                if identifybundle "${1}" ; then
+                    # Bundle file
+                    if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+                        printf "# 'shared_anno.iff'\n"
+                        ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                    fi
+                    local LISTPAGES=($($0 "${1}" info list))
+                    for i in "${LISTPAGES[@]}" ; do
+                        printf "# '%s'\n" "${i##*:}"
+                        ${DJVUSED} "${1}" -e "select '${i##*:}'; print-ant" | formatdsed
+                    done
+                else
+                    # Single page file
+                    local PAGE=$(identifypage name "${1}" 1)
+                    printf "# '%s'\n" "${PAGE}"
+                    ${DJVUSED} "${1}" -e "select 1; print-ant" | formatdsed
+                fi
+            fi
+            ;;
+        outline) # Export obsahu ve formátu .outline
+            printoutline "${1}"
+            ;;
+        bookmark) # Export obsahu ve formátu .bookmarks
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+            printoutline "${1}" > ${TEMPFILE}
+            outlinetodsed ${TEMPFILE} | encode
+            printf "\n"
+            ;;
+        dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
+            echo nil
+            ;;
+        xml-*) #exportuje obsah textové vrstvy ve formátu .xml
+            case "${INTO}" in
+                xml-all) local EXPORT="--with-text --with-anno"
+                ;;
+                xml-txt) local EXPORT="--with-text --without-anno"
+                ;;
+                xml-ant) local EXPORT="--without-text --with-anno"
+                ;;
+                *) return 1
+                ;;
+            esac
+            if [ -n "${RANGE}" ] ; then
+                # Vybraný rozsah
+                local PAGES=($(range "${RANGE}"))
+                local LISTPAGES=($($0 "${1}" info list))
+                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
+                for i in ${PAGES[@]} ; do
+                    case "$i" in
+                        0) if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+                            #printf "# 'shared_anno.iff'\n"
+                            #${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                            echo nil
+                            fi
+                        ;;
+                        *) local PAGE="${LISTPAGES[$((i-1))]}"
+                            #printf "# '%s'\n" "${PAGE##*:}"
+                            #${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed
+                            echo nil
+                        ;;
+                    esac
+                done
+            else
+                if identifybundle "${1}" ; then
+                    # Bundle file
+                    if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
+                        #printf "# 'shared_anno.iff'\n"
+                        #${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                        echo nil
+                    fi
+                    local LISTPAGES=($($0 "${1}" info list))
+                    for i in "${LISTPAGES[@]}" ; do
+                        #printf "# '%s'\n" "${i##*:}"
+                        #${DJVUSED} "${1}" -e "select '${i##*:}'; print-ant" | formatdsed
+                        echo nil
+                    done
+                else
+                    # Single page file
+                    local PAGE=$(identifypage name "${1}" 1)
+                    local TARGET="${PAGE/.djvu/.xml}"
+                    if [ -f "${TARGET}" ] ; then
+                        if [ "${FORCE}" == "yes" ] ; then
+                            ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
+                        elif [ "${FORCE}" == "skip" ] ; then
+                            log warn "exportxmlpage() Soubor ${TARGET} již v adresáři ${3} existuje."
+                        else
+                            echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
+                            potvrdit && ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
+                        fi
+                    else
+                        ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
+                    fi
+                fi
+            fi
+            ;;
+        djvu) # exportuje celé stránky ve formátu DjVu
+            echo nil
+            ;;
+        mask|black|back|fore|full)
+            # exportuje náhledy stránek ve formátu PNG
+            # Nahrazuje funkci exportpage2img
+            case "${INTO}" in
+                mask) local EXPORT="-mode=mask"
+                ;;
+                back) local EXPORT="-mode=background"
+                ;;
+                black) local EXPORT="-mode=black"
+                ;;
+                fore) local EXPORT="-mode=foreground"
+                ;;
+                full) local EXPORT="-mode=color"
+                ;;
+            esac
+            if [ -n "${RANGE}" ] ; then
+                # Vybraný rozsah
+                local PAGES=($(range "${RANGE}"))
+                local LISTPAGES=($($0 "${1}" info list))
+                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
+                for i in ${PAGES[@]} ; do
+                    case "$i" in
+                        0)
+                        ;;
+                        *) local PAGE="${LISTPAGES[$((i-1))]}"
+                            local TEMPORAR="${PAGE##*:}"
+                            local TARGET="${TEMPORAR/.djvu/.png}"
+                            ${DDJVU} -format=pnm "${EXPORT}" -page="$i" "${1}" | ${PNMTOPNG} > "${TARGET}"
+                            echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                        ;;
+                    esac
+                done
+            else
+                if identifybundle "${1}" ; then
+                    local LISTPAGES=($($0 "${1}" info list))
+                    for i in "${LISTPAGES[@]}" ; do
+                        local PAGE="${i%%\]*}"
+                        local TEMPORAR="${i##*:}"
+                        local TARGET="${TEMPORAR/.djvu/.png}"
+                        ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE#\[P}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+                        echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                    done
+                else
+                    # Single page file
+                    local PAGE=$(identifypage name "${1}" 1)
+                    local TARGET="${PAGE/.djvu/.png}"
+                    ${DDJVU} -format=pnm "${EXPORT}" -page="1" "${1}" | ${PNMTOPNG} > "${TARGET}"
+                    echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                fi
+            fi
+            ;;
+        *) echo "Nedělám nic ${INTO}" >> /dev/stderr
+            ;;
+    esac
+}
+
 # ### <span id="fromcontainer">fromcontainer()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
@@ -2226,21 +2538,26 @@ isscale() {
 # Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
 # Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
 fromcontainer() {
-    log goto "fromcontainer() ${PGMTOPBM} ${FILETYPE} $1 –> $2"
-    local RANGE=$(isrange "${2}")
-    if [ -n "${RANGE}" ] ; then
-        local TEMPORAR="${2#*${RANGE}}"
-    else
-        local TEMPORAR="${2}"
-    fi
-    local INTO=$(isformat "${TEMPORAR}")
+    log goto "fromcontainer() $1 –> $2"
+
+    local INTO=$(isformat "${2}")
     if [ -n "${INTO}" ] ; then
-        local TEMPORAR="${TEMPORAR#*${INTO}}"
+        local TEMPORAR="${2#*${INTO}}"
+    else
+        echo "Cílový formát musí být vždy uveden!" >> /dev/stderr
+        return 1
     fi
+
+    local RANGE=$(isrange "${TEMPORAR}")
+    if [ -n "${RANGE}" ] ; then
+        local TEMPORAR="${TEMPORAR#*${RANGE}}"
+    fi
+
     local CUT=$(iscut "${TEMPORAR}")
     if [ -n "${CUT}" ] ; then
         local TEMPORAR="${TEMPORAR#*${CUT}}"
     fi
+
     local SCALE=$(isscale "${TEMPORAR}")
     if [ -n "${SCALE}" ] ; then
         [ "${SCALE}" == "false" ] && return 1
@@ -2318,7 +2635,36 @@ fromcontainer() {
             #/ Nejdřív je třeba obrázek nakopírovat do pracovního prostoru
             cp "${FILE}" "${TEMPFILE}"
             #/ Pak je třeba vyseparovat výchozí masku
-            separatemask "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
+            if [ ${#ALG[@]} -gt 1 ] ; then
+                cp "${TEMPFILE}" "${TEMPFILE}.in"
+                COUNT=1
+                for i in ${ALG[@]} ; do
+                    separatemask "${TEMPFILE}.in" "${TEMPFILE}.${COUNT}" "$i"
+                    while [ ! -f "${TEMPFILE}.${COUNT}" ] ; do
+                        sleep 0.1
+                    done
+                    ${PAMARITH} -divide "${TEMPFILE}" "${TEMPFILE}.${COUNT}" > "${TEMPFILE}.in"
+                    COUNT=$((COUNT + 1))
+                done
+                echo "Je třeba složit ${COUNT} masek"
+                case ${COUNT} in
+                    1) #/ Pouze jedna maska 
+                        echo "Došlo k nějaké chybě při zpracování cyklu!" >> /dev/stderr
+                        return 1 
+                    ;;
+                    *) #/ Více masek
+                        #cp "${TEMPFILE}.1" "${TEMPFILE}.in"
+                        while [ ! ${COUNT} -eq 2 ] ; do
+                            log info "Slučuji ${TEMPFILE}.$((COUNT - 1)) ${TEMPFILE}.$((COUNT - 2))"
+                            ${PAMARITH} -and "${TEMPFILE}.$((COUNT - 1))" "${TEMPFILE}.$((COUNT - 2))" > "${TEMPFILE/.pam/.fore}"
+                            COUNT=$((COUNT - 1))
+                        done
+                    ;;
+                esac
+                log ok "Masky sloučeny"
+            else
+                separatemask "${TEMPFILE}" "${TEMPFILE/.pam/.fore}" "${ALG}"
+            fi
             if [ -n "${CUT}" ] ; then
                 #/ Na masku se aplikují vybrané rámečky
                 local BOX=( "${CUT//;/ }" )
@@ -2376,6 +2722,66 @@ fromcontainer() {
                 ;;
                 *) log info "Konverze do výchozího formátu ${FILETYPE} není nutná"
                     cp "${TEMPFILE}" "${TARGET%.}.pam"
+                ;;
+            esac
+        ;;
+        jpeg) log info "fromcontainer() Export from JPEG into ${INTO}"
+            #exit 33
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
+            if [ -n "${TARGETSAMPLE}" ] ; then
+                # jedu podle vzorku
+                local TARGET="${TARGETDIR}/${TARGETSAMPLE}.${INTO}"
+            else
+                local TARGET="${TARGETDIR}/${FILE##*/}.${INTO}"
+            fi
+            case "${INTO}" in
+                djvu) #/ V tomto bodě se v případě DjVu provede konverze
+                    encodefile ${TEMPFILE} "${TARGET}"
+                    # na anglicke texty dává lepší výsledky cuneiform
+                ;;
+                mask|pbm) #/ Výsledkem je soubor s cílovým názvem, ale příponou pbm
+                    $0 ${FILE} export 1 mask ${TEMPFILE}
+                    #if [ -f "${TEMPFILE/.pam/.text}" ] ; then
+                    #    cp "${TEMPFILE/.pam/.text}" "${TARGET/.mask/.pbm}"
+                    #else
+                    #    cp "${TEMPFILE/.pam/.fore}" "${TARGET/.mask/.pbm}"
+                    #fi
+                ;;
+                back) #/ Výsledkem je PNG soubor pozadí s cílovým názvem, a příponou back.png
+                    $0 ${FILE} export 1 back ${TEMPFILE}
+                ;;
+                pnm) echo "POZOR! Při konverzi do PNM formátu dojde ke ztrátě meta informací a tím i k anonymizaci obrázku" >> /dev/stderr
+                    ${JPEGTOPNM} -dct float -dumpexif -exif="${TEMPFILE/.pam/.exif}" -repair "${FILE}" > ${TEMPFILE}
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} > "${TARGET}"
+                    else
+                        cp ${TEMPFILE} "${TARGET}"
+                    fi
+                ;;
+                png) log info "export do PNG"
+                    if [ -n "${SCALE}" ] ; then
+                        $0 ${FILE} export 1 png ${TEMPFILE}
+                    else
+                        $0 ${FILE} export 1 png ${TEMPFILE}
+                    fi
+                ;;
+                jpg|jpeg) 
+                    if [ -n "${SCALE}" ] ; then
+                        $0 ${FILE} export 1 pnm ${TEMPFILE}
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PNMTOJPEG} > "${TARGET}"
+                    else
+                        log info "export do výchozího formátu ${FILETYPE} má smysl pouze při přeškálování"
+                    fi
+                ;;
+                jp2)
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOJPEG2K} > "${TARGET}"
+                    else
+                        ${PAMTOJPEG2K} ${TEMPFILE} > "${TARGET}"
+                    fi
+                ;;
+                *) log info "Konverze do výchozího formátu ${FILETYPE} má smysl pouze při škálování"
+                    return 1
                 ;;
             esac
         ;;
@@ -2762,9 +3168,9 @@ viewimg() {
                 local X=50
                 local Y=50
                 echo "${W}x${H}+${X}+${Y}" >> /dev/stderr
-                ${FEH} --scale-down --auto-zoom --geometry "${W}x${H}+${X}+${Y}" ${FILE}
+                ${FEH} --scale-down --auto-zoom --geometry "${W}x${H}+${X}+${Y}" "${FILE}"
             else
-                ${GEEQIE} ${FILE}
+                ${GEEQIE} "${FILE}"
             fi
         ;;
         plain|jpeg-2000) local TEMPFILE="${TEMPDIR}/${FILE##*/}"
@@ -2774,8 +3180,25 @@ viewimg() {
             exiftool ${TEMPFILE}
             $0 ${TEMPFILE} view
         ;;
-        gimp|pdf|xcf|eps|psd|tga|ps)
-            ${GIMP} "${FILE}"
+#        gimp|pdf|xcf|eps|psd|tga|ps)
+#            ${GIMP} "${FILE}"
+#        ;;
+        gimp) isrange ${CHARSTRING}
+            if [ $? -eq 0 ] ; then
+                local PAGES=($(range "${CHARSTRING}"))
+                local LISTPAGES=($(listxcf "${FILE}"))
+                #echo "${LISTPAGES[-1]}"
+                #echo "${PAGES[@]}"
+                for i in ${PAGES[0]} ; do
+                    local PAGE="${LISTPAGES[$((i-1))]}"
+                    $(itemxcf "${FILE}" "${PAGE}" > "${TEMPDIR}/${PAGE##*/}.pam")
+#                    exit 33
+                    $0 view "${TEMPDIR}/${PAGE##*/}.pam"
+                done
+            else
+                echo "V případě xcf souboru musí být uvedeno číslo stránky" >> /dev/stderr
+                return 1
+            fi
         ;;
         zip) isrange ${CHARSTRING}
             if [ $? -eq 0 ] ; then
@@ -2839,7 +3262,7 @@ infoimg() {
                     ;;
                 esac
             ;;
-            jpg) # JPEG je grafický formát se ztrátovou kompresí, který
+            jpg|jpeg) # JPEG je grafický formát se ztrátovou kompresí, který
                 # podporuje pouze jednu vrstvu
                 #
                 # .jpg, .jpeg, .jpe, .jif, .jfif, .jfi
@@ -3240,10 +3663,17 @@ itempng() {
 
 # ### <span id="listpng">listpng()</span> ([top](#FUNCTIONS))
 # Vrací pořadové číslo vrstvy, které odpovídá číslu stránky
-qqlistpng() {
+listpng() {
     local TEMPORARY="${1##*/}"
     mkdir ${TEMPORARY}
     # ${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
+}
+
+# ### <span id="listdjvu">listdjvu()</span> ([top](#FUNCTIONS))
+# Vrací seznam stránek v DjVu souboru
+listdjvu() {
+    #${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
+    echo nil
 }
 
 # ### <span id="listzip">listzip()</span> ([top](#FUNCTIONS))
@@ -3295,64 +3725,36 @@ pdb.gimp_quit(1)
 EOF
 }
 
-# ### <span id="identifyname">identifyname()</span> ([top](#FUNCTIONS))
-# Function return NAME of DjVu page in DjVu bundle
-# $1 DjVu Bundle
-# $2 Page identificator (order or name)
-identifyname() {
-    log goto "identifyname() ${1} –> ${2}"
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local IDENTIFICATOR="${2##+([[:blank:]])}"
-	identifybundle "${SOURCE}" 
-    case $? in
-        2) if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-                local SEARCH="\[P${IDENTIFICATOR}\]"
-            else
-                local SEARCH="\{${IDENTIFICATOR}\}"
-            fi
-            local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $2}')
-            if [ -n "${OUTPUT}" ] ; then
-                echo -n "${OUTPUT}"
-            fi
-            ;;
-        1) return 1 ;;
-        *) if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-                ${DJVM} -l "${SOURCE}" | grep PAGE\ #${IDENTIFICATOR}\  | awk '{print $4}'
-            else
-                ${DJVM} -l "${SOURCE}" | grep PAGE\ # | grep ${IDENTIFICATOR}$ | awk '{print $4}'
-            fi
-            ;;
+# ### <span id="identifypage">identifypage()</span> ([top](#FUNCTIONS))
+# Function return DjVu page actual ORDER in DjVu bundle
+# $1 type (order|name)
+# $2 DjVu file
+# $3 Page identificator (order or name)
+identifypage() {
+    log goto "identifypage() ${1} page ${3} from ${2}"
+    case "${3}" in
+        +([[:digit:]])) #/ Identifikace podle čísla stránky
+            local PAGE=$(${DJVUSED} "${2}" -e dump | grep "\[P${3}\]")
+        ;;
+        *) #/ Identifikace podle názvu stránky
+            local PAGE=$(${DJVUSED} "${2}" -e dump | grep "\{${3}\}")
+        ;;
+    esac
+    [ ! -n "${PAGE}" ] && \
+        log err "identifypage() Invalid identificator ${1} for ${2}" && \
+        return 1
+    case "${1}" in
+        name) local TEMPORAR="${PAGE##*\{}"
+            echo "${TEMPORAR%%\}*}"
+        ;;
+        order) local TEMPORAR="${PAGE##*\[P}"
+            echo "${TEMPORAR%%\]*}"
+        ;;
+        *) log err "identifypage() Invalid type –> ${1}"
+            return 1
+        ;;
     esac
     return 0
-}
-
-function identifypage {
-	# Function return DjVu page actual ORDER in DjVu bundle
-	# $1 DjVu Bundle
-	# $2 Page identificator (order or name)
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local IDENTIFICATOR="${2##+([[:blank:]])}"
-	if [ "${IDENTIFICATOR//+([[:digit:]])}" == "" ] ; then
-		log info "identifypage() Has DjVu file ${FILE} page on position ${IDENTIFICATOR}?"
-		local SEARCH="\[P${IDENTIFICATOR}\]"
-	else
-		log info "identifypage() Has DjVu file ${FILE} page with name ${IDENTIFICATOR}?"
-		local SEARCH="\{${IDENTIFICATOR}\}"
-	fi
-#	echo "${SEARCH}" >> /dev/stderr
-	local OUTPUT=$(${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | grep "${SEARCH}" | awk -F'[{}]' '{print $3}')
-#	echo "${OUTPUT}" >> /dev/stderr
-#	echo "${KEY}" >> /dev/stderr
-	if [ -z "${OUTPUT}" ] ; then
-		printf "identifypage: FAIL - for DjVu bundle %s identificator %s is NOT VALID.\n" "${FILE}" "${IDENTIFICATOR}" >> ${LOG}
-		return 0
-	else
-		local ORDER="${OUTPUT//+([\]P\[ ])/}"
-		log info "identifypage() OK order page is %s.\n" "${ORDER}"
-		echo -n "${ORDER}"
-	fi
 }
 
 # ### <span id="lastpage">lastpage()</span> ([top](#FUNCTIONS))
@@ -3379,7 +3781,7 @@ lastpage() {
 # Pokud se stránka ve svazku nevyskytuje, vrací __1__
 # Pokud není DjVu soubor typu bundle, vrací __2__
 deletepage() {
-    log goto "deletepage() From ${1} delete –> ${2}"
+    log goto "deletepage() From ${1} –> ${2}"
     [ -z ${2} ] && return 1
     local FILE="${1##*/}"
     identifybundle "${1}"
@@ -3390,7 +3792,7 @@ deletepage() {
         1)  log warn "deletepage() ${FILE} is not DjVu bundle"
             return 1
             ;;
-        *) local PAGE=$(identifypage "${1}" "${2}")
+        *) local PAGE=$(identifypage order "${1}" "${2}")
             if [ ! -z "${PAGE}" ] ; then
                 ${DJVM} -d "${1}" "${PAGE}"
             else
@@ -3499,7 +3901,7 @@ Každá jiná hodnota parametru je ignorována."""
 			fi
 		else
 #			echo "Je třeba provést identifikaci stránky ${IDPAGE}"
-			local NAMEPAGE=$(identifyname "${1}" "${IDPAGE}")
+			local NAMEPAGE=$(identifypage name "${1}" "${IDPAGE}")
 			if [ -z "${NAMEPAGE}" ] ; then
 				printf "Page %s is not valid for file %s" "${IDPAGE}" "${FILE}" >> /dev/stderr
 				exit 1
@@ -3542,7 +3944,7 @@ function djvumove {
 				log info "move() Zachycen soubor $SOUBOR - ${SOUBOR:$((${#SOUBOR} - 4)):4}"
 				if [ "${SOUBOR:$((${#SOUBOR} - 4)):4}" == "djvu" ] ; then
 #					echo "Před testem.. '${SOUBOR##+([[:blank:]])}'" >> /dev/stderr
-					local TESTORDER=$(identifypage "${SOURCE}" "${SOUBOR##+([[:blank:]])}")
+					local TESTORDER=$(identifypage order "${SOURCE}" "${SOUBOR##+([[:blank:]])}")
 #					echo "Po testu.." >> /dev/stderr
 					if [ -z "${TESTORDER}" ] ; then
 						if [ -f "${SOUBOR}" ] ; then
@@ -3562,14 +3964,14 @@ function djvumove {
 								local A="${TEST[0]}"
 								if [ "${A%%+([[:digit:]])}" == "" ] ; then
 									local BTEST="${SOUBOR##${A}+([[:blank:]])}"
-									local B=$(identifypage "${SOURCE}" "${BTEST}")
+									local B=$(identifypage order "${SOURCE}" "${BTEST}")
 									if [ -z "${B}" ] ; then
 										echo "move: FAIL - for DjVu file ${FILE} identificator target page ${BTEST} is not valid." >> /dev/stderr
 										exit 1
 									else
 										#FINITO### tady budu realizovat přesun...?
-										local ANAME=$(identifyname "${SOURCE}" "${A}")
-										local BNAME=$(identifyname "${SOURCE}" "${B}")
+										local ANAME=$(identifypage name "${SOURCE}" "${A}")
+										local BNAME=$(identifypage name "${SOURCE}" "${B}")
 										if [ "${ANAME}" == "${BNAME}" ] ; then
 											echo "move: FAIL - If you want move page on position ${A}, which is the same page as target. If you want moved page from position ${2} before actual position, use command without identification of target position." >> /dev/stderr
 											exit 1
@@ -3661,7 +4063,7 @@ function djvumove {
 								local TEST="${VSTUP##+([[:blank:]])}"
 								if [ "${TEST##+([[:digit:]])}" == "" ] ; then
 #									# Pořadové číslo - budu přesouvat..
-									local B=$(identifypage "${SOURCE}" "${TEST}")
+									local B=$(identifypage order "${SOURCE}" "${TEST}")
 									if [ -z "${B}" ] ; then
 										echo "move: ERROR - target position is not valid for file ${FILE}" >> /dev/stderr
 										exit 1
@@ -3718,7 +4120,7 @@ function djvumove {
 							fi
 						elif [ "${ANAME}" == "none" ] ; then
 #							# ANAME je none
-							local B=$(identifypage "${1}" "${SOUBOR}")
+							local B=$(identifypage order "${1}" "${SOUBOR}")
 							if [ -z "${B}" ] ; then
 								echo "move: ERROR - Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
 								exit 1
@@ -3735,12 +4137,12 @@ function djvumove {
 								echo "move: FAIL - If yu want move page ${ANAME} in ${FILE} about one position. You must for it use action ${MOVE} only with identificator of page to move." >> /dev/stderr
 								exit 1
 							else
-								local B=$(identifypage "${1}" "${SOUBOR}")
+								local B=$(identifypage order "${1}" "${SOUBOR}")
 								if [ -z "${B}" ] ; then
 									echo "move: FAIL - Chybné jméno stránky před kterou se má stránka přesunout" >> /dev/stderr
 									exit 1
 								else
-									local A=$(identifypage "${1}" "${ANAME}")
+									local A=$(identifypage order "${1}" "${ANAME}")
 									if [ -z "${A}" ] ; then
 										echo "move: file ${ANAME} je djvu soubor?" >> /dev/stderr
 #										exit 1
@@ -3845,7 +4247,7 @@ function djvumove {
 					exit 1
 				fi
 			else
-				local B=$(identifypage "${SOURCE}" "${TEST}")
+				local B=$(identifypage order "${SOURCE}" "${TEST}")
 				if [ -z "${B}" ] ; then
 					echo "move: identificator -${TEST} is not valid." >> /dev/stderr
 					exit 1
@@ -3871,13 +4273,13 @@ function djvumove {
 		if [ -z "${ANAME}" ] ; then
 			local TEST=( ${VSTUP} )
 			if [ "${#TEST}" -gt "0" ] ; then
-				local ANAME=$(identifyname "${SOURCE}" "${TEST[0]}")
+				local ANAME=$(identifypage name "${SOURCE}" "${TEST[0]}")
 				if [ -z "${ANAME}" ] ; then
 					echo "move: FAIL - for DjVu file ${FILE} identificator ${TEST[0]} is not valid." >> /dev/stderr
 					exit 1
 				else
 					if [ "${TEST[1]##+([[:blank:]])}" != "" ] ; then
-						local BNAME=$(identifyname "${SOURCE}" "${TEST[1]}")
+						local BNAME=$(identifypage name "${SOURCE}" "${TEST[1]}")
 						if [ -z "${BNAME}" ] ; then
 							echo "move: FAIL - for DjVu file ${FILE} identificator ${TEST[1]} is not validxxx." >> /dev/stderr
 							exit 1
@@ -3904,14 +4306,14 @@ function djvumove {
 		else
 			local TEST=( ${VSTUP} )
 			if [ "${#TEST}" -gt "0" ] ; then
-				local BNAME=$(identifyname "${SOURCE}" "${TEST[0]}")
+				local BNAME=$(identifypage name "${SOURCE}" "${TEST[0]}")
 				if [ -z "${BNAME}" ] ; then
 					echo "move: FAIL - identificator ${TEST[0]} is not valid for DjVu file ${FILE}" >> /dev/stderr
 					exit 1
 				else
 #					#FINITO## Zpracovávám přesun..
 					if [ "${ANAME}" == "${BNAME}" ] ; then
-						local A=$(identifypage "${SOURCE}" "${ANAME}")
+						local A=$(identifypage order "${SOURCE}" "${ANAME}")
 						if [ "${MOVE}" == "fore" ] ; then
 							if [ "$A" == "1" ] ; then
 								echo "move: INFO - page ${ANAME} is on first position in ${FILE}." >> /dev/stderr
@@ -3941,7 +4343,7 @@ function djvumove {
 					else
 #						echo "move: INFO - move page -${ANAME}- -${A}- ${MORE} page -${BNAME}- -${B}-" >> /dev/stderr
 #						#FINITO## Zpracovávám přesun..
-						local B=$(identifypage "${SOURCE}" "${BNAME}")
+						local B=$(identifypage order "${SOURCE}" "${BNAME}")
 						if [ "${ANAME}" == "${BNAME}" ] ; then
 							echo "move: FAIL - If you want move page on position ${A}, which is the same page as target. If you want moved page from position ${2} before actual position, use command without identification of target position." >> /dev/stderr
 							exit 1
@@ -4216,9 +4618,9 @@ EOF
 djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
-        ant*)
+        ant*) printant "${1}"
         ;;
-        list) identifybundle ${1}
+        list) identifybundle "${1}"
             case $? in
                 0) ${DJVM} -l "${1}" | grep PAGE\ # | cut -d'#' -f2 | while read line
                 do
@@ -4241,11 +4643,11 @@ djvuinfo() {
         ;;
         exif*) ${EXIFTOOL} "${1}"
         ;;
-        meta*) printmeta ${1} ${2#meta+([[:blank:]])}
+        meta*) printmeta "${1}" ${2#meta+([[:blank:]])}
         ;;
-        outline)
+        outline) printoutline "${1}"
         ;;
-        pages) identifybundle ${1}
+        pages) identifybundle "${1}"
             case $? in
                 0) ${DJVM} -l "${1}" | grep PAGE\ # | wc -l
                 ;;
@@ -4259,7 +4661,7 @@ djvuinfo() {
         ;;
         *)
             local INFO=($(cat "${1}"|infoitem))
-            identifybundle ${1}
+            identifybundle "${1}"
             case $? in
                 0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
                 ;;
@@ -4309,12 +4711,12 @@ djvuinfo1() {
 							return 0
 						else
 							printf "Meta atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
 							if [ -z "${NAMEPAGE}" ] ; then
 								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
 								exit 1
 							else
-								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
 								printf "Meta attributes from #%s page in DjVu bundle %s" "${IDPAGE}" "${FILE}" >> ${LOG}
 								printmeta "${SOURCE}" "${NAMEPAGE}" | grep -v '^[#.]\|^$'
 								return 0
@@ -4330,12 +4732,12 @@ djvuinfo1() {
 							return 0
 						else
 							printf "View %s item from list %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
 							if [ -z "${NAMEPAGE}" ] ; then
 								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
 								exit 1
 							else
-								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
 								printf " [P%d]:%s\n" "${IDPAGE}" "${NAMEPAGE}"
 								return 0
 							fi
@@ -4346,12 +4748,12 @@ djvuinfo1() {
 							return 0
 						else
 							printf "Exif atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifyname "${SOURCE}" "${2#* }")
+							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
 							if [ -z "${NAMEPAGE}" ] ; then
 								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
 								exit 1
 							else
-								local IDPAGE=$(identifypage "${SOURCE}" "${NAMEPAGE}")
+								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
 								PAGE="yes"
 								djvuexport "${1}" "${NAMEPAGE} ${TEMPDIR}"
 								local INFO="Page #${IDPAGE} from DjVu bundle"
@@ -4430,10 +4832,10 @@ Výchozí nastavení algoritmů lze upravit
         ;;
 		bitmap-export) echo """
 U bitmapových souborů, které mají podporu pro více stránek (či vrstev)
-lze využít export k jejich extrakci a případně i jejich transormaci na
-jiný rozměr či konverzi do jiného formátu, včetně DjVu. Viz příklad:
+lze využít export k jejich extrakci a případně i transformaci na jiný
+rozměr či konverzi do jiného formátu – včetně DjVu. Viz příklad:
 
-    ${APP} soubor.jpg export 1 jpg 30%
+    ${APP} soubor.jpg export jpg 1 30%
 
 Vygeneruje JPEG obrázek s názvem soubor_30%.jpg jehož obsahem bude původní
 obrázek ze souboru soubor.jpg, zmenšený na 30% původní velikosti.
@@ -4442,7 +4844,7 @@ U kontejnerů typu zip či tar, které mohou obsahovat obrázky v různých form
 lze provést export pouze s uvedením rozsahu. Cílové soubory se pak budou
 jmenovat stejně, jako ty v archívu:
 
-    ${APP} soubor.zip export 2-7
+    ${APP} soubor.zip export orig 2-7
 
 U bitmapových formátů s podporou více stránek, které mají v sobě uložen
 také název vrstvy či stránky, bude mít vyexportovaný soubor stejné jméno
@@ -4855,6 +5257,22 @@ Options:
 		keywords-export) echo """
   ACTION: [1mexport[0m
 
+  [1m${0##*/}[0m [volby] <DjVu svazek> export {FORMAT} [RANGE] [TARGET]
+
+FORMAT
+      ant - poznámky
+      xml - na výstup bude vypsán XML obsah vybraného rozsahu stránek
+     dsed - na výstup bude vypsán obsah vybraného rozsahu stránek v dsed formátu
+  outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
+     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+
+RANGE
+      num - pořadové číslo stránky v DjVu svazku
+     name - jméno stránky v DjVu svazku
+TARGET
+      dir - adresář do kterého má být výstup uložen
+      all - předmětem exportu bude obsah celého DjVu svazku
+
   O tom co bude předmětem exportu rozhoduje typ vstupního souboru, a další 
   volby.
 
@@ -4870,15 +5288,6 @@ Options:
   Export textové vrstvy zajistí volby [3m-x[23m a [3m-d[23m, náhled obrazové vrstvy
   se generuje při volbě [3m-i[23m, a celá stránka v DjVu formátu se exportuje
   při volbě [3m-p[23m.
-
-  [1m${0##*/}[0m [volby] <svazek> export {<num>|<name>|all|outline|meta [<num>|<name>|all]}  [<dir>]
-
-      num - pořadové číslo stránky v DjVu svazku
-     name - jméno stránky v DjVu svazku
-      dir - adresář do kterého má být výstup uložen
-      all - předmětem exportu bude obsah celého DjVu svazku
-  outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
-     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
 
 [4mPoznámky:[24m
   * Pro zpracování single-page DjVu stránek je parametr [3mall[23m doporučený
@@ -5837,7 +6246,7 @@ case ${FILETYPE} in
                                 fi
                             fi
                             # Určit pozici...
-                            local P=$(identifypage ${1} ${4})
+                            local P=$(identifypage order ${1} ${4})
                             log info "main() - insert: Cílová pozice je $P"
                             if [ -z "${P}" ] ; then
                                 if [ -z "${4}" ] ; then
@@ -5872,32 +6281,8 @@ case ${FILETYPE} in
                 return 0
             ;;
             export) #/ Exportuji stránku
-                case "${CHARSTRING%% *}" in
-                    ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
-                        #anttodsed "${CHARSTRING#* }"
-                        echo nil
-                    ;;
-                    outline) # Exportuje obsah ve fromátu .outline
-                        printoutline "${FILE}" "${CHARSTRING#* }"
-                    ;;
-                    bookmark) # Exportuje obsah ve formátu .bookmarks
-                        outlinetodsed "${CHARSTRING#* }" | encode > "${TARGET/.djvu/.outline}"
-                    ;;
-                    dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
-                        echo nil
-                    ;;
-                    xml) #exportuje obsah textové vrstvy ve formátu .xml
-                        echo nil
-                    ;;
-                    djvu) # exportuje celé stránky ve formátu DjVu
-                        echo nil
-                    ;;
-                    img) # exportuje náhledy stránek ve formátu PNG
-                        echo nil
-                    ;;
-                    *) djvuexport "${FILE}" "${CHARSTRING}"
-                    ;;
-                esac
+                log info "main() export from page ${CHARSTRING}"
+                fromdjvu "${FILE}" "${CHARSTRING}"
                 return 0
             ;;
             #/ Akce convert byla vyřazena..
@@ -5976,6 +6361,10 @@ case ${FILETYPE} in
                     ;;
                     set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
                         #/ REWORK!
+                        # meta informaci
+                        # URL
+                        # maparea
+                        # 
                         case "${CHARSTRING%% *}" in
                             meta) setmeta "${FILE}" "${CHARSTRING#* }"
                             ;;
@@ -6033,10 +6422,10 @@ case ${FILETYPE} in
 #								djvuimport "${FILE}" "${TEMPFILE}"
 							;;
 							*) help keywords-edit
-#								local NAMEPAGE=$(identifyname "${FILE}" "${CHARSTRING#* }")
+#								local NAMEPAGE=$(identifypage name "${FILE}" "${CHARSTRING#* }")
 #								if [ ! -z "${NAMEPAGE}" ] ; then
 #									local TARGET="${TEMPDIR}/${FILE##*/}"
-#									local IDPAGE=$(identifypage "${FILE}" "${PAGENAME}") 
+#									local IDPAGE=$(identifypage order "${FILE}" "${PAGENAME}") 
 #									local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
 #									printmeta "${FILE}" "${NAMEPAGE}" | grep -v '^$' | grep -v '^\.$' >  "${TEMPFILE}"
 #									local METAHEAD=$(head -1 ${TEMPFILE})
