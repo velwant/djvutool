@@ -5171,20 +5171,26 @@ OBSOLETE ACTIONS:
 """
 		;;
 		keywords-delete) echo """
-  ACTION: [1mdelete[0m
+  ACTION: [1mdelete[0m    Odstraňuje stránky z DjVu svazku. Pozor, akce je [4mnevratná[24m!
 
-  [4mOdstranění stránky[24m identifikované jménem, nebo pozicí v DjVu svazku
+  [1m${0##*/}[0m [volby] <svazek> delete RANGE
 
-  [1m${0##*/}[0m [volby] <svazek> delete {<num>|<name>}
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-
-[1mDávejte pozor[0m - akce je nevratná !
-  Je doporučeno při odstraňování stránek použít jako identifikátor jméno
-  stránky. A to z toho důvodu, že se pozice stránky může v průběhu
-  zpracování DjVu svazku změnit, kdežto její jméno zůstává vždy v rámci
-  svazku jedinečné.
+  RANGE
+    Stránky k odstranění mohou být identifikovány buď jménem nebo aktuální
+    pozicí v rámci DjVu svazku. Ostranit lze i několik stránek najednou.
+    Použití seznamu jmen:
+                        … 'name_1.djvu,name_23.djvu,name_4.djvu'
+    Použití rozsahu:
+                        … 1,10,4-5
+[4mPoznámky:[24m
+  * Při odstraňování stránek je uvedený rozsah setříděn tak, aby se stránky
+    odstraňovaly postupně odzadu, tak aby se během odstraňování neměnilo
+    jejich pořadové číslo.
+  * K odstranění stránky dojde pouze v případě že DjVu soubor tvoří víc než
+    jedna stránka.
+  * Při odstraňování stránek je bezpečnější používat k identifikaci jména
+    stránek, neboť pozice stránky se může v průběhu zpracování DjVu svazku
+    měnit, kdežto jméno zůstává vždy v rámci svazku jedinečné.
 """
 		;;
 		keywords-fore) help move
@@ -6219,21 +6225,18 @@ case ${FILETYPE} in
     djvu) #/ Pracuji se souborem v DjVu formátu
         log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
         case "${ACTION}" in
-            delete) #/ Odstraňování stránek z DjVu svazku se provádí
-                # odzadu podle pořadového čísla stránky, ale předat lze
-                # jak rozsah, tak seznam stránek
-                local TEST=$(isrange "${CHARSTRING}")
+            delete) local TEST=$(isrange "${CHARSTRING}")
                 if [ -n "${TEST}" ] ; then
+                    #/ Rozsah stránek identifikovaných pořadím
                     RANGE=$(range ${TEST})
                 else
                     #/ Seznam stránek oddělených čárkami
-                    #/ vytvoření pole RANGE
                     x=0
                     for i in ${CHARSTRING//,/ } ; do
                        RANGE[$x]=$(identifypage order "${FILE}" "${i}")
                     done
                 fi
-                #/ setřídění RANGE pozpátku
+                #/ Setřídění RANGE pozpátku, 
                 for i in $(printf "%d\n" ${RANGE[@]} | sort -nr) ; do
                     deletepage "${FILE}" "${i}"
                     [ $? -eq 1 ] && echo "Page isn't in ${FILE} –> $i" >> /dev/stderr && return 1
