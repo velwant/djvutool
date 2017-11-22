@@ -3772,7 +3772,7 @@ lastpage() {
 }
 
 # ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
-# Odstraňuje z DjVu Bundle svazku stránky
+# Odstraňuje z DjVu svazku stránky, pokud jejich celkový počet je > 1
 #
 # $1 - jméno DjVu svazku se kterým se pracuje
 # $2 - číslo, nebo název strany co se má odstranit
@@ -3783,18 +3783,16 @@ lastpage() {
 deletepage() {
     log goto "deletepage() From ${1} –> ${2}"
     [ -z ${2} ] && return 1
-    local FILE="${1##*/}"
-    identifybundle "${1}"
-    case $? in
-        2) echo "Soubor ${FILE} je typu single-page" >> /dev/stderr
-            return 2
-            ;;
-        1)  log warn "deletepage() ${FILE} is not DjVu bundle"
-            return 1
+    local SUMPAGE=$(${DJVUSED} "${1}" -e 'n')
+    [ $? -eq 1 ] && return 1
+    case $SUMPAGE in
+        1) echo "Single page DjVu file –> ${FILE}" >> /dev/stderr
+            return 0
             ;;
         *) local PAGE=$(identifypage order "${1}" "${2}")
             if [ ! -z "${PAGE}" ] ; then
                 ${DJVM} -d "${1}" "${PAGE}"
+                echo "Page ${2} from ${1} was removed" >> /dev/stderr
             else
                 return 1
             fi
@@ -6221,12 +6219,25 @@ case ${FILETYPE} in
     djvu) #/ Pracuji se souborem v DjVu formátu
         log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
         case "${ACTION}" in
-            delete) #/ Odstraňuji stránk, či stránky z DjVu svazku dle rozsahu, pořadí či jména
-                deletepage "${FILE}" "${CHARSTRING}"
-                case "$?" in
-                    1) printf "Page for remove from bundle must by identificated by num order, or name page in bundle. Range can not be use.\n" >> /dev/stderr
-                    ;;
-                esac
+            delete) #/ Odstraňování stránek z DjVu svazku se provádí
+                # odzadu podle pořadového čísla stránky, ale předat lze
+                # jak rozsah, tak seznam stránek
+                local TEST=$(isrange "${CHARSTRING}")
+                if [ -n "${TEST}" ] ; then
+                    RANGE=$(range ${TEST})
+                else
+                    #/ Seznam stránek oddělených čárkami
+                    #/ vytvoření pole RANGE
+                    x=0
+                    for i in ${CHARSTRING//,/ } ; do
+                       RANGE[$x]=$(identifypage order "${FILE}" "${i}")
+                    done
+                fi
+                #/ setřídění RANGE pozpátku
+                for i in $(printf "%d\n" ${RANGE[@]} | sort -nr) ; do
+                    deletepage "${FILE}" "${i}"
+                    [ $? -eq 1 ] && echo "Page isn't in ${FILE} –> $i" >> /dev/stderr && return 1
+                done
                 return 0
             ;;
             insert) #/ Vkládám soubor předaný jako parametr 
