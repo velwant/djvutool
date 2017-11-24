@@ -143,6 +143,8 @@ DJVUXMLPARSER=$(which djvuxmlparser)
 [ ! ${DJVUXMLPARSER} ] && exit 20
 DJVMCVT=$(which djvmcvt)
 [ ! ${DJVMCVT} ] && exit 20
+DJVUEXTRACT=$(which djvuextract)
+[ ! ${DJVUEXTRACT} ] && exit 20
 DJVM=$(which djvm)
 [ ! ${DJVM} ] && exit 20
 CJB2=$(which cjb2)
@@ -707,7 +709,197 @@ function important1 {
 	fi
 }
 
-function formatdsed {
+testsyntaxant() {
+    while read -r line ; do
+        local OK="OK –> ${line}"
+        local ERR="ERR –> Chybí typ datového bloku"
+        local INVALID="INVALID –> Neplatný typ datového bloku"
+        case "${line}" in
+            \#+([[:blank:]])+([[:digit:]])) echo "Adresa" >> /dev/stderr
+                printf "select; remove-ant\n"
+                printf "# ------------------------- \n"
+                printf "select '%d'\n" "${line##\#+([[:blank:]])}"
+                printf "set-ant\n"
+            ;;
+            \#+([[:blank:]])*) echo "Adresa" >> /dev/stderr
+                printf "select; remove-ant\n"
+                printf "# ------------------------- \n"
+                printf "select '%s'\n" "${line##\#+([[:blank:]])}"
+                printf "set-ant\n"
+            ;;
+            metadata) local META='metadata'
+            ;;
+            maparea) local META='maparea'
+            ;;
+            +([[:digit:]])+([[:blank:]])*)
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                echo "Klíč ${line%% *} tvořený pouze číslem sice DjVu sežere, ale prohlížeč nezobrazí" >> /dev/stderr
+            ;;
+            +([[:alnum:]])+([[:blank:]])\"+([[:alpha:]])*\") #/ klíč začínající číslem sice sežere, ale nezobrazí
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                KEYS="${KEYS} (${line})"
+            ;;
+            url+([[:blank:]])\"*\"+([[:blank:]])\"*\")
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ -n "${URL}" ] && echo "URL už je nastaveno!" >> /dev/stderr && return 1
+                local TEMPORAR=(${line})
+                if [ ${#TEMPORAR[@]} -eq 4 ] ; then
+                    URL="(${line[0]} ${line[1]} ${line[2]}) ${line[3]}"
+                else
+                    echo "Neplatné nastavení URL –> ${line}"
+                    return 1
+                fi
+            ;;
+            \"*\"+([[:blank:]])\"*\") #maparea bez URL
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ -n "${URL}" ] && echo "URL už je nastaveno!" >> /dev/stderr && return 1
+                URL="${line}"
+            ;;
+            rect|oval|poly|line|text)
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                BORDER="${line}"
+            ;;
+            shadow_*) # stínování - číslem uvedená tloušťka
+            ;;
+            hilite+([[:blank:]])\#+([[:digit:]])) # barva vysvícení
+            ;;
+            pushpin) # špendlík
+            ;;
+            arrow) # šipka
+            ;;
+            border_avis)
+            ;;
+            xor|none)
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavea oblast!" >> /dev/stderr
+                TEMPORAR="(${BORDER} ) (${line} )" && unset BORDER
+            ;;
+            border+([[:blank:]])+([[:digit:]]))
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
+                TEMPORAR="(${BORDER} ) (${line} )" && unset BORDER
+            ;;
+            '') #echo "Prázdný řádek - vypíše položku a vypne přechozí volbu"
+                if [ "${META}" == "metadata" ] ; then
+                    printf "(${META} ${KEYS}) "
+                    unset META
+                    unset KEYS
+                elif [ "${META}" == "maparea" ] ; then
+                    printf "(${META} ${URL} ${KEYS}) "
+                    unset META
+                    unset URL
+                    unset KEYS
+                fi
+            ;;
+            *) echo "Na řádku je chyba –> ${line}" >> /dev/stderr
+                return 1
+            ;;
+        esac
+    done < $1
+    printf "\n.\n"
+}
+
+# ###
+# Funkce pro zpracování výstupu příkazu output-ant
+testsyntaxdsed() {
+    local ANTFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+    local TXTFILE=$(tempfile -d ${TEMPDIR} -s .txt)
+    while read -r line ; do
+        case "${line}" in
+            select\;*) # Následuje výstup příkazu output-ant
+                local ALL="yes"
+            ;;
+            select+([[:blank:]])\"*) # Následuje výstup příkazu output-ant
+                local PAGE="# ${line#select+([[:blank:]])}"
+                echo "${PAGE}"
+            ;;
+            set-ant) local ANT="yes"
+            ;;
+            set-txt) local TXT="yes"
+            ;;
+            \.) if [ -n "${ANT}" ] ; then
+                    cat ${ANTFILE} | formatdsed
+                    unset ANT
+                elif [ -n "${TXT}" ] ; then
+                    cat ${TXTFILE} | formatdsed
+                    unset TXT
+                fi
+            ;;
+            \#+([[:blank:]])+(-)) # echo "Konec stránky" >> /dev/stderr
+                unset PAGE
+            ;;
+            *) if [ -n "${ANT}" ] ; then
+                    echo "${line}" >> ${ANTFILE}
+                elif [ -n "${TXT}" ] ; then
+                    echo "${line}" >> ${TXTFILE}
+                fi
+            ;;
+        esac
+    done < $1
+}
+
+# ###
+# Konvertuje stream v .dsed formátu do formátu .ant
+#
+#/ # ------------------------- 
+#/ select "shared_anno.iff"
+#/ set-ant
+#/ (background #000000 ) (zoom d50 ) 
+#/ .
+# 
+formatdsed() {
+    sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
+    sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g' | \
+    while read line ; do
+        #echo "zpracovávám ${line}" >> /dev/stderr
+        case ${line} in
+            \(metadata) echo -e "metadata"
+                local TAB=""
+            ;;
+            \(maparea+([[:blank:]])\") echo -e "\n"
+                local TAB="\t"
+            ;;
+            \(note+([[:blank:]])\"*) local TEMPORAR="${line#(}"
+                echo -e "${TEMPORAR%\)}"
+                unset TEMPORAR
+                unset TAB
+            ;;
+            *) if [ "${TAB}" == "\t" ] ; then
+                    case "${line:0:2}" in
+                        "(u") local TEMPORAR="${line#(}"
+                            echo "maparea"
+                            echo -e "${TAB}${TEMPORAR//\) /}"
+                            unset TEMPORAR
+                        ;;
+                        *)
+                            local TEMPORAR="${line#(}"
+                            echo -e "${TAB}${TEMPORAR// \)/}"
+                            unset TEMPORAR
+                        ;;
+                    esac
+                else
+                    local TEMPORAR="${line//[)(]/}"
+                    case "${TEMPORAR}" in
+                        maparea*) echo -e "${TEMPORAR/ /\\\n\\\t}"
+                            unset TEMPORAR
+                        ;;
+                        background*|zoom*) local TEMPORAR="${line#(}"
+                            echo -e "${TEMPORAR// \)/}"
+                            unset TEMPORAR
+                        ;;
+                        *) echo -e "\t${TEMPORAR}"
+                            unset TEMPORAR
+                        ;;
+                    esac
+                fi
+            ;;
+        esac
+    done  | sed 's/) )/)/ ; /^$/d '
+}
+
+function formatdsed1 {
 	# .dsed to .ant
 	sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
 	sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g' | \
@@ -1381,21 +1573,21 @@ writefile() {
 # Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
 # Velmi důležitá funkce!!!
 encode() {
-	while read -n 1 a
-	do
-	CHAR=($( echo "$a" | od -A n -t c ))
-	if [ "${#CHAR[@]}" -gt "2" ] ; then 
-		echo -n "\\${CHAR[0]}\\${CHAR[1]}"
-	elif [ "${#CHAR[@]}" == "1" ] ; then 
-		echo -n " "
-	else
-		if [ "${#CHAR[0]}" == "0" ] ; then
-			echo -n " "
-		else
-			echo -n "${CHAR[0]}"
-		fi
-	fi
-	done
+    while read -n 1 a
+    do
+    CHAR=($( echo "$a" | od -A n -t c ))
+    if [ "${#CHAR[@]}" -gt "2" ] ; then 
+        echo -n "\\${CHAR[0]}\\${CHAR[1]}"
+    elif [ "${#CHAR[@]}" == "1" ] ; then 
+        echo -n " "
+    else
+        if [ "${#CHAR[0]}" == "0" ] ; then
+            echo -n " "
+        else
+            echo -n "${CHAR[0]}"
+        fi
+    fi
+    done
 }
 
 # ### <span id="encodefile">encodefile()</span> ([top](#FUNCTIONS))
@@ -1463,32 +1655,32 @@ separatemask() {
 # ### <span id="bookmarktooutline">bookmarktooutline()</span> ([top](#FUNCTIONS))
 # Funkce zpracovává záložky z DjVu souboru do formátu s odsazením
 bookmarktooutline() {
-	local TARGET="$1"
-	local BEGIN=""
-	local TAB=0
-	${DJVUSED} "${1}" -e 'print-outline' | sed -n '
-	s|(|\n(\n|g
-	s|)|\n)\n|g
-	s|\\|\\\\0|g
-	p
-	' |	while read y
-	do
-		case "$y" in
-			\)) local TAB=$((TAB - 1))
-			;;
-			\() local TAB=$((TAB + 1))
-			;;
-			\"*) if [ "${BEGIN}" == "" ] ; then
-					local TEXT="$y"
-					local BEGIN="yes"
-				else
-					for i in $(seq $((TAB-2))) ; do echo -en '\t' ; done
-					echo -e "${TEXT} ${y}"
-					local BEGIN=""
-				fi
-			;;
-		esac
-	done
+    local TARGET="$1"
+    local BEGIN=""
+    local TAB=0
+    ${DJVUSED} "${1}" -e 'print-outline' | sed -n '
+    s|(|\n(\n|g
+    s|)|\n)\n|g
+    s|\\|\\\\0|g
+    p
+    ' |	while read y
+    do
+        case "$y" in
+            \)) local TAB=$((TAB - 1))
+            ;;
+            \() local TAB=$((TAB + 1))
+            ;;
+            \"*) if [ "${BEGIN}" == "" ] ; then
+                    local TEXT="$y"
+                    local BEGIN="yes"
+                else
+                    for i in $(seq $((TAB-2))) ; do echo -en '\t' ; done
+                    echo -e "${TEXT} ${y}"
+                    local BEGIN=""
+                fi
+            ;;
+        esac
+    done
 }
 
 function outlineunset {
@@ -1623,7 +1815,7 @@ EOF
 # Funkce převádí obsah .outline souboru na formát .dsed
 # a výsledek zapisuje do djvu souboru
 # $1 - DjVu file
-# $2 - outline file nebo stream
+# $2 - soubor ve formátu .outline
 outlinetodjvu() {
     log goto "outlinetodjvu() From $2 into $1"
     local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
@@ -1637,72 +1829,42 @@ outlinetodjvu() {
     return $?
 }
 
-outlinetodjvu1() {
-    local SOURCE=$(${REALPATH} -m -P "${1}")
-    local OUTLINE=$(${REALPATH} -m -P "${2}")
-    local FILE="${SOURCE##*/}"
-    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bookmarks)
-    if [ -z "${3}" ] ; then
-        if [ -f "${OUTLINE}" ] ; then
-			# zdrojem je outline soubor
-			outlinetodsed "${OUTLINE}" | encode > "${TEMPFILE}"
-			pushd ${TEMPDIR}
-				${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE##*/}; save"
-			popd
-		else
-			echo "outlinetodjvu: import only from outline file" >> /dev/stderr
-		fi
-	else
-		local BOOKMARKS=$(${REALPATH} -m -P ${3})
-		if [ -f "${BOOKMARKS}" ] ; then
-			echo "File for bookmarks in dsed format exist. Overwrite it?"
-			potvrdit
-			printf "set-outline\n" > "${BOOKMARKS}"
-			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}"
-			printf "\n\n.\n" >> "${BOOKMARKS}"
-		elif [ -d "${BOOKMARKS}" ] ; then
-			outlinetodsed "${OUTLINE}" | encode >> "${BOOKMARKS}/${FILE//.djvu/.bookmarks}"
-		else
-			outlinetodsed "${OUTLINE}" | encode >> ${3}
-		fi
-	fi
-	return 0
-}
-
+# ### <span id="outlinetodjvu">outlinetodjvu()</span> ([top](#FUNCTIONS))
+# Funkce převádí obsah ve formátu .outline na formát .dsed
+# $1 - .outline file with TAB syntax
+# Output is txt stream
 function outlinetodsed {
-	# $1 - temporary .outline file with TAB syntax
-	# Output is txt stream
-	local TARGET="$1"
-	# Remove comment from .outline file
-	sed --in-place '/^#/d ; /^;/d' "${TARGET}"
-	[ $(grep -c ^ "${TARGET}") -eq "0" ] && return 1
-	local LEVEL="1"
-	IFS=''
-	echo -n "(bookmarks "
-	CONTENT=$(sed '
-		s/\ \ \ \ /\t/g
-		s/^/\t/
-		' "${TARGET}" | while read line ; do
-		local SPACE="${line%%\"*}"
-		if [ "${#SPACE}" -gt "${LEVEL}" ] ; then
-			local PREV="${PREV%)} ( ${line} )"
-			local LEVEL=$((${LEVEL} + 1))
-		elif [ "${#SPACE}" -eq "${LEVEL}" ] ; then
-			local PREV="${PREV} ( ${line} )"
-		elif [ "${#SPACE}" -lt "${LEVEL}" ] ; then
-			local ROZDIL=$((${LEVEL} - ${#SPACE}))
-			local ZAV=$(seq  -f "%1.0f" -s '' ${ROZDIL})
-			local PREV="${PREV} ${ZAV//[[:digit:]]/)} ( $line )"
-			local LEVEL=$((${LEVEL} - ${ROZDIL}))
-		fi
-		echo "${PREV}"
-		echo "-----${LEVEL}"
-	done | sed 's/\t/\ /g' | tail -2)
-	TEST="${CONTENT##*-----}"
-	echo -n "${CONTENT%-----*}"
-	local ZAV=$(seq  -f "%1.0f" -s '' ${TEST})
-	echo "${ZAV//[[:digit:]]/)}"
-	return 0
+    local TARGET="$1"
+    # Remove comment from .outline file
+    sed --in-place '/^#/d ; /^;/d' "${TARGET}"
+    [ $(grep -c ^ "${TARGET}") -eq "0" ] && return 1
+    local LEVEL="1"
+    IFS=''
+    echo -n "(bookmarks "
+    CONTENT=$(sed '
+        s/\ \ \ \ /\t/g
+        s/^/\t/
+        ' "${TARGET}" | while read line ; do
+        local SPACE="${line%%\"*}"
+        if [ "${#SPACE}" -gt "${LEVEL}" ] ; then
+            local PREV="${PREV%)} ( ${line} )"
+            local LEVEL=$((${LEVEL} + 1))
+        elif [ "${#SPACE}" -eq "${LEVEL}" ] ; then
+            local PREV="${PREV} ( ${line} )"
+        elif [ "${#SPACE}" -lt "${LEVEL}" ] ; then
+            local ROZDIL=$((${LEVEL} - ${#SPACE}))
+            local ZAV=$(seq  -f "%1.0f" -s '' ${ROZDIL})
+            local PREV="${PREV} ${ZAV//[[:digit:]]/)} ( $line )"
+            local LEVEL=$((${LEVEL} - ${ROZDIL}))
+        fi
+        echo "${PREV}"
+        echo "-----${LEVEL}"
+    done | sed 's/\t/\ /g' | tail -2)
+    TEST="${CONTENT##*-----}"
+    echo -n "${CONTENT%-----*}"
+    local ZAV=$(seq  -f "%1.0f" -s '' ${TEST})
+    echo "${ZAV//[[:digit:]]/)}"
+    return 0
 }
 
 
@@ -2120,6 +2282,8 @@ isformat() {
         ant) #/ Volba pro DjVu
             #/ Poznámky
             ;;
+        meta) #/ Volba pro DjVu
+            ;;
         outline) #/ Volba pro DjVu
             #/ Obsah
             ;;
@@ -2402,9 +2566,12 @@ fromdjvu() {
                             ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                             fi
                         ;;
-                        *) local PAGE="${LISTPAGES[$((i-1))]}"
+                        *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            local PAGE="${LISTPAGES[$((i-1))]}"
                             printf "# '%s'\n" "${PAGE##*:}"
-                            ${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed
+                            ${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed > ${TEMPFILE}
+                            echo "Zapsán obsah do souboru ${TEMPFILE}"
+                            createant ${TEMPFILE}
                         ;;
                     esac
                 done
@@ -2436,6 +2603,8 @@ fromdjvu() {
             printoutline "${1}" > ${TEMPFILE}
             outlinetodsed ${TEMPFILE} | encode
             printf "\n"
+            ;;
+        meta) printmeta "${FILE}" global
             ;;
         dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
             echo nil
@@ -3735,6 +3904,42 @@ infoitem() {
     ${EXIFTOOL} -s3 -FileType -ImageSize -Compression -AnimationFrames -FrameCount -
 }
 
+# ### <span id="infoitem">infoitem()</span> ([top](#FUNCTIONS))
+# Na vstupu je soubor $1, a případně identifikátor stránky $2
+rotateinfo() {
+    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bin)
+    case ${2} in
+        +([[:digit:]])) #/ pořadí stránky
+            ${DJVUEXTRACT} "${1}" -page=${2} INFO=${TEMPFILE} 2>/dev/null
+        ;;
+        '') #/ globální
+            ${DJVUEXTRACT} "${1}" INFO=${TEMPFILE} 2>/dev/null
+        ;;
+        *) #/ jméno stránky
+            ${DJVUEXTRACT} "${1}" -page="${2}" INFO=${TEMPFILE} 2>/dev/null
+        ;;
+    esac
+    [ $? -eq 1 ] && return 1
+    local ROTATION=$(dd if=${TEMPFILE} bs=1 skip=9 2>/dev/null | od -A none -b)
+    case ${ROTATION} in
+        001) # 0°
+            echo "0"
+        ;;
+        005) # 270°
+            echo "3"
+        ;;
+        002) # 180°
+            echo "2"
+        ;;
+        006) # 90°
+            echo "1"
+        ;;
+        *) return 1
+        ;;
+    esac
+    return 0
+}
+
 # ### <span id="convertovergimp">convertovergimp()</span> ([top](#FUNCTIONS))
 # Bitmapový editor gimp lze rovněž využívat ke konverzi bitmapových souborů
 #
@@ -4646,11 +4851,11 @@ EOF
 	return 0
 }
 
+# ###
+#
 djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
-        ant*) printant "${1}"
-        ;;
         list) identifybundle "${1}"
             case $? in
                 0) ${DJVM} -l "${1}" | grep PAGE\ # | cut -d'#' -f2 | while read line
@@ -4668,15 +4873,31 @@ djvuinfo() {
                     echo "[${TEMPORAR##*\[}]:${PAGENAME##*\{}"
                 done
                 ;;
-                *)
-                ;;
             esac
         ;;
-        exif*) ${EXIFTOOL} "${1}"
+        exif) ${EXIFTOOL} "${1}"
         ;;
-        meta*) printmeta "${1}" ${2#meta+([[:blank:]])}
-        ;;
-        outline) printoutline "${1}"
+        meta*)
+            #/ zpracovat rozsah, nebo jméno předané stránky
+            #/ TODO
+            ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL | awk '{print $4,$3,$2}' | \
+            while read line ; do
+                case "${line}" in
+                    \[S\]*) local TEMPORAR="${line#*\{}"
+                            local PAGE="${TEMPORAR%\}*}"
+                           echo "# shared_anno.iff # ${line##*+([[:blank:]])}"
+                           #echo "Tisknu Globální meta informace"
+                           ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
+                    ;;
+                    *) local TEMPORAR="${line#*\{}"
+                            local PAGE="${TEMPORAR%\}*}"
+                            echo -n "# ${PAGE} # ${line%%+([[:blank:]])*} ${line##*+([[:blank:]])} "
+                            ${DJVUSED} "${1}" -e "select ${PAGE}; size"
+                            #echo -e "Tisknu Meta informace ke stránce"
+                            ${DJVUSED} "${1}" -e "select ${PAGE}; print-meta"
+                    ;;
+                esac
+            done
         ;;
         pages) identifybundle "${1}"
             case $? in
@@ -4688,10 +4909,29 @@ djvuinfo() {
                 ;;
             esac
         ;;
-        text*)
+        grep*) ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL | awk '{print $4,$3}' | \
+            while read line ; do
+                case "${line}" in
+                    \[S\]*)
+                    ;;
+                    *) local TEMPORAR="${line#*\{}"
+                        local PAGE="${TEMPORAR%\}*}"
+                        local TEMPORAR="${line%%\]*}"
+                        local ORDER="${TEMPORAR##*\[P}"
+                            #echo -n "# ${PAGE} # ${line%%+([[:blank:]])*} ${line##*+([[:blank:]])} "
+                            #${DJVUSED} "${1}" -e "select ${PAGE}; size"
+                            #echo -e "Tisknu Meta informace ke stránce"
+                            #${DJVUSED} "${1}" -e "select ${PAGE}; print-meta" | ${2}
+                            local TEMPORAR=$(${DJVUTXT} "${1}" -page=${ORDER} | ${2} 2>1)
+                            if [ -n "${TEMPORAR}" ] ; then
+                                echo "# ${PAGE} # ${line%%+([[:blank:]])*}"
+                                printf "%s\n" "${TEMPORAR}"
+                            fi
+                    ;;
+                esac
+            done
         ;;
-        *)
-            local INFO=($(cat "${1}"|infoitem))
+        '') local INFO=($(cat "${1}"|infoitem))
             identifybundle "${1}"
             case $? in
                 0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
@@ -4703,7 +4943,10 @@ djvuinfo() {
             esac
             echo "${INFO[@]} ${SUMPAGES}"
         ;;
+        *) return 1
+        ;;
     esac
+    return $?
 }
 
 # ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
@@ -5393,20 +5636,14 @@ TARGET
   Print informations about DjVu bundle. Without parameters return number of pages.
   If is DjVu file 'single-page', return 'none'.
 
-  [1m${0##*/}[0m <DjVu> info [SUBKEY [<num>|<name>]]
+  [1m${0##*/}[0m [volby] <DjVu svazek> info [SUBKEY]
 
-         num  - order number of page in DjVu bundle
-         name - name of page in DjVu bundle
-
-  SUBKEYS:
-         [3mexif[23m - return exif info about DjVu file
-         [3mmeta[23m - return meta attribute keys from DjVu file
-        [3mpages[23m - return ordered list pages from DjVu bundle with names
-
-[3mNotice:[23m
-  * For [3m'meta'[23m [2minfo[22m different from [2mexport[22m in that output is purified from syntax chars, whose is required for [2mimport[22m.
-  * When is passed subkey [3m'exif'[23m with an identificator of page, be export a page into temporary dir and view info only about this page.
-  * Subkey [3m'pages'[23m with an identificator of page return only item for this.
+SUBKEY
+    exif - vypisuje exif info o DjVu souboru
+    meta - vypisuje meta informace stránek DjVu souboru
+    pages - vrací celkový počet stran v DjVu svazku
+    list - vrací seznam stránek DjVu svazku
+    grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
 """
 		;;
 		keywords-print) echo """
@@ -6357,10 +6594,17 @@ case ${FILETYPE} in
                 esac
                 return 0
             ;;
-            import) #/ Import předhozeného souboru
+            import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
                 case "${CHARSTRING}" in
                     ant*) #/ Importuji obsah .ant souboru
                         local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                        writefile ${TEMPFILE}
+                        echo "Byl zapsán ${TEMPFILE}" >> /dev/stderr
+                        # Následující funkce parsuje formát .ant
+                        #testsyntaxant ${TEMPFILE}
+                        # Následující funkce parsuje formát .dsed
+                        testsyntaxdsed ${TEMPFILE}
+                        exit 33
                         local ANTFILE=${CHARSTRING#ant}
                         #/ ořezat mezery před a za
                         if [ -f "${ANTFILE}" ] ; then
@@ -6368,7 +6612,31 @@ case ${FILETYPE} in
                         else
                             writefile "${TEMPFILE}"
                             if [ $? -eq 1 ] ; then
-                                $0 "${FILE}" export ant > "${TEMPFILE}"
+                                printf '; Pravidla pro obsah souboru .ant :\n' >> "${TEMPFILE}"
+                                printf '; * Globální meta informace se píší jako součást stránky "shared_anno.iff" \n' >> "${TEMPFILE}"
+                                printf '; * Stránka může být identifikována buď pořadovým číslem, nebo jménem\n' >> "${TEMPFILE}"
+                                printf '; * Blok meta informací vždy začíná řádkem uvozeným znakem # za kterým následuje identifikátor stránky (číslo, nebo jméno)\n' >> "${TEMPFILE}"
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
+                                printf '; * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
+                                printf '; * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
+                                printf '; * Soubor nesmí končit prázdným řádkem!\n' >> "${TEMPFILE}"
+                                printf '; * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
+                                printf ';\n' >> "${TEMPFILE}"
+                                printf ';Author "Aleš Novák"\n' >> "${TEMPFILE}"
+                                printf ';\n' >> "${TEMPFILE}"
+                                printf ';; Aktivní link bez bubliny"\n' >> "${TEMPFILE}"
+                                printf ';maparea "https://www.thewoodcraft.org/" ""\n' >> "${TEMPFILE}"
+                                printf ';rect 225 0 804 61\n' >> "${TEMPFILE}"
+                                printf ';xor\n' >> "${TEMPFILE}"
+                                printf ';\n' >> "${TEMPFILE}"
+                                printf ';; Aktivní link s bublinou"\n' >> "${TEMPFILE}"
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
+                                printf ';        (rect 225 0 804 61 )\n' >> "${TEMPFILE}"
+                                printf ';        (xor )\n' >> "${TEMPFILE}"
+                                printf ';; Aktivní link s bublinou u textu přes dva řádky"\n' >> "${TEMPFILE}"
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
+                                printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
+                                $0 "${FILE}" export ant >> "${TEMPFILE}"
                             fi
                         fi
                         echo "Obsah byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
@@ -6402,25 +6670,41 @@ case ${FILETYPE} in
                         local OUTLINEFILE=${CHARSTRING#outline}
                         #/ ořezat mezery před a za
                         if [ -f "${OUTLINEFILE}" ] ; then
+                            log info "main() Importuji .outline soubor ${OUTLINEFILE}"
                             cat "${OUTLINEFILE}" > "${TEMPFILE}"
                         else
                             writefile "${TEMPFILE}"
                             if [ $? -eq 1 ] ; then
-                                $0 "${FILE}" export outline > "${TEMPFILE}"
+                                log info "main() Na stdin nebylo nic, přidám záhlaví a vytáhnu stávající záložky"
+                                printf '; Pravidla pro obsah souboru .outline :\n' >> "${TEMPFILE}"
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
+                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n' >> "${TEMPFILE}"
+                                printf ';  * Identifikátor vždy začíná znakem #\n' >> "${TEMPFILE}"
+                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n' >> "${TEMPFILE}"
+                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
+                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
+                                printf ';  * Soubor nesmí končit prázným řádkem!\n' >> "${TEMPFILE}"
+                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
+                                printf ';\n' >> "${TEMPFILE}"
+                                printf ';"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
+                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
+                                $0 "${FILE}" export outline >> "${TEMPFILE}"
                             fi
                         fi
-                        echo "Obsah byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
+                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
                         case ${ACTION} in
                             edit) echo "Edituji soubor ${TEMPFILE}" >> /dev/stderr
                             ;;
                         esac
-                        echo "Importuji soubor ${TEMPFILE}" >> /dev/stderr
+                        lig info "main() Importuji soubor .outline ${TEMPFILE} do ${FILE}"
                         outlinetodjvu "${FILE}" "${TEMPFILE}"
-                        exit 33
+                        echo "Záložky byly aktualizovány" >> /dev/stderr
+                        return 0
                     ;;
                     page*) echo "Importuji do svazku DjVu stránku"
                     ;;
-                    *) #djvuimport "${FILE}" "${CHARSTRING}"
+                    *) help keyword-${CHARSTRING%% *}
+                    #djvuimport "${FILE}" "${CHARSTRING}"
                     ;;
                 esac
                 return 33
@@ -6474,7 +6758,7 @@ case ${FILETYPE} in
                         esac
                         return 0
                     ;;
-                    edit) log info "main() Edit from ${FILE} –> ${CHARSTRING}"
+                    edit1) log info "main() Edit from ${FILE} –> ${CHARSTRING}"
                         #/ REWORK!
                         case "${CHARSTRING}" in
                             ant) # export všech ant 
