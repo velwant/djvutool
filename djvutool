@@ -4856,14 +4856,22 @@ EOF
 djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
-        list) 
-            ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL |\
-            awk -F'}' '{print $2,$1}' | \
-            sed -E 's/][[:blank:]]+[[:alnum:]:]+[[:blank:]]+\[[[:digit:]]+\][[:blank:]]+\{/ / ; s/ \[// ; s/^P// ; s/^S/0/' | sort -n
-        ;;
-        exif) ${EXIFTOOL} "${1}"
-        ;;
-        meta) $0 "${1}" export meta | awk -F'#' '{print $4,$3}' | grep -v ^\ 
+        '') local INFO=($(cat "${1}"|infoitem))
+            identifybundle "${1}"
+            case $? in
+                0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
+                 local TEMP=$(${DJVM} -l "${1}" | grep SHARED_ANNO)
+                ;;
+                2) local SUMPAGES=1
+                ;;
+                *) local SUMPAGES=error
+                ;;
+            esac
+            if [ -n "${TEMP}" ] ; then
+                echo "${INFO[@]} ${SUMPAGES} shared_anno"
+            else
+                echo "${INFO[@]} ${SUMPAGES}"
+            fi
         ;;
         pages) identifybundle "${1}"
             case $? in
@@ -4874,6 +4882,23 @@ djvuinfo() {
                 *) echo error
                 ;;
             esac
+        ;;
+        list) identifybundle "${1}"
+            case $? in
+                0) ${DJVM} -l "${1}" |\
+                    sed -E 's/SHARED_ANNO/#0/ ; s/[[:alnum:][:blank:]]+#// ; /^Size/d ; /^\-/d' | sort -n
+                ;;
+                2) ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL |\
+                    awk -F'}' '{print $2,$1}' | \
+                    sed -E 's/][[:blank:]]+[[:alnum:]:]+[[:blank:]]+\[[[:digit:]]+\][[:blank:]]+\{/ / ; s/ \[// ; s/^P// ; s/^S/0/' | sort -n
+                ;;
+                *) echo error
+                ;;
+            esac
+        ;;
+        exif) ${EXIFTOOL} "${1}"
+        ;;
+        meta) $0 "${1}" export meta | awk -F'#' '{print $4,$3}' | grep -v ^\ 
         ;;
         grep*) $0 "${1}" info list | \
             while read line ; do
@@ -4892,18 +4917,6 @@ djvuinfo() {
                     ;;
                 esac
             done
-        ;;
-        '') local INFO=($(cat "${1}"|infoitem))
-            identifybundle "${1}"
-            case $? in
-                0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
-                ;;
-                2) local SUMPAGES=1
-                ;;
-                *) local SUMPAGES=error
-                ;;
-            esac
-            echo "${INFO[@]} ${SUMPAGES}"
         ;;
         *) return 1
         ;;
@@ -5305,10 +5318,12 @@ OBSOLETE ACTIONS:
    For more description about any action or option you set on command line as next parameter option -h (--help)
 """
 		;;
-		keywords-delete) echo """
-  ACTION: [1mdelete[0m    Odstraňuje stránky z DjVu svazku. Pozor, akce je [4mnevratná[24m!
+    keywords-delete) echo """
+  ACTION: [1mdelete[0m
 
   [1m${0##*/}[0m [volby] <svazek> delete RANGE
+
+  Odstraňuje stránky z DjVu svazku. Pozor, akce je [4mnevratná[24m!
 
   RANGE
     Stránky k odstranění mohou být identifikovány buď jménem nebo aktuální
@@ -5327,7 +5342,9 @@ OBSOLETE ACTIONS:
     stránek, neboť pozice stránky se může v průběhu zpracování DjVu svazku
     měnit, kdežto jméno zůstává vždy v rámci svazku jedinečné.
 """
-		;;
+    ;;
+    delete-*) help keywords-delete
+        ;;
 		keywords-fore) help move
 		;;
 		keywords-fore1) echo """
@@ -5393,7 +5410,7 @@ Options:
   * If is not any identificator of page, do set global orientation for all DjVu bundle.
 """
 		;;
-		keywords-export) echo """
+    keywords-export) echo """
   ACTION: [1mexport[0m
 
   [1m${0##*/}[0m [volby] <DjVu svazek> export {FORMAT} [RANGE] [TARGET]
@@ -5441,7 +5458,37 @@ TARGET
   * Přepsání již existujících souborů si lze vynutit volbou [3m--force yes[23m
     Výchozí chování je - [3mskip[23m (existující soubory se znovu neexportují)
 """
-		;;
+    ;;
+    export-ant) echo """
+Nápověda pro export metainformacé
+"""
+    ;;
+    export-meta) echo """
+Nápověda pro export metainformacé
+"""
+    ;;
+    export-outline) echo """
+Nápověda pro export obsahu
+"""
+    ;;
+    export-dsed-*) echo """
+Nápověda pro export metainformacé
+"""
+    ;;
+    export-xml-*) echo """
+Nápověda pro export metainformacé
+"""
+    ;;
+    export-color|\
+    export-black|\
+    export-background|\
+    export-foreground|\
+    export-mask) echo """
+Nápověda pro export grafické vrstvy
+    """
+    ;;
+    export-grep|export-pages|export-exif) help keywords-export
+    ;;
 		keywords-import) echo """
    ACTION: [1mimport[0m
   [4mImport obsahu textové vrstvy[24m do DjVu souboru
@@ -5495,23 +5542,90 @@ TARGET
 """
 		help range
 		;;
-		keywords-info) echo """
+    keywords-info) echo """
   ACTION [1minfo[0m
-
-  Vypisuje informace o DjVu souboru.
 
   [1m${0##*/}[0m [volby] <DjVu soubor> info [SUBKEY] [-h]
 
+  Vypisuje informace o DjVu souboru. Není-li uveden žádný SUBKEY, vypadá
+  výstup jako u následujících ukázek:
+
+  A, DjVu Bundle o 3 stránkách, ovšem bez sdílených metainformací.
+
+        DJVU (multi-page) 3983x4874 3
+
+  B, DjVu Bundle o jedné straně, se sdílenými metainformacemi.
+
+        DJVU (multi-page) 4007x4867 1 shared_anno
+
+  C, DjVu Single.
+
+        DJVU 4019x4910 1
+
 SUBKEY
-    pages - počet stran v DjVu svazku
-     list - seznam stránek DjVu svazku, včetně 
-    exif - vypisuje exif info o DjVu souboru
-    meta - vypisuje meta informace stránek DjVu souboru
+    pages - vrací celkový počet stran v DjVu svazku
+     list - vrací setříděný seznam stránek DjVu svazku
+     exif - vypisuje exif informace k DjVu souboru, včetně meta informací
+            ze stránek
+     meta - vypisuje rozměry stránek DjVu souboru a info o případné rotaci
     grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
 
 """
-		;;
-		keywords-print) echo """
+    ;;
+    info-exif) echo """
+  ACTION [1minfo[0m –> exif
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info exif
+
+  Vrací exif informace o DjVu souboru – včetně metainformací, pokud je
+  obsahuje.
+"""
+    ;;
+    info-grep) echo """
+  ACTION [1minfo[0m –> grep
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info grep …
+
+  Aplikuje příkazy utility grep na výstup textového obsahu DjVu souboru,
+  pokud nějaký obsahuje. V případě že nalezený vzorek podmínce příkazu
+  vyhoví, tak se – kromě nalezeného vzorku – vypíše také jméno a pořadové
+  číslo příslušné stránky v DjVu svazku.
+"""
+    ;;
+    info-list) echo """
+  ACTION [1minfo[0m –> list
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info list
+
+  Vrací seznam všech stránek v DjVu souboru, včetně speciální stránky
+  shared_anno.iff, která (pokud se ve svazku vyskytuje) je vždy označena
+  jako stránka 0. Výpis pak vypadá takto:
+
+0     shared_anno.iff
+1     w03.djvu
+2     Příliš žluťoučký kůň.djvu
+3     w02.djvu
+"""
+    ;;
+    info-meta) echo """
+  ACTION [1minfo[0m –> meta
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info meta
+
+  Vrací informace o velikosti stránek DjVu souboru, podle pořadí, včetně
+  informace o jejich případné rotaci.
+"""
+    ;;
+    info-pages) echo """
+  ACTION [1minfo[0m –> pages
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info pages
+
+  Vrací celkový počet stran v DjVu souboru. V případě DjVu single vrací 1,
+  stejně jako v případě DjVu svazku s jednou stránkou.
+"""
+    ;;
+    keywords-print) echo """
    Action [1mprint[0m
 
    Action [2mprint[22m meta attribute keys or outline into stdout
@@ -6348,7 +6462,13 @@ case "${CHARSTRING}" in
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
                 djvu) case "${CHARSTRING}" in
+                        exif*) help "${ACTION}-exif"
+                        ;;
                         meta*) help "${ACTION}-meta"
+                        ;;
+                        pages*) help "${ACTION}-pages"
+                        ;;
+                        grep*) help "${ACTION}-grep"
                         ;;
                         *) help "keywords-${ACTION}"
                         ;;
