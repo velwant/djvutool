@@ -2509,11 +2509,12 @@ isscale() {
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
-# Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
-# Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
-# ant - Exportuje hyperlinky a meta atributy ve formátu .ant
-# meta
-# mask|background|foreground|color|black - oxportuje obrázek pozadí
+# * ant - Exportuje hyperlinky a meta atributy ve formátu .ant
+# * meta - Exportuje meta informace stránky, její rozměry a stav rotace
+# * djvu - Exportuje DjVu stránky
+# * mask|background|foreground|color|black - oxportuje obrázek pozadí
+# * dsed-*
+# * xml-*
 fromdjvu() {
     log goto "fromdjvu() ${FILETYPE} $1 –> $2"
     local INTO=$(isformat "${2}")
@@ -2586,10 +2587,11 @@ fromdjvu() {
                 case "${LISTPAGES[$i]%% *}" in
                     0) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
                         case ${INTO} in
-                            ant) printf "# 'shared_anno.iff' # [S]\n"
+                            ant) printf "# 'shared_anno.iff' #[S]#\n"
                                 ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                             ;;
-                            meta)
+                            meta) printf "# 'shared_anno.iff' #[S]\n"
+                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
                             ;;
                             dsed-*) local EXPORT="output-ant"
                                 local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
@@ -2610,10 +2612,12 @@ fromdjvu() {
                     *) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
                         local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
-                            ant) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' # [P${LISTPAGES[$i]%% *}]\n"
+                            ant) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' #[P${LISTPAGES[$i]%% *}]\n"
                                 ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; print-ant" | formatdsed
                             ;;
-                            meta)
+                            meta) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' #[P${LISTPAGES[$i]%% *}] #"
+                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; size"
+                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; print-meta"
                             ;;
                             djvu) local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
                                 local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}")
@@ -4822,8 +4826,17 @@ EOF
 	return 0
 }
 
-# ###
+# ### <span id="djvuinfo">djvuinfo()</span> ([top](#FUNCTIONS))
+# Prvním parametrem __$1__ je cesta k DjVu souboru a druhým $2 pořadovaná
+# informace:
 #
+# * list
+# * exif
+# * meta
+# * pages
+# * grep
+#
+# Pokud není předaná, vrátí se pouze informace o typu souboru
 djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
@@ -4834,28 +4847,7 @@ djvuinfo() {
         ;;
         exif) ${EXIFTOOL} "${1}"
         ;;
-        meta*)
-            #/ zpracovat rozsah, nebo jméno předané stránky
-            #/ TODO
-            ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL | awk '{print $4,$3,$2}' | \
-            while read line ; do
-                case "${line}" in
-                    \[S\]*) local TEMPORAR="${line#*\{}"
-                            local PAGE="${TEMPORAR%\}*}"
-                           echo "# shared_anno.iff # ${line##*+([[:blank:]])}"
-                           echo "Tisknu Globální meta informace"
-                           echo "select 'shared_anno.iff'; print-meta"
-                           ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
-                    ;;
-                    *) local TEMPORAR="${line#*\{}"
-                            local PAGE="${TEMPORAR%\}*}"
-                            echo -n "# ${PAGE} # ${line%%+([[:blank:]])*} ${line##*+([[:blank:]])} "
-                            ${DJVUSED} "${1}" -e "select ${PAGE}; size"
-                            #echo -e "Tisknu Meta informace ke stránce"
-                            ${DJVUSED} "${1}" -e "select ${PAGE}; print-meta"
-                    ;;
-                esac
-            done
+        meta) $0 "${1}" export meta | awk -F'#' '{print $4,$3}' | grep -v ^\ 
         ;;
         pages) identifybundle "${1}"
             case $? in
@@ -4867,24 +4859,20 @@ djvuinfo() {
                 ;;
             esac
         ;;
-        grep*) ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL | awk '{print $4,$3}' | \
+        grep*) $0 "${1}" info list | \
             while read line ; do
-                case "${line}" in
-                    \[S\]*)
+                case "${line%% *}" in
+                    O)
                     ;;
-                    *) local TEMPORAR="${line#*\{}"
-                        local PAGE="${TEMPORAR%\}*}"
-                        local TEMPORAR="${line%%\]*}"
-                        local ORDER="${TEMPORAR##*\[P}"
-                            #echo -n "# ${PAGE} # ${line%%+([[:blank:]])*} ${line##*+([[:blank:]])} "
-                            #${DJVUSED} "${1}" -e "select ${PAGE}; size"
-                            #echo -e "Tisknu Meta informace ke stránce"
-                            #${DJVUSED} "${1}" -e "select ${PAGE}; print-meta" | ${2}
-                            local TEMPORAR=$(${DJVUTXT} "${1}" -page=${ORDER} | ${2} 2>1)
-                            if [ -n "${TEMPORAR}" ] ; then
-                                echo "# ${PAGE} # ${line%%+([[:blank:]])*}"
-                                printf "%s\n" "${TEMPORAR}"
-                            fi
+                    '') return 1
+                    ;;
+                    *) local PAGE="${line#* }"
+                        local ORDER="${line%% *}"
+                        local TEMPORAR=$(${DJVUTXT} "${1}" -page=${ORDER} | ${2} 2>1)
+                        if [ -n "${TEMPORAR}" ] ; then
+                            echo "# ${PAGE} #[P${ORDER}]"
+                            printf "%s\n" "${TEMPORAR}"
+                        fi
                     ;;
                 esac
             done
@@ -4905,109 +4893,6 @@ djvuinfo() {
         ;;
     esac
     return $?
-}
-
-# ### <span id="deletepage">deletepage()</span> ([top](#FUNCTIONS))
-# Odstraňuje z DjVu Bundle svazku stránky
-#
-# $1 - soubor
-# $2 - parametry
-djvuinfo1() {
-    log goto "djvuinfo() $1 –> $2"
-    local SOURCE=$(${REALPATH} -m -P "${1}")
-    local FILE="${SOURCE##*/}"
-    if $(identifybundle "${SOURCE}") ; then
-        local PAGES="none"
-    else
-        local PAGES=$(lastpage "${SOURCE}")
-    fi
-    if [ -n "${2}" ] ; then
-        case "${2}" in
-            exif) ${EXIFTOOL} "${SOURCE}"
-                ;;
-            meta) printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
-                ;;
-            pages) if identifybundle ${SOURCE} ; then
-                    ${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
-                else
-                    ${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
-                fi
-                return 0
-            ;;
-            *) case "${2%%\ *}" in
-                    meta) if [ "${2#* }" == "all" ] ; then
-                            printmeta "${SOURCE}" all | grep -v '^[#.]\|^$'
-                            return 0
-                        elif [ "${2#* }" == "global" ] ; then
-							printmeta "${SOURCE}" global | grep -v '^[#.]\|^$'
-							return 0
-						else
-							printf "Meta atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
-							if [ -z "${NAMEPAGE}" ] ; then
-								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
-								exit 1
-							else
-								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
-								printf "Meta attributes from #%s page in DjVu bundle %s" "${IDPAGE}" "${FILE}" >> ${LOG}
-								printmeta "${SOURCE}" "${NAMEPAGE}" | grep -v '^[#.]\|^$'
-								return 0
-							fi
-						fi
-					;;
-					pages) if [ "${2#* }" == "all" ] ; then
-							if identifybundle ${SOURCE} ; then
-								${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
-							else
-								${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $3":"$2}'
-							fi
-							return 0
-						else
-							printf "View %s item from list %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
-							if [ -z "${NAMEPAGE}" ] ; then
-								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
-								exit 1
-							else
-								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
-								printf " [P%d]:%s\n" "${IDPAGE}" "${NAMEPAGE}"
-								return 0
-							fi
-						fi
-					;;
-					exif) if [ "${2#* }" == "all" ] ; then
-							${EXIFTOOL} "${SOURCE}"
-							return 0
-						else
-							printf "Exif atributtes for page %s from %s" "${2#* }" "${FILE}" >> ${LOG}
-							local NAMEPAGE=$(identifypage name "${SOURCE}" "${2#* }")
-							if [ -z "${NAMEPAGE}" ] ; then
-								echo "info: FAIL - identificator page ${2#* } is not valid for DjVu bundle ${FILE}" >> /dev/stderr
-								exit 1
-							else
-								local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
-								PAGE="yes"
-								djvuexport "${1}" "${NAMEPAGE} ${TEMPDIR}"
-								local INFO="Page #${IDPAGE} from DjVu bundle"
-								echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : ${FILE}\n"
-								${EXIFTOOL} "${TEMPDIR}/${NAMEPAGE}"
-								return 0
-							fi
-						fi
-					;;
-				esac
-			;;
-		esac
-    else
-        case "${PAGES}" in
-            none) local INFO="${FILE}"
-                echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu single-page\n"
-                ;;
-            *) local INFO="${FILE}"
-                echo -n "${INFO}" && printf "%$((31 - ${#INFO}))s : DjVu bundle - ${PAGES} pages\n"
-                ;;
-        esac
-    fi
 }
 
 function help {
