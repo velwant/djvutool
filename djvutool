@@ -2290,8 +2290,11 @@ isformat() {
         bookmark) #/ Volba pro DjVu
             #/ Záložky
             ;;
-        dsed) #/ Volba pro DjVu
+        dsed-*) #/ Volba pro DjVu
             #/ Export textové vrstvy v dsed formátu
+            #/ dsed-ant
+            #/ dsed-all
+            #/ dsed-txt
             ;;
         djvu) #/ Bitmapový soubor bude konvertován do djvu
             #/ U DjVu souboru budou vyexportované stránky složené opět
@@ -2310,7 +2313,7 @@ isformat() {
             ;;
         pnm|pam)
             ;;
-        mask|black|back|fore|full) #/ Typ exportované obrazové vrstvy
+        mask|black|background|foreground|color) #/ Typ exportované obrazové vrstvy
             ;;
         xcf|gimp)
             ;;
@@ -2508,6 +2511,9 @@ isscale() {
 #
 # Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
 # Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
+# ant - Exportuje hyperlinky a meta atributy ve formátu .ant
+# meta
+# mask|background|foreground|color|black - oxportuje obrázek pozadí
 fromdjvu() {
     log goto "fromdjvu() ${FILETYPE} $1 –> $2"
     local INTO=$(isformat "${2}")
@@ -2551,49 +2557,133 @@ fromdjvu() {
     echo "TEMPORAR ${TEMPORAR}"
     echo "Můžeme přikročit k akci"
     ''' >> /dev/null
+    mapfile -t LISTPAGES <<< $($0 "${1}" info list)
     case "${INTO}" in
-        ant) # Exportuje hyperlinky a meta atributy ve formátu .ant
-            #anttodsed "${CHARSTRING#* }"
+        djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*)
             if [ -n "${RANGE}" ] ; then
-                # Vybraný rozsah
                 local PAGES=($(range "${RANGE}"))
-                local LISTPAGES=($($0 "${1}" info list))
-                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
-                for i in ${PAGES[@]} ; do
-                    case "$i" in
-                        0) if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
-                            printf "# 'shared_anno.iff'\n"
-                            ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
-                            fi
-                        ;;
-                        *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-                            local PAGE="${LISTPAGES[$((i-1))]}"
-                            printf "# '%s'\n" "${PAGE##*:}"
-                            ${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed > ${TEMPFILE}
-                            echo "Zapsán obsah do souboru ${TEMPFILE}"
-                            createant ${TEMPFILE}
-                        ;;
-                    esac
-                done
             else
-                if identifybundle "${1}" ; then
-                    # Bundle file
-                    if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
-                        printf "# 'shared_anno.iff'\n"
-                        ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
-                    fi
-                    local LISTPAGES=($($0 "${1}" info list))
-                    for i in "${LISTPAGES[@]}" ; do
-                        printf "# '%s'\n" "${i##*:}"
-                        ${DJVUSED} "${1}" -e "select '${i##*:}'; print-ant" | formatdsed
-                    done
-                else
-                    # Single page file
-                    local PAGE=$(identifypage name "${1}" 1)
-                    printf "# '%s'\n" "${PAGE}"
-                    ${DJVUSED} "${1}" -e "select 1; print-ant" | formatdsed
-                fi
+                case "${TEMPORAR//+([[:blank:]])/}" in
+                    '') # jenom příkaz
+                        local PAGES=($(range "0-${#LISTPAGES[@]}"))
+                    ;;
+                    *) # seznam stránek oddělených čárkou
+                        local IFS_BAK=$IFS
+                        local IFS=$','
+                        local SEZNAM=($TEMPORAR)
+                        local IFS=$IFS_BAK
+                        for i in "${LISTPAGES[@]}" ; do
+                            if [[ "${SEZNAM[@]}" =~ "${i#+([[:digit:]]) }" ]] ; then
+                                local TEMP="$TEMP${i%% *} "
+                            fi
+                            x=$((x + 1))
+                        done
+                        local PAGES=($TEMP)
+                    ;;
+                esac
             fi
+            for i in ${PAGES[@]} ; do
+                case "${LISTPAGES[$i]%% *}" in
+                    0) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
+                        case ${INTO} in
+                            ant) printf "# 'shared_anno.iff' # [S]\n"
+                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                            ;;
+                            meta)
+                            ;;
+                            dsed-*) local EXPORT="output-ant"
+                                local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}.dsed")
+                                if [ -f "${TARGET}" ] ; then
+                                    anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                    [ $? -eq 1 ]&& return 1
+                                fi
+                                printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; remove-ant\n" > "${TARGET}"
+                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}" >> "${TARGET}"
+                                [ $? -eq 1 ] && return 1
+                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                            ;;
+                        esac
+                    ;;
+                    '') echo ""
+                    ;;
+                    *) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                        case ${INTO} in
+                            ant) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' # [P${LISTPAGES[$i]%% *}]\n"
+                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; print-ant" | formatdsed
+                            ;;
+                            meta)
+                            ;;
+                            djvu) local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}")
+                                if [ -f "${TARGET}" ] ; then
+                                    anone "Soubor ${TEMPORAR} již existuje. Mám ho přepsat?"
+                                    [ $? -eq 1 ]&& return 1
+                                fi
+                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; save-page-with '${TARGET}'"
+                                echo "Exportuji stránku Zapisuji do souboru ${TARGET}" >> /dev/stderr
+                            ;;
+                            mask|background|foreground|color|black)
+                                local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.png}")
+                                ${DDJVU} -format=pnm -mode=${INTO} -page="${LISTPAGES[$i]%% *}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+                                [ $? -eq 1 ] && return 1
+                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                            ;;
+                            dsed-*)
+                                case ${INTO} in
+                                    dsed-all) local EXPORT="output-all"
+                                        local IMPORT="remove-ant; remove-txt"
+                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.dsed}")
+                                    ;;
+                                    dsed-txt) local EXPORT="output-txt"
+                                        local IMPORT="remove-txt"
+                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.txt.dsed}")
+                                    ;;
+                                    dsed-ant) local EXPORT="output-ant"
+                                        local IMPORT="remove-ant"
+                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.ant.dsed}")
+                                    ;;
+                                    *) return 1
+                                    ;;
+                                esac
+                                if [ -f "${TARGET}" ] ; then
+                                    anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                    [ $? -eq 1 ]&& return 1
+                                fi
+                                printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; ${IMPORT}\n" > "${TARGET}"
+                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; ${EXPORT}" >> "${TARGET}"
+                                [ $? -eq 1 ] && return 1
+                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                            ;;
+                            xml-*) local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.xml}")
+                                case ${INTO} in
+                                    xml-all) local EXPORT="--with-text --with-anno"
+                                    ;;
+                                    xml-txt) local EXPORT="--with-text --without-anno"
+                                    ;;
+                                    xml-ant) local EXPORT="--without-text --with-anno"
+                                    ;;
+                                    *) return 1
+                                    ;;
+                                esac
+                                if [ -f "${TARGET}" ] ; then
+                                    anone "Soubor ${TEMPORAR/.djvu/.xml} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                    [ $? -eq 1 ]&& return 1
+                                fi
+                                ${DJVUTOXML} --page "${LISTPAGES[$i]%% *}" ${EXPORT} "${1}" "${TARGET}"
+                                [ $? -eq 1 ] && return 1
+                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                            ;;
+                        esac
+                    ;;
+                esac
+            done
             ;;
         outline) # Export obsahu ve formátu .outline
             printoutline "${1}"
@@ -2604,129 +2694,10 @@ fromdjvu() {
             outlinetodsed ${TEMPFILE} | encode
             printf "\n"
             ;;
-        meta) printmeta "${FILE}" global
-            ;;
-        dsed) # Exportuje obsah textové vrstvy ve formátu .dsed
-            echo nil
-            ;;
-        xml-*) #exportuje obsah textové vrstvy ve formátu .xml
-            case "${INTO}" in
-                xml-all) local EXPORT="--with-text --with-anno"
-                ;;
-                xml-txt) local EXPORT="--with-text --without-anno"
-                ;;
-                xml-ant) local EXPORT="--without-text --with-anno"
-                ;;
-                *) return 1
-                ;;
-            esac
-            if [ -n "${RANGE}" ] ; then
-                # Vybraný rozsah
-                local PAGES=($(range "${RANGE}"))
-                local LISTPAGES=($($0 "${1}" info list))
-                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
-                for i in ${PAGES[@]} ; do
-                    case "$i" in
-                        0) if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
-                            #printf "# 'shared_anno.iff'\n"
-                            #${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
-                            echo nil
-                            fi
-                        ;;
-                        *) local PAGE="${LISTPAGES[$((i-1))]}"
-                            #printf "# '%s'\n" "${PAGE##*:}"
-                            #${DJVUSED} "${1}" -e "select '${PAGE##*:}'; print-ant" | formatdsed
-                            echo nil
-                        ;;
-                    esac
-                done
-            else
-                if identifybundle "${1}" ; then
-                    # Bundle file
-                    if ${DJVM} -l "${1}" 2>/dev/null | grep SHARED_ANNO &>/dev/null ; then
-                        #printf "# 'shared_anno.iff'\n"
-                        #${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
-                        echo nil
-                    fi
-                    local LISTPAGES=($($0 "${1}" info list))
-                    for i in "${LISTPAGES[@]}" ; do
-                        #printf "# '%s'\n" "${i##*:}"
-                        #${DJVUSED} "${1}" -e "select '${i##*:}'; print-ant" | formatdsed
-                        echo nil
-                    done
-                else
-                    # Single page file
-                    local PAGE=$(identifypage name "${1}" 1)
-                    local TARGET="${PAGE/.djvu/.xml}"
-                    if [ -f "${TARGET}" ] ; then
-                        if [ "${FORCE}" == "yes" ] ; then
-                            ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
-                        elif [ "${FORCE}" == "skip" ] ; then
-                            log warn "exportxmlpage() Soubor ${TARGET} již v adresáři ${3} existuje."
-                        else
-                            echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-                            potvrdit && ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
-                        fi
-                    else
-                        ${DJVUTOXML} --page "1" ${EXPORT} "${1}" "${TARGET}"
-                    fi
-                fi
-            fi
-            ;;
-        djvu) # exportuje celé stránky ve formátu DjVu
-            echo nil
-            ;;
-        mask|black|back|fore|full)
-            # exportuje náhledy stránek ve formátu PNG
-            # Nahrazuje funkci exportpage2img
-            case "${INTO}" in
-                mask) local EXPORT="-mode=mask"
-                ;;
-                back) local EXPORT="-mode=background"
-                ;;
-                black) local EXPORT="-mode=black"
-                ;;
-                fore) local EXPORT="-mode=foreground"
-                ;;
-                full) local EXPORT="-mode=color"
-                ;;
-            esac
-            if [ -n "${RANGE}" ] ; then
-                # Vybraný rozsah
-                local PAGES=($(range "${RANGE}"))
-                local LISTPAGES=($($0 "${1}" info list))
-                [ "${PAGES[-1]}" -gt "${#LISTPAGES[@]}" ] && echo "Rozsah překračuje počet listů v dokumentu" >> /dev/stderr && return 1
-                for i in ${PAGES[@]} ; do
-                    case "$i" in
-                        0)
-                        ;;
-                        *) local PAGE="${LISTPAGES[$((i-1))]}"
-                            local TEMPORAR="${PAGE##*:}"
-                            local TARGET="${TEMPORAR/.djvu/.png}"
-                            ${DDJVU} -format=pnm "${EXPORT}" -page="$i" "${1}" | ${PNMTOPNG} > "${TARGET}"
-                            echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
-                        ;;
-                    esac
-                done
-            else
-                if identifybundle "${1}" ; then
-                    local LISTPAGES=($($0 "${1}" info list))
-                    for i in "${LISTPAGES[@]}" ; do
-                        local PAGE="${i%%\]*}"
-                        local TEMPORAR="${i##*:}"
-                        local TARGET="${TEMPORAR/.djvu/.png}"
-                        ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE#\[P}" "${1}" | ${PNMTOPNG} > "${TARGET}"
-                        echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
-                    done
-                else
-                    # Single page file
-                    local PAGE=$(identifypage name "${1}" 1)
-                    local TARGET="${PAGE/.djvu/.png}"
-                    ${DDJVU} -format=pnm "${EXPORT}" -page="1" "${1}" | ${PNMTOPNG} > "${TARGET}"
-                    echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
-                fi
-            fi
-            ;;
+#        meta) #/ printmeta "${FILE}" global
+#            # může být vše, ale také jen kus..
+#            testsyntaxdsed ${TEMPFILE}
+#            ;;
         *) echo "Nedělám nic ${INTO}" >> /dev/stderr
             ;;
     esac
@@ -4856,24 +4827,10 @@ EOF
 djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
-        list) identifybundle "${1}"
-            case $? in
-                0) ${DJVM} -l "${1}" | grep PAGE\ # | cut -d'#' -f2 | while read line
-                do
-                    local PAGENUM="${line%% *}"
-                    local TEMPORAR="${line#${PAGENUM}}"
-                    echo "[P${PAGENUM}]:${TEMPORAR##+([[:blank:]])}"
-                done
-#                ${DJVM} -l "${1}" | grep PAGE\ # | awk '{print " [P"$3"]:"$4}' | sed 's/P#/P/'
-                ;;
-                2) ${DJVUSED} "${1}" -e dump | grep FORM:DJVU | while read line
-                do
-                    local TEMPORAR="${line%\]*}"
-                    local PAGENAME="${line%%\}*}"
-                    echo "[${TEMPORAR##*\[}]:${PAGENAME##*\{}"
-                done
-                ;;
-            esac
+        list) 
+            ${DJVUSED} "${1}" -e 'dump' | grep '{' | grep -v INCL |\
+            awk -F'}' '{print $2,$1}' | \
+            sed -E 's/][[:blank:]]+[[:alnum:]:]+[[:blank:]]+\[[[:digit:]]+\][[:blank:]]+\{/ / ; s/ \[// ; s/^P// ; s/^S/0/' | sort -n
         ;;
         exif) ${EXIFTOOL} "${1}"
         ;;
@@ -4886,7 +4843,8 @@ djvuinfo() {
                     \[S\]*) local TEMPORAR="${line#*\{}"
                             local PAGE="${TEMPORAR%\}*}"
                            echo "# shared_anno.iff # ${line##*+([[:blank:]])}"
-                           #echo "Tisknu Globální meta informace"
+                           echo "Tisknu Globální meta informace"
+                           echo "select 'shared_anno.iff'; print-meta"
                            ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
                     ;;
                     *) local TEMPORAR="${line#*\{}"
@@ -5544,7 +5502,13 @@ FORMAT
       xml - na výstup bude vypsán XML obsah vybraného rozsahu stránek
      dsed - na výstup bude vypsán obsah vybraného rozsahu stránek v dsed formátu
   outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
-     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+ ?   meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+
+     color - plnobarevná stránka
+     black - černobílá kresba
+foreground - vrstva popředí
+background - vrstva pozadí
+      mask - maska
 
 RANGE
       num - pořadové číslo stránky v DjVu svazku
