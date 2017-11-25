@@ -34,6 +34,8 @@ shopt -s extglob
 #
 
 # ToDo
+# Odstranění vrstvy ze stránky
+# Odstranění sdíleného chunku
 # Doplnit nové funkce do wiki souboru
 # Opravit akci edit meta - dočasný soubor je někde v pytli - binec dělá asi realpath nebo co..
 # implementovat kontrolu do funkce todjvu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
@@ -2558,7 +2560,16 @@ fromdjvu() {
     echo "TEMPORAR ${TEMPORAR}"
     echo "Můžeme přikročit k akci"
     ''' >> /dev/null
-    mapfile -t LISTPAGES <<< $($0 "${1}" info list)
+    mapfile -t ARRAY <<< $($0 "${1}" info list)
+    case "${ARRAY:0:1}" in
+        0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+        ;;
+        *) LISTPAGES="0 none"
+        mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+        ;;
+    esac
+    #echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
+    #echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
         djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*)
             if [ -n "${RANGE}" ] ; then
@@ -2586,24 +2597,29 @@ fromdjvu() {
             for i in ${PAGES[@]} ; do
                 case "${LISTPAGES[$i]%% *}" in
                     0) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
-                        case ${INTO} in
-                            ant) printf "# 'shared_anno.iff' #[S]#\n"
-                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                        case "${LISTPAGES[$i]#+([[:digit:]]) }" in
+                            none)
                             ;;
-                            meta) printf "# 'shared_anno.iff' #[S]\n"
-                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
-                            ;;
-                            dsed-*) local EXPORT="output-ant"
-                                local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}.dsed")
-                                if [ -f "${TARGET}" ] ; then
-                                    anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
-                                    [ $? -eq 1 ]&& return 1
-                                fi
-                                printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; remove-ant\n" > "${TARGET}"
-                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}" >> "${TARGET}"
-                                [ $? -eq 1 ] && return 1
-                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                            *) case ${INTO} in
+                                ant) printf "# 'shared_anno.iff' #[S]\n"
+                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                                ;;
+                                meta) printf "# 'shared_anno.iff' #[S]\n"
+                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
+                                ;;
+                                dsed-*) local EXPORT="output-ant"
+                                    local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
+                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}.dsed")
+                                    if [ -f "${TARGET}" ] ; then
+                                        anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                        [ $? -eq 1 ]&& return 1
+                                    fi
+                                    printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; remove-ant\n" > "${TARGET}"
+                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}" >> "${TARGET}"
+                                    [ $? -eq 1 ] && return 1
+                                    echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                                ;;
+                            esac
                             ;;
                         esac
                     ;;
@@ -5482,17 +5498,17 @@ TARGET
 		keywords-info) echo """
   ACTION [1minfo[0m
 
-  Print informations about DjVu bundle. Without parameters return number of pages.
-  If is DjVu file 'single-page', return 'none'.
+  Vypisuje informace o DjVu souboru.
 
-  [1m${0##*/}[0m [volby] <DjVu svazek> info [SUBKEY]
+  [1m${0##*/}[0m [volby] <DjVu soubor> info [SUBKEY] [-h]
 
 SUBKEY
+    pages - počet stran v DjVu svazku
+     list - seznam stránek DjVu svazku, včetně 
     exif - vypisuje exif info o DjVu souboru
     meta - vypisuje meta informace stránek DjVu souboru
-    pages - vrací celkový počet stran v DjVu svazku
-    list - vrací seznam stránek DjVu svazku
     grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
+
 """
 		;;
 		keywords-print) echo """
@@ -5770,12 +5786,15 @@ xx  -t|--thumb     Creating thumbnails in DjVu bundle
     -v|--verbose   
     -x|--xml       Export hiddent text layer (XML) for use with DjVuWebEd"""
 		;;
-		*) echo """
+		'') echo """
 DJVUTOOL - tool to work with DjVu files & bundles
 
 Use:  [1m${0##*/}[0m [options] { [-h|--help] | <file> {KEYWORDS} [...] }
 """ && help options && help keywords
 		;;
+        *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
+            return 1
+        ;;
 	esac
 }
 
@@ -6326,15 +6345,20 @@ done
 FILETYPE=$(testfile "${FILE}")
 case "${CHARSTRING}" in
     *-h|*--help|-h*|--help*)
-        if [ -z "${ACTION}" ] ; then
-            help
-        else
+        if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
-                djvu) help "keywords-${ACTION}"
+                djvu) case "${CHARSTRING}" in
+                        meta*) help "${ACTION}-meta"
+                        ;;
+                        *) help "keywords-${ACTION}"
+                        ;;
+                    esac
                 ;;
                 *) help "bitmap-${ACTION}"
                 ;;
             esac
+        else
+            help
         fi
         exit 0
     ;;
