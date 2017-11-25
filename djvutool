@@ -6825,6 +6825,9 @@ case ${FILETYPE} in
                     ;;
                 esac
             ;;
+            '') echo "${FILE} –> invalid path!" >> /dev/stderr
+                return 1
+            ;;
             *) log info "main() Input bitmap file (or archive) ${FILE} is in format –> ${FILETYPE}"
                 case ${ACTION} in
                     # ### export
