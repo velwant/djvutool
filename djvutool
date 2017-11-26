@@ -1571,6 +1571,10 @@ writefile() {
     fi
 }
 
+decode() {
+    sed 's/\\/\\0/g' | tr '\000' '\\'
+}
+
 # ### <span id="encode">encode()</span> ([top](#FUNCTIONS))
 # Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
 # Velmi důležitá funkce!!!
@@ -2552,14 +2556,14 @@ fromdjvu() {
             fi
         ;;
     esac
-    echo '''
-    echo "RANGE ${RANGE}"
-    echo "INTO ${INTO}"
-    echo "TARGETDIR ${TARGETDIR}"
-    echo "TARGETSAMPLE ${TARGETSAMPLE}"
-    echo "TEMPORAR ${TEMPORAR}"
-    echo "Můžeme přikročit k akci"
-    ''' >> /dev/null
+    echo """
+    RANGE ${RANGE}
+    INTO ${INTO}
+    TARGETDIR ${TARGETDIR}
+    TARGETSAMPLE ${TARGETSAMPLE}
+    TEMPORAR ${TEMPORAR}
+    Můžeme přikročit k akci
+    """ >> /dev/null
     mapfile -t ARRAY <<< $($0 "${1}" info list)
     case "${ARRAY:0:1}" in
         0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
@@ -2568,8 +2572,8 @@ fromdjvu() {
         mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
         ;;
     esac
-    #echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
-    #echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
+#/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
+#/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
         djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*)
             if [ -n "${RANGE}" ] ; then
@@ -2585,7 +2589,7 @@ fromdjvu() {
                         local SEZNAM=($TEMPORAR)
                         local IFS=$IFS_BAK
                         for i in "${LISTPAGES[@]}" ; do
-                            if [[ "${SEZNAM[@]}" =~ "${i#+([[:digit:]]) }" ]] ; then
+                            if [[ "${SEZNAM[@]}" =~ "${i##+([[:digit:]])+([[:blank:]])}" ]] ; then
                                 local TEMP="$TEMP${i%% *} "
                             fi
                             x=$((x + 1))
@@ -2594,10 +2598,12 @@ fromdjvu() {
                     ;;
                 esac
             fi
+#/            echo "PAGES ${#PAGES[@]} ${PAGES[@]}" >> /dev/stderr
             for i in ${PAGES[@]} ; do
-                case "${LISTPAGES[$i]%% *}" in
-                    0) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
-                        case "${LISTPAGES[$i]#+([[:digit:]]) }" in
+                local PAGENAME="${LISTPAGES[$i]##+([[:digit:]])+([[:blank:]])}"
+                local PAGEORDER="${LISTPAGES[$i]%% *}"
+                case "${PAGEORDER}" in
+                    0) case "${PAGENAME}" in
                             none)
                             ;;
                             *) case ${INTO} in
@@ -2605,16 +2611,16 @@ fromdjvu() {
                                     ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                                 ;;
                                 meta) printf "# 'shared_anno.iff' #[S]\n"
-                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta"
+                                    local META=$(${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta" | decode)
+                                echo -e "${META}"
                                 ;;
                                 dsed-*) local EXPORT="output-ant"
-                                    local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}.dsed")
+                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}.dsed")
                                     if [ -f "${TARGET}" ] ; then
                                         anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
                                         [ $? -eq 1 ]&& return 1
                                     fi
-                                    printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; remove-ant\n" > "${TARGET}"
+                                    printf "select '${PAGENAME}' ; remove-ant\n" > "${TARGET}"
                                     ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}" >> "${TARGET}"
                                     [ $? -eq 1 ] && return 1
                                     echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
@@ -2625,29 +2631,27 @@ fromdjvu() {
                     ;;
                     '') echo ""
                     ;;
-                    *) #/ echo "${LISTPAGES[$i]#+([[:digit:]]) }"
-                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                    *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
-                            ant) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' #[P${LISTPAGES[$i]%% *}]\n"
-                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; print-ant" | formatdsed
+                            ant) printf "# '${PAGENAME}' #[P${PAGEORDER}]\n"
+                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed
                             ;;
-                            meta) printf "# '${LISTPAGES[$i]#+([[:digit:]]) }' #[P${LISTPAGES[$i]%% *}] #"
-                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; size"
-                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; print-meta"
+                            meta) printf "# '${PAGENAME}' #[P${PAGEORDER}] #"
+                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
+                                local META=$(${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-meta" | decode)
+                                echo -e "${META}"
                             ;;
-                            djvu) local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR}")
+                            djvu) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
                                 if [ -f "${TARGET}" ] ; then
                                     anone "Soubor ${TEMPORAR} již existuje. Mám ho přepsat?"
                                     [ $? -eq 1 ]&& return 1
                                 fi
-                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; save-page-with '${TARGET}'"
+                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; save-page-with '${TARGET}'"
                                 echo "Exportuji stránku Zapisuji do souboru ${TARGET}" >> /dev/stderr
                             ;;
                             mask|background|foreground|color|black)
-                                local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.png}")
-                                ${DDJVU} -format=pnm -mode=${INTO} -page="${LISTPAGES[$i]%% *}" "${1}" | ${PNMTOPNG} > "${TARGET}"
+                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.png}")
+                                ${DDJVU} -format=pnm -mode=${INTO} -page="${PAGEORDER}" "${1}" | ${PNMTOPNG} > "${TARGET}"
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
@@ -2655,18 +2659,15 @@ fromdjvu() {
                                 case ${INTO} in
                                     dsed-all) local EXPORT="output-all"
                                         local IMPORT="remove-ant; remove-txt"
-                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.dsed}")
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.dsed}")
                                     ;;
                                     dsed-txt) local EXPORT="output-txt"
                                         local IMPORT="remove-txt"
-                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.txt.dsed}")
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.txt.dsed}")
                                     ;;
                                     dsed-ant) local EXPORT="output-ant"
                                         local IMPORT="remove-ant"
-                                        local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.ant.dsed}")
+                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.ant.dsed}")
                                     ;;
                                     *) return 1
                                     ;;
@@ -2675,13 +2676,12 @@ fromdjvu() {
                                     anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
                                     [ $? -eq 1 ]&& return 1
                                 fi
-                                printf "select '${LISTPAGES[$i]#+([[:digit:]]) }' ; ${IMPORT}\n" > "${TARGET}"
-                                ${DJVUSED} "${1}" -e "select ${LISTPAGES[$i]%% *}; ${EXPORT}" >> "${TARGET}"
+                                printf "select '${PAGENAME}' ; ${IMPORT}\n" > "${TARGET}"
+                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; ${EXPORT}" >> "${TARGET}"
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
-                            xml-*) local TEMPORAR="${LISTPAGES[$i]#+([[:digit:]]) }"
-                                local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TEMPORAR/.djvu/.xml}")
+                            xml-*) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.xml}")
                                 case ${INTO} in
                                     xml-all) local EXPORT="--with-text --with-anno"
                                     ;;
@@ -2693,10 +2693,10 @@ fromdjvu() {
                                     ;;
                                 esac
                                 if [ -f "${TARGET}" ] ; then
-                                    anone "Soubor ${TEMPORAR/.djvu/.xml} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                    anone "Soubor ${PAGENAME/.djvu/.xml} již existuje a může obsahovat změny. Mám ho přepsat?"
                                     [ $? -eq 1 ]&& return 1
                                 fi
-                                ${DJVUTOXML} --page "${LISTPAGES[$i]%% *}" ${EXPORT} "${1}" "${TARGET}"
+                                ${DJVUTOXML} --page "${PAGEORDER}" ${EXPORT} "${1}" "${TARGET}"
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
@@ -5300,19 +5300,19 @@ ACTIONS for DjVu:
 
     delete - remove page from bundle
 fore, back - move, or insert pages into DjVu bundle
-    rotate - change orientation page or all pages DjVu bundle
+?    rotate - change orientation page or all pages DjVu bundle
     export - export from DjVu bundle
     import - import (content, meta attributes, outline) into DjVu bundle 
-      edit - edit meta attributes or outline in DjVu bundle
+?      edit - edit meta attributes or outline in DjVu bundle
       info - view info about DjVu bundle or selected page
-    rename - rename pages in DjVu bundle by pattern
+?    rename - rename pages in DjVu bundle by pattern
+      view - otevření DjVu souboru v djview4
 
 OBSOLETE ACTIONS:
     insert - vložení čehokoliv do DjVu (nahrazuje import)
      print - výpis meta atributů na konzoli (nahrazuje export)
        set - nastavení meta atributu (nahrazuje edit)
      unset - zrušení meta atributu (nahrazuje edit)
-      view - otevření DjVu souboru v djview4
 
 [3mNotice:[23m
    For more description about any action or option you set on command line as next parameter option -h (--help)
@@ -5324,15 +5324,9 @@ OBSOLETE ACTIONS:
   [1m${0##*/}[0m [volby] <svazek> delete RANGE
 
   Odstraňuje stránky z DjVu svazku. Pozor, akce je [4mnevratná[24m!
-
-  RANGE
-    Stránky k odstranění mohou být identifikovány buď jménem nebo aktuální
-    pozicí v rámci DjVu svazku. Ostranit lze i několik stránek najednou.
-    Použití seznamu jmen:
-                        … 'name_1.djvu,name_23.djvu,name_4.djvu'
-    Použití rozsahu:
-                        … 1,10,4-5
-[4mPoznámky:[24m
+"""
+        help range
+        echo """[4mPoznámky:[24m
   * Při odstraňování stránek je uvedený rozsah setříděn tak, aby se stránky
     odstraňovaly postupně odzadu, tak aby se během odstraňování neměnilo
     jejich pořadové číslo.
@@ -5464,8 +5458,23 @@ Nápověda pro export metainformacé
 """
     ;;
     export-meta) echo """
-Nápověda pro export metainformacé
+ACTION [1mexport[0m –> meta
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> export meta [RANGE]
+
+  Vypisuje meta informace z DjVu souboru, včetně jmen a pořadí stránek,
+  jejich rozměrů a případně aktuální stav rotace. Viz ukázka výstupu:
+
+   # 'shared_anno.iff' #[S]
+   Creator    \"Zpracovatel DjVu svazku\"
+   # 'w01.djvu' #[P1] #width=4019 height=4910
+   # 'další stránka.djvu' #[P2] #width=3972 height=4904 rotation=2
+   CreatorPage2    \"Zpracovatel stránky č. 2\"
+
+SEE ALSO
+    [1mexport[0m –> ant, [1minfo[0m –> exif, [1minfo[0m –> meta
 """
+    help range
     ;;
     export-outline) echo """
 Nápověda pro export obsahu
@@ -5706,10 +5715,23 @@ Examle for remove meta attribute:
 		help key
 		help value
 		;;
-		range) echo """  RANGE - parameter for selection range pages, specified by order of pages
-           in DjVu bundle. Separated by comma. Hyphen is for limits from-to.
-           Example range: 1,3,7-12"""
-		;;
+    range) echo """RANGE
+    Stránky lze identifikovat buď jménem nebo aktuální pozicí v rámci DjVu
+    souboru. Pokud chceme identifikovat více stránek najednou, lze použít
+    buď seznam jmen stránek, oddělených čárkou:
+
+                        … 'name_1.djvu,name_23.djvu,name_4.djvu'
+
+    Nebo seznam jejich pořadových čísel v souboru. Přičemž pomlčka
+    identifikuje rozsah od-do:
+                        … 1,10,4-5
+[4mPoznámka:[24m
+  * Před realizací akce se na základě jmen v seznamu vytvoří rozsah pořadí
+    stránek v souboru, který se následně setřídí. Nezáleží tedy na tom, v
+    jakém pořadí byly stránky, či jejich pořadová čísla předány.
+  * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
+"""
+        ;;
 		key) echo """    KEY - name of meta attribute, single word without diacritical chars
           and spaces. Example commonly used keys:
                  [3mTitle[23m - Title of DjVu page or bundle
@@ -6462,6 +6484,8 @@ case "${CHARSTRING}" in
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
                 djvu) case "${CHARSTRING}" in
+                        ant*) help "${ACTION}-ant"
+                        ;;
                         exif*) help "${ACTION}-exif"
                         ;;
                         meta*) help "${ACTION}-meta"
