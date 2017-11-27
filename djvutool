@@ -317,14 +317,16 @@ fi
 #=== konec testu závislostí ===
 
 ## Pomocné funkce...
-function xtabs {
-	# $1 - count of tabs
-	# return string of tabs
-	local TAB=$1
-	while [ ! $TAB -eq 0 ] ; do
-		printf '\t'
-		TAB=$(( $TAB - 1 ))
-	done 
+# ### <span id="xtabs">xtabs()</span> ([top](#FUNCTIONS))
+# Používá ji pouze funkce outlineset
+# $1 - count of tabs
+# return string of tabs
+xtabs() {
+    local TAB=$1
+    while [ ! $TAB -eq 0 ] ; do
+        printf '\t'
+        TAB=$(( $TAB - 1 ))
+    done 
 }
 
 function tabs {
@@ -711,89 +713,238 @@ function important1 {
 	fi
 }
 
+# ###  <span id="testsyntaxant">testsyntaxant()</span> ([top](#FUNCTIONS))
+# Tato funkce se stará o zpracování .ant formátu do formátu .dsed
+# Je opakem funkce formatsed
+#
+#    # 'shared_anno.iff' ; remove-ant
+#    set-ant
+#    metadata
+#        Author "jméno a příjmení"
+#        Exif.Image.DateTime "2017:11:27 17:05:21"
+#    background #000000
+#    zoom d50
+# 
+# A výstup takto:
+#
+#    # ------------------------- 
+#    select "shared_anno.iff"
+#    set-ant
+#    (metadata (Author "jméno a příjmení") (Exif.Image.DateTime "2017:11:27 17:05:21"))
+#    (background #000000 ) (zoom d50 ) 
+#    .
+#
 testsyntaxant() {
+    local OK="OK –> ${line}"
+    local ERR="ERR –> Chybí typ datového bloku"
+    local INVALID="INVALID –> Neplatný typ datového bloku"
+    local START="yes"
     while read -r line ; do
-        local OK="OK –> ${line}"
-        local ERR="ERR –> Chybí typ datového bloku"
-        local INVALID="INVALID –> Neplatný typ datového bloku"
+    log info "textsyntax() –> ${line}"
         case "${line}" in
-            \#+([[:blank:]])+([[:digit:]])) echo "Adresa" >> /dev/stderr
-                printf "select; remove-ant\n"
-                printf "# ------------------------- \n"
-                printf "select '%d'\n" "${line##\#+([[:blank:]])}"
+            \#+([[:blank:]])+([[:digit:]]))
+                if [ -n "${START}" ] ; then
+                    unset START
+                else
+                    case ${META} in
+                        metadata) echo "(${META} ${KEYS})"
+                        ;;
+                        maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
+                        ;;
+                    esac
+                    unset KEYS
+                    unset BORDER
+                    unset URL
+                    unset META
+                    printf "\n."
+                fi
+                printf "\n# ------------------------- \n"
+                case "${line#\#+([[:blank:]])}" in
+                    0*) printf "select 'shared_anno.iff' ; remove-ant\n"
+                    ;;
+                    *) printf "select %d\n" "${line#\#+([[:blank:]])}"
+                    ;;
+                esac
+                printf "remove-ant ; set-ant\n"
+            ;;
+            \#+([[:blank:]])*) 
+                if [ -n "${START}" ] ; then
+                    unset START
+                else
+                    case ${META} in
+                        metadata) echo "(${META} ${KEYS})"
+                        ;;
+                        maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
+                        ;;
+                    esac
+                    unset KEYS
+                    unset BORDER
+                    unset URL
+                    unset META
+                    printf "\n."
+                fi
+                printf "\n# ------------------------- \n"
+                local TEMPORAR="${line#\#+([[:blank:]])}"
+                case "${TEMPORAR}" in
+                    'shared_anno.iff'*|\
+                    shared_anno.iff*|\
+                    0) printf "select 'shared_anno.iff' ; remove-ant\n"
+                    ;;
+                    +([[:digit:]])*) printf "select %s; remove-ant\n" "${TEMPORAR%%+([[:blank:]])*}"
+                    ;;
+                    *)  printf "select %s; remove-ant\n" "${TEMPORAR%%#*}"
+                    ;;
+                esac
                 printf "set-ant\n"
             ;;
-            \#+([[:blank:]])*) echo "Adresa" >> /dev/stderr
-                printf "select; remove-ant\n"
-                printf "# ------------------------- \n"
-                printf "select '%s'\n" "${line##\#+([[:blank:]])}"
-                printf "set-ant\n"
+            metadata) case "${META}" in
+                        metadata) printf "(${META} ${KEYS})\n"
+                        ;;
+                        maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
+                        ;;
+                esac
+                unset KEYS
+                unset BORDER
+                unset URL
+                META='metadata'
             ;;
-            metadata) local META='metadata'
+            maparea) case "${META}" in
+                        metadata) echo "(${META} ${KEYS})"
+                        ;;
+                        maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
+                        ;;
+                esac
+                unset KEYS
+                unset BORDER
+                unset URL
+                META='maparea'
             ;;
-            maparea) local META='maparea'
+            background+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]|\
+            mode+([[:blank:]])+(color|bw|fore|black)|\
+            zoom+([[:blank:]])d+([[:digit:]])|\
+            zoom+([[:blank:]])+(stretch|one2one|width|page)|\
+            note*)
+                case ${META} in
+                        metadata) echo "(${META} ${KEYS})"
+                        ;;
+                        maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
+                        ;;
+                esac
+                printf "($line) "
+                unset KEYS
+                unset BORDER
+                unset URL
+                unset META
             ;;
             +([[:digit:]])+([[:blank:]])*)
-                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
-                echo "Klíč ${line%% *} tvořený pouze číslem sice DjVu sežere, ale prohlížeč nezobrazí" >> /dev/stderr
+                echo "Klíč tvořený pouze číslem není přípustný –> ${line}" >> /dev/stderr
+                return 1
             ;;
-            +([[:alnum:]])+([[:blank:]])\"+([[:alpha:]])*\") #/ klíč začínající číslem sice sežere, ale nezobrazí
-                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
-                KEYS="${KEYS} (${line})"
+            [[:digit:]]+([[:alnum:]])+([[:blank:]])\"*) #/ klíč začínající číslem sice sežere, ale nezobrazí
+                echo "Klíč začínající číslem není přípustný –> ${line}" >> /dev/stderr
+                return 1               
             ;;
             url+([[:blank:]])\"*\"+([[:blank:]])\"*\")
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ -n "${URL}" ] && echo "URL už je nastaveno!" >> /dev/stderr && return 1
                 local TEMPORAR=(${line})
                 if [ ${#TEMPORAR[@]} -eq 4 ] ; then
-                    URL="(${line[0]} ${line[1]} ${line[2]}) ${line[3]}"
+                    local URL="(${line[0]} ${line[1]} ${line[2]}) ${line[3]}"
                 else
                     echo "Neplatné nastavení URL –> ${line}"
                     return 1
                 fi
             ;;
-            \"*\"+([[:blank:]])\"*\") #maparea bez URL
+            \"*\"+([[:blank:]])\"*\")  #maparea bez URL
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ -n "${URL}" ] && echo "URL už je nastaveno!" >> /dev/stderr && return 1
-                URL="${line}"
+                local URL="${line}"
             ;;
-            rect|oval|poly|line|text)
+            +(rect|oval|poly|line|text)+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])*)
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
-                BORDER="${line}"
+                [ -n "${BORDER}" ] && echo echo "BORDER už je nastaveno! –> ${BORDER}" >> /dev/stderr && return 1
+                local BORDER="(${line}) "
             ;;
             shadow_*) # stínování - číslem uvedená tloušťka
             ;;
             hilite+([[:blank:]])\#+([[:digit:]])) # barva vysvícení
             ;;
             pushpin) # špendlík
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ -n "${BORDER}" ] || echo "${ERR}" >> /dev/stderr
+                case "${BORDER%% *}" in
+                    \(text) local KEYS="${KEYS} (${line})"
+                    ;;
+                    *) echo "Atribut pushpin lze použít pouze je-li maparea typu text –> ${BORDER}" >> /dev/stderr
+                        return 1
+                    ;;
+                esac
             ;;
             arrow) # šipka
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ -n "${BORDER}" ] || echo "${ERR}" >> /dev/stderr
+                case "${BORDER%% *}" in
+                    \(line) local KEYS="${KEYS} (${line})"
+                    ;;
+                    *) echo "Atribut arrow lze použít pouze u typu 'line' proto se u ostaních typů ignoruje –> ${BORDER}." >> /dev/stderr
+                    ;;
+                esac
             ;;
             border_avis)
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
+                case "${BORDER%% *}" in
+                    \(line) echo "Atribut border_avis typ 'line' nepoužívá, proto při importu ignoruje." >> /dev/stderr
+                    ;;
+                    *) local KEYS="${KEYS} (${line})"
+                    ;;
+                esac
             ;;
             xor|none)
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
-                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavea oblast!" >> /dev/stderr
-                TEMPORAR="(${BORDER} ) (${line} )" && unset BORDER
+                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
+                local KEYS="${KEYS} (${line})"
             ;;
             border+([[:blank:]])+([[:digit:]]))
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
-                TEMPORAR="(${BORDER} ) (${line} )" && unset BORDER
+                local KEYS="${KEYS} (${line})"
+            ;;
+            +(backclr|textclr|border)+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F])
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
+                [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
+                local KEYS="${KEYS} (${line})"
             ;;
             '') #echo "Prázdný řádek - vypíše položku a vypne přechozí volbu"
                 if [ "${META}" == "metadata" ] ; then
-                    printf "(${META} ${KEYS}) "
+                    echo "(${META} ${KEYS})"
                     unset META
                     unset KEYS
+                    unset BORDER
+                    unset URL
                 elif [ "${META}" == "maparea" ] ; then
-                    printf "(${META} ${URL} ${KEYS}) "
+                    echo "(${META} ${URL} ${BORDER} ${KEYS})"
+                    unset BORDER
                     unset META
                     unset URL
                     unset KEYS
                 fi
+            ;;
+            \;*) #/ komentáře
+            ;;
+            +([[:alpha:]])+([[:alnum:]])+([[:blank:]])\"*\") #/ Metadatové klíče
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                local KEYS="${KEYS} (${line})"
+            ;;
+            +([[:alpha:]])+([[:blank:]])\"*\") #/ Metadatové klíče
+                [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
+                local KEYS="${KEYS} (${line})"
             ;;
             *) echo "Na řádku je chyba –> ${line}" >> /dev/stderr
                 return 1
@@ -813,7 +964,7 @@ testsyntaxdsed() {
             select\;*) # Následuje výstup příkazu output-ant
                 local ALL="yes"
             ;;
-            select+([[:blank:]])\"*) # Následuje výstup příkazu output-ant
+            select+([[:blank:]])\"*) # Následuje zpracování stránky
                 local PAGE="# ${line#select+([[:blank:]])}"
                 echo "${PAGE}"
             ;;
@@ -842,20 +993,32 @@ testsyntaxdsed() {
     done < $1
 }
 
-# ###
-# Konvertuje stream v .dsed formátu do formátu .ant
+# ###  <span id="formatdsed">formatdsed()</span> ([top](#FUNCTIONS))
+# Tato funkce se stará o zpracování streamu v .dsed formátu do formátu .ant
+# Je opakem funkce testsyntaxant(). Vstup vypadá takto:
 #
-#/ # ------------------------- 
-#/ select "shared_anno.iff"
-#/ set-ant
-#/ (background #000000 ) (zoom d50 ) 
-#/ .
+#    # ------------------------- 
+#    select "shared_anno.iff"
+#    set-ant
+#    (metadata (Author "jméno a příjmení") (Exif.Image.DateTime "2017:11:27 17:05:21"))
+#    (background #000000 ) (zoom d50 ) 
+#    .
 # 
+# A výstup takto:
+#
+#    # 'shared_anno.iff' ; remove-ant
+#    set-ant
+#    metadata
+#        Author "jméno a příjmení"
+#        Exif.Image.DateTime "2017:11:27 17:05:21"
+#    background #000000
+#    zoom d50
+#
 formatdsed() {
     sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
     sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g' | \
     while read line ; do
-        #echo "zpracovávám ${line}" >> /dev/stderr
+        #/echo "zpracovávám ${line}" >> /dev/stderr
         case ${line} in
             \(metadata) echo -e "metadata"
                 local TAB=""
@@ -868,6 +1031,8 @@ formatdsed() {
                 unset TEMPORAR
                 unset TAB
             ;;
+            set-ant|set-txt)
+            ;;
             *) if [ "${TAB}" == "\t" ] ; then
                     case "${line:0:2}" in
                         "(u") local TEMPORAR="${line#(}"
@@ -875,6 +1040,9 @@ formatdsed() {
                             echo -e "${TAB}${TEMPORAR//\) /}"
                             unset TEMPORAR
                         ;;
+#                        \#*) echo -n "# "
+#                            unset TAB
+#                        ;;
                         *)
                             local TEMPORAR="${line#(}"
                             echo -e "${TAB}${TEMPORAR// \)/}"
@@ -887,9 +1055,17 @@ formatdsed() {
                         maparea*) echo -e "${TEMPORAR/ /\\\n\\\t}"
                             unset TEMPORAR
                         ;;
-                        background*|zoom*) local TEMPORAR="${line#(}"
-                            echo -e "${TEMPORAR// \)/}"
+                        background*|zoom*|mode*|align*)
+                            #local TEMPORAR="${line#(}"
+                            #echo -e "${TEMPORAR// \)/}"
+                            echo "${TEMPORAR}"
                             unset TEMPORAR
+                            unset TAB
+                        ;;
+                        \#*) echo -n "# "
+                            unset TAB
+                        ;;
+                        select*) echo "${TEMPORAR}"
                         ;;
                         *) echo -e "\t${TEMPORAR}"
                             unset TEMPORAR
@@ -1706,6 +1882,14 @@ EOF
 	fi
 }
 
+# ### <span id="outlineset">outlineset()</span> ([top](#FUNCTIONS))
+# Funkce ukládá outline do souboru
+# $1 - DjVu soubor
+#
+# Používá funkce:
+# * xtabs
+# * bookmarktooutline
+# * outlinetodsed
 function outlineset {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
@@ -2607,10 +2791,10 @@ fromdjvu() {
                             none)
                             ;;
                             *) case ${INTO} in
-                                ant) printf "# 'shared_anno.iff' #[S]\n"
+                                ant) printf "# 'shared_anno.iff'\n"
                                     ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                                 ;;
-                                meta) printf "# 'shared_anno.iff' #[S]\n"
+                                meta) printf "# 'shared_anno.iff'\n"
                                     local META=$(${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta" | decode)
                                 echo -e "${META}"
                                 ;;
@@ -2633,10 +2817,10 @@ fromdjvu() {
                     ;;
                     *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
-                            ant) printf "# '${PAGENAME}' #[P${PAGEORDER}]\n"
+                            ant) printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed
                             ;;
-                            meta) printf "# '${PAGENAME}' #[P${PAGEORDER}] #"
+                            meta) printf "# '${PAGENAME}' # page ${PAGEORDER} "
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
                                 local META=$(${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-meta" | decode)
                                 echo -e "${META}"
@@ -4716,7 +4900,14 @@ function changemeta {
 	return 0
 }
 
-function setmeta {
+# ### <span id="setmeta">setmeta()</span> ([top](#FUNCTIONS))
+#
+setmeta() {
+        log goto "setmeta() $1 –> $2"
+
+}
+
+function setmeta1 {
 	local SOURCE=$(${REALPATH} -m -P "${1}")
 	local FILE="${SOURCE##*/}"
 	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
@@ -5098,41 +5289,16 @@ Pokud má být číslování jiné než výchozí pětimístné, vypadá vzorek 
 		bundle) echo """Nápověda pro volbu typu svazku.. ToDo
 		"""
 		;;
-		page) echo """volba [1m-p[0m ([1m--page[0m)
+		dpi) echo """
+[1mOption:[0m --dpi  <[2mčíslo[22m> Hodnota DPI, která se má použít při zpracování obrázku.
+                               při konverzi. Optimální je zjistit hodnotu přímo ze vstupního
+                               obrázku. Před nastavením této hodnoty pro finální konverzi. lze vyzkoušet
+                               optimální nastavení na některém ze souborů s využitím parametru
+                               --test
 
-  Extrakce DjVu stránky ze svazku při akci [2mexport[22m
-
-  [1m${0##*/}[0m ... {-p|--page} [yes|no] ...
-  
-[4mPoznámka:[24m
-  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
-    předpokládá - yes.
-  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
-    PAGE do souboru v adresáři ${HOME}/.config/${NAME}/
-  * Exportované stránky se ukládají pod svým původním názvem.
-"""
-		;;
-		image) echo """volba [1m-i[0m ([1m--img[0m)
-
-  [4mExtrakce obrazové vrstvy[24m DjVu stránky do bitmapového souboru
-
-  [1m${0##*/}[0m ... {-i|--img} [yes|no|<layer>] ...
-
-  Je-li parametrem volby [3myes[23m, tak se bude při akci [2mexport[22m generovat z DjVu
-  stránky plnobarevný bitmapový obrázek ve formátu PNG.
-  V ostatních případech bude ve formátu PNM.
-
-      [1m${0##*/}[0m --img background svazek.djvu export stranka.djvu
- 
-Použitelné parametry:
-                 color - plnobarevná stránka
-                 black - černobílá kresba
-            foreground - vrstva popředí
-            background - vrstva pozadí
-                  mask - maska
-  Je-li místo [3m'yes'[23m uvedeno [3m'background'[23m, bude při exportu stránky
-  strana.djvu uložen obrázek pozadí pod jménem strana.background.pnm
-  Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
+  Rozsah číselné hodnoty je od 72 do 6000 dpi. Výchozí hodnota 300 se použije 
+  v případě, že parametr --dpi není vůbec uveden.
+  Vliv dpi na zpracování obrazu..
 """
 		;;
 		dsed) echo """Option [1m-d[0m ([1m--dsed[0m)
@@ -5156,56 +5322,9 @@ Použitelné parametry:
   * Exportovaná data se ukládají do souborů s příponou [3m.dsed[23m.
 """
 		;;
-		force) echo """volba [1m-f[0m ([1m--force[0m)
-
-  Nastavením této volby si lze vynutit výchozí chování k souborům při
-  akci [2mexport[22m. Není-li uvedena, tak se skript před každým
-  přepsáním již existujícího souboru zeptá, zda-li má, nebo nemá
-  pokračovat.
-
-  [1m${0##*/}[0m ... {-f|--force} [yes|no|skip] ...
-  
-         yes  - všechny soubory se budou bez keců přepisovat.
-         no   - skript se před přepsáním souboru bude dotazovat, zda-li
-                má soubor přepsat.
-         skip - pokud bude cílový soubor existovat, tak se akce přeskočí.
-
-[4mPoznámka:[24m
-  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
-    předpokládá - skip.
-  * Výchozí parametr hodnotu parametru  (skip) - lze implicitně změnit
-    nastavením proměnné FORCE v uživatelském konfiguračním souboru.
-"""
-		;;
-		verbose) echo """volbu [1m-v[0m ([1m--verbose[0m)
-  Prostřednictvím této volby si lze přesměrovat výstup doplňujících
-  informačních výpisů na konzoli. Díky nim pak lze podrobně sledovat
-  postup skriptu při zpracování souboru
-
-  [1m${0##*/}[0m ... {-v|--verbose} ...
-"""
-		;;
-		xml) echo """volba [1m-x[0m ([1m--xml[0m)
-
-  Extrakce skryté textové vrstvy DjVu stránky ve formátu XML.
-  Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
-
-  [1m${0##*/}[0m ... {-d|--dsed} [yes|no|all|txt|ant] ...
-  
-         yes - stejný efekt jako volba all
-         no  - textová vrstva se neexportuje (default)
-         all - exportuje se celý obsah skryté textové vrstvy
-         txt - exportuje se pouze obsah stránky
-         ant - exportují se meta atributy stránky
-
-[4mPoznámka:[24m
-  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
-    předpokládá - yes.
-  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
-    XML do souboru v adresáři ${HOME}/.config/${NAME}/
-  * Exportovaná data se ukládají do souborů s příponou [3m.xml[23m.
-
-[1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
+		existed) echo """
+  Soubor $2 existuje. Pokud se má přepsat, musí být
+  uveden parametr -f (--force)
 """
 		;;
 		exporttometa) echo """volba [1m-m[0m ([1m--meta[0m)
@@ -5238,6 +5357,50 @@ Použitelné parametry:
     ${HOME}/.config/${NAME}/
 """
 		;;
+		force) echo """volba [1m-f[0m ([1m--force[0m)
+
+  Nastavením této volby si lze vynutit výchozí chování k souborům při
+  akci [2mexport[22m. Není-li uvedena, tak se skript před každým
+  přepsáním již existujícího souboru zeptá, zda-li má, nebo nemá
+  pokračovat.
+
+  [1m${0##*/}[0m ... {-f|--force} [yes|no|skip] ...
+  
+         yes  - všechny soubory se budou bez keců přepisovat.
+         no   - skript se před přepsáním souboru bude dotazovat, zda-li
+                má soubor přepsat.
+         skip - pokud bude cílový soubor existovat, tak se akce přeskočí.
+
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - skip.
+  * Výchozí parametr hodnotu parametru  (skip) - lze implicitně změnit
+    nastavením proměnné FORCE v uživatelském konfiguračním souboru.
+"""
+		;;
+		image) echo """volba [1m-i[0m ([1m--img[0m)
+
+  [4mExtrakce obrazové vrstvy[24m DjVu stránky do bitmapového souboru
+
+  [1m${0##*/}[0m ... {-i|--img} [yes|no|<layer>] ...
+
+  Je-li parametrem volby [3myes[23m, tak se bude při akci [2mexport[22m generovat z DjVu
+  stránky plnobarevný bitmapový obrázek ve formátu PNG.
+  V ostatních případech bude ve formátu PNM.
+
+      [1m${0##*/}[0m --img background svazek.djvu export stranka.djvu
+ 
+Použitelné parametry:
+                 color - plnobarevná stránka
+                 black - černobílá kresba
+            foreground - vrstva popředí
+            background - vrstva pozadí
+                  mask - maska
+  Je-li místo [3m'yes'[23m uvedeno [3m'background'[23m, bude při exportu stránky
+  strana.djvu uložen obrázek pozadí pod jménem strana.background.pnm
+  Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
+"""
+		;;
 		indirect) echo"""
 [1mVolba[0m
          --indirect Volba, kterou lze změnit výchozí typ vícestránkového 
@@ -5254,38 +5417,13 @@ Použitelné parametry:
   bundled, kdy je vše zabaleno v jednom souboru
 """
 		;;
-		existed) echo """
-  Soubor $2 existuje. Pokud se má přepsat, musí být
-  uveden parametr -f (--force)
-"""
-		;;
-		dpi) echo """
-[1mOption:[0m --dpi  <[2mčíslo[22m> Hodnota DPI, která se má použít při zpracování obrázku.
-                               při konverzi. Optimální je zjistit hodnotu přímo ze vstupního
-                               obrázku. Před nastavením této hodnoty pro finální konverzi. lze vyzkoušet
-                               optimální nastavení na některém ze souborů s využitím parametru
-                               --test
-
-  Rozsah číselné hodnoty je od 72 do 6000 dpi. Výchozí hodnota 300 se použije 
-  v případě, že parametr --dpi není vůbec uveden.
-  Vliv dpi na zpracování obrazu..
-"""
-		;;
-		level) echo """
-[1mParametr[0m
-         -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
-                               při konverzi. Před nastavením této hodnoty vyzkoušejte
-                               optimální nastavení na některém ze souborů a s parametrem
-                               --test
-
-  Kromě číselné hodnoty, která musí být menší než 200 lze úroveň ztrát
-  nastavit i pomocí některého z následujících parametrů - v případě že 
-  jich bude uvedeno víc, má prioritu poslední z nich.
-
-        --lossless     0 - žádné ztráty (default)
-        --clean        1 - ignorují se body o velikosti 1 pixelu
-        --lossy        100 - ignorují se plochy
-"""
+		key) echo """    KEY - name of meta attribute, single word without diacritical chars
+          and spaces. Example commonly used keys:
+                 [3mTitle[23m - Title of DjVu page or bundle
+               [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
+          [3mCreationDate[23m - Creation date of DjVu bundle or page
+              [3mKeywords[23m - Keywords for indexation DjVu file
+                [3mannote[23m - Notes about origin of document & etc."""
 		;;
 		keywords) echo """
 
@@ -5378,31 +5516,33 @@ OBSOLETE ACTIONS:
   svazku jedinečné.
 """
 		;;
-		keywords-rotate) echo """
-  ACTION [1mrotate[0m
+		keywords-edit) echo """
+  ACTION [1medit[0m
 
-  For change of default orientation page in DjVu file.
+  Editace textový informací DjVu svazku - meta informace, bookmarks,outline
 
-  [1m${0##*/}[0m [option] <DjVu> rotate {<num>|<name>} <VALUE>
+  [1m${0##*/}[0m <DjVu> edit outline
 
-         num   - order of page to change in DjVu bundle
-         name  - name of page to change in DjVu bundle
+  [1m${0##*/}[0m <DjVu> edit ant [<num>|<name>|<RANGE>]
 
-Options:
-    -f|--force   Force rotate without any questions
+         outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
+         meta  - vygenerování šablony pro .outline formát s adresováním
+                 stránek podle jejich názvů
 
-  VALUE:
-             0 - normal orientation (0°)
-             1 - rotate page 90° to right
-             2 - rotate page 180°
-             3 - rotate page 90° to left (270°)
-          left - rotate page 90° in left direction
-         right - rotate page 90° in right direction
-           180 - turn the page on the contrary
+         num  - pořadové číslo stránky v DjVu svazku
+         name - jméno stránky v DjVu svazku
 
-[3mWarning:[23m
-  * If is not any identificator of page, do set global orientation for all DjVu bundle.
+[3mPoznámka:[23m
+  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
+  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
+  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
+                   1 úroveň = 1 tabulátor = 8 mezer
+  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
+  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
+[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
+  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
+		help range
 		;;
     keywords-export) echo """
   ACTION: [1mexport[0m
@@ -5523,34 +5663,6 @@ Nápověda pro export grafické vrstvy
     zpracovávat soubory z aktuálního adresáře
 """
 		;;
-		keywords-edit) echo """
-  ACTION [1medit[0m
-
-  Editace textový informací DjVu svazku - meta informace, bookmarks,outline
-
-  [1m${0##*/}[0m <DjVu> edit outline
-
-  [1m${0##*/}[0m <DjVu> edit ant [<num>|<name>|<RANGE>]
-
-         outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
-         meta  - vygenerování šablony pro .outline formát s adresováním
-                 stránek podle jejich názvů
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-
-[3mPoznámka:[23m
-  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
-  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
-  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
-                   1 úroveň = 1 tabulátor = 8 mezer
-  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
-  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
-[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
-  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
-"""
-		help range
-		;;
     keywords-info) echo """
   ACTION [1minfo[0m
 
@@ -5658,6 +5770,32 @@ SUBKEY
   akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
 """
 		;;
+		keywords-rotate) echo """
+  ACTION [1mrotate[0m
+
+  For change of default orientation page in DjVu file.
+
+  [1m${0##*/}[0m [option] <DjVu> rotate {<num>|<name>} <VALUE>
+
+         num   - order of page to change in DjVu bundle
+         name  - name of page to change in DjVu bundle
+
+Options:
+    -f|--force   Force rotate without any questions
+
+  VALUE:
+             0 - normal orientation (0°)
+             1 - rotate page 90° to right
+             2 - rotate page 180°
+             3 - rotate page 90° to left (270°)
+          left - rotate page 90° in left direction
+         right - rotate page 90° in right direction
+           180 - turn the page on the contrary
+
+[3mWarning:[23m
+  * If is not any identificator of page, do set global orientation for all DjVu bundle.
+"""
+		;;
 		keywords-set) echo """
   ACTION [1mset[0m set meta attribute key or outline item from command line
 
@@ -5714,33 +5852,6 @@ Examle for remove meta attribute:
 		help range
 		help key
 		help value
-		;;
-    range) echo """RANGE
-    Stránky lze identifikovat buď jménem nebo aktuální pozicí v rámci DjVu
-    souboru. Pokud chceme identifikovat více stránek najednou, lze použít
-    buď seznam jmen stránek, oddělených čárkou:
-
-                        … 'name_1.djvu,name_23.djvu,name_4.djvu'
-
-    Nebo seznam jejich pořadových čísel v souboru. Přičemž pomlčka
-    identifikuje rozsah od-do:
-                        … 1,10,4-5
-[4mPoznámka:[24m
-  * Před realizací akce se na základě jmen v seznamu vytvoří rozsah pořadí
-    stránek v souboru, který se následně setřídí. Nezáleží tedy na tom, v
-    jakém pořadí byly stránky, či jejich pořadová čísla předány.
-  * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
-"""
-        ;;
-		key) echo """    KEY - name of meta attribute, single word without diacritical chars
-          and spaces. Example commonly used keys:
-                 [3mTitle[23m - Title of DjVu page or bundle
-               [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
-          [3mCreationDate[23m - Creation date of DjVu bundle or page
-              [3mKeywords[23m - Keywords for indexation DjVu file
-                [3mannote[23m - Notes about origin of document & etc."""
-		;;
-		value) echo """  VALUE - is normal text string in quotes"""
 		;;
 		keywords-meta) echo """
   ACTION [1mset[0m or [1munset[0m
@@ -5809,6 +5920,22 @@ Zrušeno, nahrazeno akcí edit a export
   jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
 		;;
+		level) echo """
+[1mParametr[0m
+         -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
+                               při konverzi. Před nastavením této hodnoty vyzkoušejte
+                               optimální nastavení na některém ze souborů a s parametrem
+                               --test
+
+  Kromě číselné hodnoty, která musí být menší než 200 lze úroveň ztrát
+  nastavit i pomocí některého z následujících parametrů - v případě že 
+  jich bude uvedeno víc, má prioritu poslední z nich.
+
+        --lossless     0 - žádné ztráty (default)
+        --clean        1 - ignorují se body o velikosti 1 pixelu
+        --lossy        100 - ignorují se plochy
+"""
+		;;
 # ODSTRANIT VVVV
 		meta) echo """
 Export meta atributů
@@ -5854,6 +5981,59 @@ Pokud stránka žádné meta atributy nemá, vypíše se pouze prázdná šablon
     přejmenování - za název se přidá podtržítko a pořadové číslo.
 """
 		;;
+		ocr) echo "Nápověda k OCR - ToDo"
+		;;
+		options) echo """Options:
+    -a|--algorithm Algorithm for separating mask of image (fore or back)
+xx  -b|--bundle    Setting type of DjVu bundle
+    -d|--dsed      Export hiddent text layer in native code for DjVused
+       --dpi       DPI input image for import (actions fore or back)
+    -f|--force     Force action
+       --clean     Params for convert image to DjVu with separate layers
+       --lossy
+       --lossless
+       --level
+    -h|--help      Main options for help about option, or action
+    -i|--image     Export .png image of page for use with DjVuWebEd
+??  -m|--meta      Export meta attributes from DjVu file
+    -o|--ocr       Application OCR
+    -p|--page      Export single DjVu page from bundle
+    -r|--rename    Pattern for action rename 
+xx  -t|--thumb     Creating thumbnails in DjVu bundle
+    -v|--verbose   
+    -x|--xml       Export hiddent text layer (XML) for use with DjVuWebEd"""
+		;;
+		page) echo """volba [1m-p[0m ([1m--page[0m)
+
+  Extrakce DjVu stránky ze svazku při akci [2mexport[22m
+
+  [1m${0##*/}[0m ... {-p|--page} [yes|no] ...
+  
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - yes.
+  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
+    PAGE do souboru v adresáři ${HOME}/.config/${NAME}/
+  * Exportované stránky se ukládají pod svým původním názvem.
+"""
+		;;
+    range) echo """RANGE
+    Stránky lze identifikovat buď jménem nebo aktuální pozicí v rámci DjVu
+    souboru. Pokud chceme identifikovat více stránek najednou, lze použít
+    buď seznam jmen stránek, oddělených čárkou:
+
+                        … 'name_1.djvu,name_23.djvu,name_4.djvu'
+
+    Nebo seznam jejich pořadových čísel v souboru. Přičemž pomlčka
+    identifikuje rozsah od-do:
+                        … 1,10,4-5
+[4mPoznámka:[24m
+  * Před realizací akce se na základě jmen v seznamu vytvoří rozsah pořadí
+    stránek v souboru, který se následně setřídí. Nezáleží tedy na tom, v
+    jakém pořadí byly stránky, či jejich pořadová čísla předány.
+  * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
+"""
+        ;;
 		rename) echo """ volba [1m-r[0m, [1m--rename[0m
  Nastavení vzorku, podle jakého se mají pojmenovat, nebo přejmenovat DjVu soubory v DjVu svazku.
 
@@ -5900,27 +6080,38 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
      xcf, tiff, pdf 
 """
 			;;
-		ocr) echo "Nápověda k OCR - ToDo"
+		value) echo """  VALUE - is normal text string in quotes"""
 		;;
-		options) echo """Options:
-    -a|--algorithm Algorithm for separating mask of image (fore or back)
-xx  -b|--bundle    Setting type of DjVu bundle
-    -d|--dsed      Export hiddent text layer in native code for DjVused
-       --dpi       DPI input image for import (actions fore or back)
-    -f|--force     Force action
-       --clean     Params for convert image to DjVu with separate layers
-       --lossy
-       --lossless
-       --level
-    -h|--help      Main options for help about option, or action
-    -i|--image     Export .png image of page for use with DjVuWebEd
-??  -m|--meta      Export meta attributes from DjVu file
-    -o|--ocr       Application OCR
-    -p|--page      Export single DjVu page from bundle
-    -r|--rename    Pattern for action rename 
-xx  -t|--thumb     Creating thumbnails in DjVu bundle
-    -v|--verbose   
-    -x|--xml       Export hiddent text layer (XML) for use with DjVuWebEd"""
+		verbose) echo """volbu [1m-v[0m ([1m--verbose[0m)
+  Prostřednictvím této volby si lze přesměrovat výstup doplňujících
+  informačních výpisů na konzoli. Díky nim pak lze podrobně sledovat
+  postup skriptu při zpracování souboru
+
+  [1m${0##*/}[0m ... {-v|--verbose} ...
+"""
+		;;
+		xml) echo """volba [1m-x[0m ([1m--xml[0m)
+
+  Extrakce skryté textové vrstvy DjVu stránky ve formátu XML.
+  Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
+
+  [1m${0##*/}[0m ... {-d|--dsed} [yes|no|all|txt|ant] ...
+  
+         yes - stejný efekt jako volba all
+         no  - textová vrstva se neexportuje (default)
+         all - exportuje se celý obsah skryté textové vrstvy
+         txt - exportuje se pouze obsah stránky
+         ant - exportují se meta atributy stránky
+
+[4mPoznámka:[24m
+  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
+    předpokládá - yes.
+  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
+    XML do souboru v adresáři ${HOME}/.config/${NAME}/
+  * Exportovaná data se ukládají do souborů s příponou [3m.xml[23m.
+
+[1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
+"""
 		;;
 		'') echo """
 DJVUTOOL - tool to work with DjVu files & bundles
@@ -6612,17 +6803,18 @@ case ${FILETYPE} in
                 return 0
             ;;
             import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
+                # Před editací meta informací, je doporučeno zkontrolovat a případně 
+                # vyexportovat aktuální stav, příkazem
+                #
+                # djvutool <DJVU soubor> export ant [> aktualni_stav.ant]
+                #
+                # Pokud chcete mít obarvený výstup a zároveň ho uložit obvarvený do souboru, použijte následující kombinaci:
+                #
+                # ( grc djvutool soubor.djvu export ant | tee >(sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})*)?m//g" > soubor.ant) )
                 case "${CHARSTRING}" in
                     ant*) #/ Importuji obsah .ant souboru
                         local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-                        writefile ${TEMPFILE}
-                        echo "Byl zapsán ${TEMPFILE}" >> /dev/stderr
-                        # Následující funkce parsuje formát .ant
-                        #testsyntaxant ${TEMPFILE}
-                        # Následující funkce parsuje formát .dsed
-                        testsyntaxdsed ${TEMPFILE}
-                        exit 33
-                        local ANTFILE=${CHARSTRING#ant}
+                        local ANTFILE="${CHARSTRING#ant+([[:blank:]])}"
                         #/ ořezat mezery před a za
                         if [ -f "${ANTFILE}" ] ; then
                             cat "${ANTFILE}" > "${TEMPFILE}"
@@ -6653,28 +6845,26 @@ case ${FILETYPE} in
                                 printf ';; Aktivní link s bublinou u textu přes dva řádky"\n' >> "${TEMPFILE}"
                                 printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
                                 printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
-                                $0 "${FILE}" export ant >> "${TEMPFILE}"
+                                $0 "${FILE}" export ${CHARSTRING} >> "${TEMPFILE}"
                             fi
                         fi
-                        echo "Obsah byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
                         case ${ACTION} in
-                            edit) echo "Edituji soubor ${TEMPFILE}" >> /dev/stderr
+                            edit)
+                                editor "${TEMPFILE}"
+                                anone "Uložit změny?"
+                                [ $? -eq 1 ] && return 1
                             ;;
                         esac
-                        echo "Importuji soubor ${TEMPFILE}" >> /dev/stderr
-                        important "${FILE}" "${TEMPFILE}"
-#                        outlinetodjvu "${FILE}" "${TEMPFILE}"
-
-#                        local ANT=${CHARSTRING#* }
-#                        if [ -f "${ANT%% *}" ] ; then
-#                            echo "import from ant file ${ANT%% *} to ${FILE} to pages: ${ANT#${ANT%% *}}" >> /dev/stderr
-#                            #anttodsed "${CHARSTRING#* }"
-#                            important "${FILE}" "${ANT%% *}" "${ANT#${ANT%% *}}"
-#                        else
-#                            echo "ERROR: ${ANT%% *} isn't .ant file!"
-#                            return 1
-#                        fi
-                        return 0
+                        local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+                        testsyntaxant "${TEMPFILE}" > "${DSEDFILE}"
+                        if [ $? -eq 1 ] ; then
+                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
+                            exit 33
+                        fi
+                        ${DJVUSED} "${FILE}" -f "${DSEDFILE}" -s
+                        # Funkci important nahradil textsyntaxant
+                        #important "${FILE}" "${DSEDFILE}"
+                        return $?
                     ;;
                     meta*) echo "import from meta file to ${FILE}"
                         echo nil
@@ -6684,7 +6874,7 @@ case ${FILETYPE} in
                         #/ Může být předaný i soubor
                         #/ Není-li předaný soubor, zkus načíst stdin
                         local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-                        local OUTLINEFILE=${CHARSTRING#outline}
+                        local OUTLINEFILE="${CHARSTRING#outline+([[:blank:]])}"
                         #/ ořezat mezery před a za
                         if [ -f "${OUTLINEFILE}" ] ; then
                             log info "main() Importuji .outline soubor ${OUTLINEFILE}"
@@ -6705,17 +6895,24 @@ case ${FILETYPE} in
                                 printf ';\n' >> "${TEMPFILE}"
                                 printf ';"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
                                 printf ';      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
+                                $0 "${FILE}" info list | sed 's/^/; /' >> "${TEMPFILE}"
                                 $0 "${FILE}" export outline >> "${TEMPFILE}"
                             fi
                         fi
-                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
+#                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
                         case ${ACTION} in
-                            edit) echo "Edituji soubor ${TEMPFILE}" >> /dev/stderr
+                            edit) editor "${TEMPFILE}"
                             ;;
                         esac
-                        lig info "main() Importuji soubor .outline ${TEMPFILE} do ${FILE}"
+#                        lig info "main() Importuji soubor .outline ${TEMPFILE} do ${FILE}"
+#                        local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
                         outlinetodjvu "${FILE}" "${TEMPFILE}"
-                        echo "Záložky byly aktualizovány" >> /dev/stderr
+                        if [ $? -eq 1 ] ; then
+                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
+                            exit 33
+                        else
+                            echo "Záložky byly aktualizovány" >> /dev/stderr
+                        fi
                         return 0
                     ;;
                     page*) echo "Importuji do svazku DjVu stránku"
@@ -6749,12 +6946,24 @@ case ${FILETYPE} in
                     ;;
                     set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
                         #/ REWORK!
-                        # meta informaci
+                        # Akce set je určena pro primární nastavení odkazů v obsahu, či poznámek v textu
+                        # Souřadnice se při ní přepočítávají podle velikosto stránky
+                        # a zároveň se kontroluje syntaxe.
+                        # Dodatečné úpravy lze pak provádět buď přes djvusmooth, nebo editací vrstvy .ant
+                        # set outline : "#cíl" "popis"
+                        # set meta RANGE : key "Popis"
+                        # set note RANGE : key "Obsah skryté poznámky"
+                        # set poly RANGE : "" "" {none|xor|border} [border_avis] x1 y1 x2 y2 …
+                        # set rect : "" {none|xor|border c} [hilite c] [border_avis] x1 y1 x2 y2
+                        # set oval : "" {none|xor|border} [border_avis] x1 y1 x2 y2
+                        # set line : 
+                        # Jak upravit line - nejprve někam nastavit a pak přes djvusmooth upravit odkud kam
+                        # set text : x1 y1 x2 x3
                         # URL
                         # maparea
                         # 
                         case "${CHARSTRING%% *}" in
-                            meta) setmeta "${FILE}" "${CHARSTRING#* }"
+                            meta) setmeta "${FILE}" "${CHARSTRING}"
                             ;;
                             outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
                             ;;
