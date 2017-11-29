@@ -838,12 +838,16 @@ testsyntaxdsed() {
 #
 formatdsed() {
     sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
-    sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g' | \
+    sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g ; s/</\n</g' | \
     while read line ; do
         #/echo "zpracovávám ${line}" >> /dev/stderr
         case ${line} in
             \(metadata) echo -e "metadata"
                 local TAB=""
+            ;;
+            \(xmp*) echo -e "xmp"
+                local XMP="y"
+                local TAB="\t"
             ;;
             \(maparea+([[:blank:]])\") echo -e "\n"
                 local TAB="\t"
@@ -865,10 +869,19 @@ formatdsed() {
 #                        \#*) echo -n "# "
 #                            unset TAB
 #                        ;;
-                        *)
-                            local TEMPORAR="${line#(}"
-                            echo -e "${TAB}${TEMPORAR// \)/}"
-                            unset TEMPORAR
+                        *) if [ -n "${XMP}" ] ; then
+                                case "${line: -2}" in
+                                    \"\)) echo -e "${TAB}${line%>*}>"
+                                        unset XMP
+                                    ;;
+                                    *)  echo -e "${TAB}${line}"
+                                    ;;
+                                esac
+                            else
+                                local TEMPORAR="${line#(}"
+                                echo -e "${TAB}${TEMPORAR// \)/}"
+                                unset TEMPORAR
+                            fi
                         ;;
                     esac
                 else
@@ -877,7 +890,7 @@ formatdsed() {
                         maparea*) echo -e "${TEMPORAR/ /\\\n\\\t}"
                             unset TEMPORAR
                         ;;
-                        background*|zoom*|mode*|align*)
+                        background*|zoom*|mode*|align*|phead*|pfoot*)
                             #local TEMPORAR="${line#(}"
                             #echo -e "${TEMPORAR// \)/}"
                             echo "${TEMPORAR}"
@@ -2619,6 +2632,219 @@ fromdjvu() {
             ;;
         *) echo "Nedělám nic ${INTO}" >> /dev/stderr
             ;;
+    esac
+}
+
+# ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
+# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
+# __$2__ obsahuje parametry
+#
+# * ant - Exportuje hyperlinky a meta atributy ve formátu .ant
+# * meta - Exportuje meta informace stránky, její rozměry a stav rotace
+# * djvu - Exportuje DjVu stránky
+# * mask|background|foreground|color|black - oxportuje obrázek pozadí
+# * dsed-*
+# * xml-*
+setdjvu() {
+    log goto "setdjvu() ${FILETYPE} $1 –> $2"
+
+    local RANGE=$(isrange "${2}")
+    if [ ! -n "${RANGE}" ] ; then
+        local RANGE="${2%%+([[:blank:]])*}"
+    fi
+
+    local TEMPORAR="${2#*${RANGE}}"
+    [ ! -n "${TEMPORAR##+([[:blank:]])}" ] && return 1
+
+    case "${RANGE}" in
+        outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+                $0 "${FILE}" export outline > "${TEMPFILE}"
+                echo "${TEMPORAR##+([[:blank:]])}" >> "${TEMPFILE}"
+                outlinetodjvu "${FILE}" "${TEMPFILE}"
+                if [ $? -eq 1 ] ; then
+                    echo "V importované záložce je syntaktická chyba –> ${TEMPORAR}" >> /dev/stderr
+                    return 1
+                else
+                    echo "Pozici naimportované záložky v obsahu lze upravit přes akci edit" >> /dev/stderr
+                fi
+                return $?
+        ;;
+        *) local TEST=($($0 "${1}" info list))
+            case "${TEMPORAR##+([[:blank:]])}" in
+                key+([[:blank:]])*)
+                        echo "nastavuji metadatový klíč" >> /dev/stderr
+                        # vypsat do TEMPFILE
+                        # zapsat klíč
+                        # naimportovat tempfile
+                ;;
+                note+([[:blank:]])*) echo "Skrytá poznámka" >> /dev/stderr
+                ;;
+                link+([[:blank:]])*) echo "Odkaz na stránce - první položka musí být http nebo hash" >> /dev/stderr
+                ;;
+                area+([[:blank:]])*) echo "Zvýrazněná oblast na stránce" >> /dev/stderr
+                    local TEMP="${TEMPORAR#+([[:blank:]])area+([[:blank:]])}"
+                    case "${TEMP}" in
+                        oval+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                            # 4 souřadnice
+                        ;;
+                        poly+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                            # x 2 souřadnic
+                        ;;
+                        text+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                            # 4 souřadnice
+                        ;;
+                        rect+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                            # 4 souřadnice
+                        ;;
+                    esac
+                ;;
+                arrow+([[:blank:]])*) # echo "Šipka na stránce" >> /dev/stderr
+                        # 4 souřadnice
+                    local TEMP="${TEMPORAR#+([[:blank:]])arrow+([[:blank:]])}"
+                    case "${TEMP}" in
+                        +([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání šipka na stránce nedává smysl"
+                                return 1
+                            fi
+                            local MESSAGE="${TEMP#+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])}"
+                            local COORDS="${TEMP%${MESSAGE}}"
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\tline ${COORDS}"
+                                echo -e "\tarrow\n"
+                                ) | $0 "${1}" import ant
+                            done
+                        ;;
+                        *) echo "${TEMP}"
+                            help set-arrow
+                        ;;
+                    esac
+                    return $?
+                ;;
+                mode+([[:blank:]])*)
+                    case "${TEMPORAR#*+([[:blank:]])}" in
+                        color|bw|fore|black) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR#+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR#+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR#+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-mode
+                        ;;
+                    esac
+                    return $?
+                ;;
+                pfoot+([[:blank:]])*|\
+                phead+([[:blank:]])*) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat."
+                ;;
+                align+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        +(left|center|right)+([[:blank:]])+(top|center|bottom)) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-align
+                        ;;
+                    esac
+                    return $?
+                ;;
+                background+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-background
+                        ;;
+                    esac
+                    return $?
+                ;;
+                zoom+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        stretch|one2one|width|page|d+([[:digit:]])) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-zoom
+                        ;;
+                    esac
+                    return $?
+                ;;
+                '')
+                ;;
+                *) echo "Nepodporovaný parametr ${TEMPORAR}"
+                ;;
+        esac
+        echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit"
+        ;;
     esac
 }
 
@@ -4808,7 +5034,11 @@ djvuinfo() {
         ;;
         meta) $0 "${1}" export meta | awk -F'#' '{print $4,$3}' | grep -v ^\ 
         ;;
-        grep*) $0 "${1}" info list | \
+        dsed*) log dsed "djvuinfo() –> ${2#dsed+([[:blank:]])}"
+            ${DJVUSED} "${1}" -e "${2#dsed+([[:blank:]])}"
+        ;;
+        grep*) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
+            $0 "${1}" info list | \
             while read line ; do
                 case "${line%% *}" in
                     O)
@@ -5406,8 +5636,17 @@ SUBKEY
      exif - vypisuje exif informace k DjVu souboru, včetně meta informací
             ze stránek
      meta - vypisuje rozměry stránek DjVu souboru a info o případné rotaci
-    grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
+     dsed - aplikuje na soubor příkaz přes djvused
+     grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
 
+"""
+    ;;
+    info-dsed) echo """
+  ACTION [1minfo[0m –> dsed
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> info dsed …
+
+  Řetězec se předá k dalšímu zpracování utilitě djvused
 """
     ;;
     info-exif) echo """
@@ -5548,6 +5787,40 @@ Example for set meta attribute:
 		help value
 		help range
 		;;
+    set-background) echo """
+   set global background #F8F8F8
+
+Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
+se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
+barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
+Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+stránky.
+"""
+    ;;
+    set-mode) echo """
+    set global mode bw
+
+color, bw, fore, black
+
+Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
+nejenom globálně, ale také pro konkrétní stránky.
+
+    set 3,6-9 mode color
+
+To se může hodit, pokud jsou v rámci jednoho DjVu svazku kombinované stránky
+zpracované různým způsobe - černobílé, barevné. Uživatel pak nemusí při
+prohlížení přepínat mód zobrazení manuálně.
+"""
+    ;;
+    set-zoom) echo """
+    set global zoom stretch
+
+Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
+Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné různě
+velké stránky.
+"""
+    ;;
 		keywords-unset) echo """
   ACTION [1munset[0m remove item from outline or meta attributes
 
@@ -6484,7 +6757,7 @@ case ${FILETYPE} in
                 #/ TODO!
                 return 1
             ;;
-                set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
+            set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
                         #/ REWORK!
                         # Akce set je určena pro primární nastavení odkazů v obsahu, či poznámek v textu
                         # Souřadnice se při ní přepočítávají podle velikosto stránky
@@ -6501,17 +6774,19 @@ case ${FILETYPE} in
                         # set text : x1 y1 x2 x3
                         # URL
                         # maparea
-                        # 
-                        case "${CHARSTRING%% *}" in
-                            meta) setmeta "${FILE}" "${CHARSTRING}"
-                            ;;
-                            outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
-                            ;;
-                            *) help keyword-meta
-                            ;;
-                        esac
-                        return 0
-                    ;;
+                # set global key "zbytek"
+                # set 1-5 key "zbytek"
+#                case "${CHARSTRING%% *}" in
+#                            meta) setmeta "${FILE}" "${CHARSTRING}"
+#                            ;;
+#                            outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
+#                            ;;
+#                            *) help keyword-meta
+#                            ;;
+#                        esac
+                setdjvu  "${FILE}" "${CHARSTRING}"
+                return 0
+            ;;
             '') echo "${FILE} –> invalid path!" >> /dev/stderr
                 return 1
             ;;
@@ -6616,6 +6891,8 @@ case ${FILETYPE} in
                         ;;
                 esac
                 ;;
+        esac
+        ;;
 esac
 }
 
