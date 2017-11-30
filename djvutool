@@ -687,10 +687,10 @@ testsyntaxant() {
                 [ -n "${BORDER}" ] && echo echo "BORDER už je nastaveno! –> ${BORDER}" >> /dev/stderr && return 1
                 local BORDER="(${line}) "
             ;;
-            shadow_*) # stínování - číslem uvedená tloušťka
-            ;;
-            hilite+([[:blank:]])\#+([[:digit:]])) # barva vysvícení
-            ;;
+            #shadow_*) # stínování - číslem uvedená tloušťka
+            #;;
+            #hilite+([[:blank:]])\#+([[:digit:]])) # barva vysvícení
+            #;;
             pushpin) # špendlík
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
@@ -731,13 +731,13 @@ testsyntaxant() {
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
                 local KEYS="${KEYS} (${line})"
             ;;
-            border+([[:blank:]])+([[:digit:]]))
+            +(opacity|shadow_+(in|out|ein|eout))+([[:blank:]])+([[:digit:]]))
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
                 local KEYS="${KEYS} (${line})"
             ;;
-            +(backclr|textclr|border)+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F])
+            +(backclr|textclr|border|hilite)+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F])
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
@@ -2684,20 +2684,121 @@ setdjvu() {
                 ;;
                 area+([[:blank:]])*) echo "Zvýrazněná oblast na stránce" >> /dev/stderr
                     local TEMP="${TEMPORAR#+([[:blank:]])area+([[:blank:]])}"
-                    case "${TEMP}" in
-                        oval+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                    local TYPE="${TEMP%%+([[:blank:]])*}"
+                    local TEMPX="${TEMP#${TYPE}+([[:blank:]])}"
+                    local MESSAGE="${TEMPX//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
+                    local COORDS="${TEMPX%${MESSAGE}}"
+                    if [[ ${MESSAGE:0:1} =~ [0-9] ]] ; then
+                        echo "Chyba v počtu koordinátů –> ${MESSAGE}" >> /dev/stderr
+                        return 1
+                    else
+                        #echo "MESSAGE ${MESSAGE}" >> /dev/stderr
+                        # echo "COORDS ${COORDS}" >> /dev/stderr
+                        local TEST=(${COORDS})
+                    case "${TYPE}" in
+                        oval)
+                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
                             # 4 souřadnice
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání nastavení oválné oblasti na stránce nedává smysl"
+                                return 1
+                            fi
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\toval ${COORDS}"
+                                echo -e "\tborder #FF0000"
+                                echo -e "\tborder_avis"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done
                         ;;
-                        poly+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                        poly)
                             # x 2 souřadnic
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání nastavení polynomní oblasti na stránce nedává smysl"
+                                return 1
+                            fi
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\tpoly ${COORDS}"
+                                echo -e "\tborder #FF0000"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done
                         ;;
-                        text+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                        text)
+                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
                             # 4 souřadnice
-                        ;;
-                        rect+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*)
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání nastavení textové poznámky na stránce nedává smysl"
+                                return 1
+                            fi
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\ttext ${COORDS}"
+                                echo -e "\tpushpin"
+                                echo -e "\tnone"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done                        ;;
+                        rect)
+                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
                             # 4 souřadnice
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání nastavení zvýrazněné oblasti na stránce nedává smysl"
+                                return 1
+                            fi
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\trect ${COORDS}"
+                                echo -e "\thilite #FF0000"
+                                echo -e "\topacity 75"
+                                echo -e "\tnone"
+                                # echo -e "\tborder_avis"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done                        ;;
+                        ramec)
+                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
+                            # 4 souřadnice
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání nastavení zvýrazněné oblasti na stránce nedává smysl"
+                                return 1
+                            fi
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\trect ${COORDS}"
+                                echo -e "\tshadow_eout 5"
+                                echo -e "\topacity 75"
+                                echo -e "\tborder_avis"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done                        ;;
+                        *) echo "Neplatný typ oblasti –> ${TYPE}" >> /dev/stderr
+                            return 1
                         ;;
                     esac
+                    fi
                 ;;
                 arrow+([[:blank:]])*) # echo "Šipka na stránce" >> /dev/stderr
                         # 4 souřadnice
@@ -2717,7 +2818,8 @@ setdjvu() {
                                 echo "maparea"
                                 echo -e "\t\"\" \"${MESSAGE}\""
                                 echo -e "\tline ${COORDS}"
-                                echo -e "\tarrow\n"
+                                echo -e "\tarrow"
+                                echo -e "\n"
                                 ) | $0 "${1}" import ant
                             done
                         ;;
