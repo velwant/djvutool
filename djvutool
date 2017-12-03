@@ -731,13 +731,13 @@ testsyntaxant() {
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
                 local KEYS="${KEYS} (${line})"
             ;;
-            +(opacity|shadow_+(in|out|ein|eout))+([[:blank:]])+([[:digit:]]))
+            +(opacity|width|shadow_+(in|out|ein|eout))+([[:blank:]])+([[:digit:]]))
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
                 local KEYS="${KEYS} (${line})"
             ;;
-            +(backclr|textclr|border|hilite)+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F])
+            +(backclr|textclr|line_clr|lineclr|border|hilite)+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F])
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 [ "${META}" == "maparea" ] || echo "${INVALID}" >> /dev/stderr
                 [ ! -n "${BORDER}" ] && echo "Nejprve musí být nastavena oblast!" >> /dev/stderr
@@ -2635,6 +2635,95 @@ fromdjvu() {
     esac
 }
 
+# ### 
+# Zpracovává stream. pokud se vyskytne, vrátí parametr a zbytek řetězce
+object() {
+    # Je tady - vrátí parametr, řetězec a 0
+    # Není tady nic - vrátí řetězec a 1
+    log goto "object() ${TYPE} –> $1"
+    while [ $# -gt 0 ]
+    do
+        case ${1} in
+            border_avis|pushpin|none|xor) case ${TYPE} in
+                rect|oval) echo -e "\t$1" && shift
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            hilite|text_clr|back_clr|line_clr)
+            ;;
+            border) case ${TYPE} in
+                rect|oval) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} $1" && shift
+                        ;;
+                        *) help set-area-${PROPERTY}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                line) shift
+                    case "${1}" in
+                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
+                            echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
+                            echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
+                            return 1
+                        ;;
+                        *) help set-line
+                            return 1
+                        ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            shadow_+(in|out|ein|eout)) case ${TYPE} in
+                rect) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
+                        ;;
+                        *) help set-area-${PROPERTY}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                text) echo "Nastavení stínovaného okraje by zobrazování objektu ${TYPE} znemožnilo, proto ho ignoruji" >> /dev/stderr
+                    case "${1}" in
+                        [1-9]|[1-9][0-9]) shift
+                            echo "Nastavení stínovaného okraje by zobrazování objektu ${TYPE} znemožnilo, proto ho ignoruji" >> /dev/stderr
+                        ;;
+                        *) help set-area-${TYPE}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            opacity|width) case ${TYPE} in
+                rect|oval) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
+                        ;;
+                        *) help set-area-${PROPERTY}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;            *)  echo "$@"
+                break
+            ;;
+        esac
+    done
+    return 0
+}
+
 # ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
@@ -2705,15 +2794,96 @@ setdjvu() {
                             fi
                             local PAGES=($(range ${RANGE}))
                             for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\toval ${COORDS}"
-                                echo -e "\tborder #FF0000"
-                                echo -e "\tborder_avis"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
+#                                (
+                                # co mohu mměnit - buď souřadnice, nebo cílovou message
+                                local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                $0 "${1}" export ant $i > "${TEMPFILE}"
+                                #/ V případě opravy textu - půjde o nahrazení od prvního řetězce
+#                                cat "${TEMPFILE}" >> /dev/stderr
+                                mapfile -t CORDANT <<< $(grep -n "${COORDS%+([[:blank:]])}" "${TEMPFILE}")
+                                local RADKYCELKEM=$(wc -l ${TEMPFILE})
+                                echo "${RADKYCELKEM}" >> /dev/stderr
+                                mapfile -t POLEOBJEKTU <<< $(grep -n '^[a-Z#]' "${TEMPFILE}" | awk -F\: '{print $1}')
+                                echo "${POLEOBJEKTU[@]}" >> /dev/stderr
+                                mapfile -t MESANT <<< $(grep -n "\t\"\" \"${MESSAGE}\"" "${TEMPFILE}")
+                                echo "CORDANT ${CORDANT[@]}" >> /dev/stderr
+                                echo "MESANT ${MESANT[@]}" >> /dev/stderr
+                                if [ -n "${CORDANT[0]%\:}" ] && [ -n "${MESANT[0]%\:}" ] ; then
+                                    if [ "${MESANT%%:*}" == $(("${CORDANT%%:*}" - 1)) ] ; then
+                                        echo "Obojí patří ke stejnému bloku"
+                                        # editace bloku
+                                        # nejprve zjistit kolik má soubor řádek
+                                        # pak vytáhnout pole řádek které nezačínají tabulátorem,  zjistit první vyšší číslo 
+ #                                   else
+#                                        echo "Přidávám jako novou poznámku"
+                                        # zapsání na konec bloku
+#                                    fi
+                                else
+                                    if [ -n "${CORDANT[0]%\:}" ] ; then
+                                        echo "Souřadnice beze změny"
+                                        if [ "${CORDANT[0]%\:}" -gt "${POLEOBJEKTU[@]: -1}" ] ; then
+                                            echo "Je to na konci souboru"
+                                            # objekt začíná na řádku "${POLEOBJEKTU[@]: -1}"
+                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[@]: -1} a končí na řádku ${RADKYCELKEM%%:*}" 
+                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
+                                            # echo zapisovaná zpráva
+                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
+                                            )
+                                        else
+                                            echo "Je někde uprostřed"
+                                            x=0
+                                            for i in ${POLEOBJEKTU[@]} ; do
+                                               if [ "${i}" -lt "${CORDANT[0]%\:}" ] ; then
+                                                    x=$((x + 1))
+                                               else
+                                                    break
+                                               fi
+                                            done
+                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[$x]} a končí na řádku ${POLEOBJEKTU[$(($x + 1))]}" 
+                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
+                                            # echo zapisovaná zpráva
+                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
+                                            )
+                                        fi
+                                    elif [ -n "${MESANT[0]%\:}" ] ; then
+                                        echo "Zpráva beze změny"
+                                        if [ "${MESANT[0]%\:}" -gt "${POLEOBJEKTU[@]: -1}" ] ; then
+                                            echo "Je to na konci souboru"
+                                            # objekt začíná na řádku "${POLEOBJEKTU[@]: -1}"
+                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[@]: -1} a končí na řádku ${RADKYCELKEM%%:*}"
+                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
+                                            # echo zapisovaná zpráva
+                                            )
+                                        else
+                                            echo "Je někde uprostřed"
+                                            x=0
+                                            for i in ${POLEOBJEKTU[@]} ; do
+                                               if [ "${i}" -lt "${MESANT[0]%\:}" ] ; then
+                                                    x=$((x + 1))
+                                               else
+                                                    break
+                                               fi
+                                            done
+                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[$x]} a končí na řádku ${POLEOBJEKTU[$(($x + 1))]}" 
+                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
+                                            # echo zapisovaná zpráva
+                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
+                                            )
+                                        fi
+                                    else
+                                        echo "Zcela nová zpráva z – připojuji za"
+                                            ( cat "${TEMPFILE}"
+                                            # echo zapisovaná zpráva
+                                            )
+                                    fi
+                                fi
+#                                echo "maparea"
+#                                echo -e "\t\"\" \"${MESSAGE}\""
+#                                echo -e "\toval ${COORDS}"
+#                                echo -e "\tborder #FF0000"
+#                                echo -e "\tborder_avis"
+#                                echo -e "\n"
+#                                ) | $0 "${1}" import ant
                             done
                         ;;
                         poly)
@@ -2747,12 +2917,13 @@ setdjvu() {
                                 $0 "${1}" export ant $i
                                 echo "maparea"
                                 echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\ttext ${COORDS}"
+                                echo -e "\ttext ${TEST[0]} ${TEST[1]} $((${TEST[2]} - ${TEST[0]})) $((${TEST[3]} - ${TEST[1]}))"
                                 echo -e "\tpushpin"
                                 echo -e "\tnone"
                                 echo -e "\n"
                                 ) | $0 "${1}" import ant
-                            done                        ;;
+                            done
+                        ;;
                         rect)
                             [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
                             # 4 souřadnice
@@ -2767,16 +2938,22 @@ setdjvu() {
                                 echo "maparea"
                                 echo -e "\t\"\" \"${MESSAGE}\""
                                 echo -e "\trect ${COORDS}"
-                                echo -e "\thilite #FF0000"
-                                echo -e "\topacity 75"
-                                echo -e "\tnone"
+                                object ${MESSAGE}
+                                # echo -e "\thilite #FF0000"
+                                # echo -e "\topacity 75"
+                                # echo -e "\tnone"
                                 # echo -e "\tborder_avis"
                                 echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done                        ;;
+                                ) >> /dev/stderr
+                                # | $0 "${1}" import ant
+                            done 
+                        ;;
                         ramec)
                             [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
                             # 4 souřadnice
+                            case "${MESSAGE##* }" in
+                                -h|--help) help set-area-ramec
+                            esac
                             if [ "${RANGE}" == "global" ] ; then
                                 echo "Globání nastavení zvýrazněné oblasti na stránce nedává smysl"
                                 return 1
@@ -2793,8 +2970,10 @@ setdjvu() {
                                 echo -e "\tborder_avis"
                                 echo -e "\n"
                                 ) | $0 "${1}" import ant
-                            done                        ;;
+                            done
+                        ;;
                         *) echo "Neplatný typ oblasti –> ${TYPE}" >> /dev/stderr
+                            help set-area
                             return 1
                         ;;
                     esac
@@ -5854,7 +6033,7 @@ Options:
   * If is not any identificator of page, do set global orientation for all DjVu bundle.
 """
 		;;
-		keywords-set) echo """
+		keywords-seti) echo """
   ACTION [1mset[0m set meta attribute key or outline item from command line
 
   [1m${0##*/}[0m <DjVu> set outline {<num>[:[+|-]]} <ITEM> <TARGET>
@@ -5889,6 +6068,72 @@ Example for set meta attribute:
 		help value
 		help range
 		;;
+    set-area) echo """
+Nastavení plošného objektu
+"""
+    ;;
+    set-area-oval) echo """Nastavení oválné plochy
+    oval 0 0 50 50
+
+Nakreslí kružnici o poloměru 50 pixelů, která bude umístěna v levém dolním
+rohu.
+První souřadnice udávají x,y souřadnice výchozího bodu, od kterého se pak
+odměří X,Y součadnice středu kružnice.
+
+    oval 350 125 100 100
+
+Vykreslí kružnici o poloměru 100px, co bude mít střed na absolutních
+souřadnicích 450 225
+
+"""
+    ;;
+    set-area-shadow_+(in|out|ein|eout)) echo """Nastavení velikosti stínu u pravoúhlého rámečku
+
+  shadow_in - vnitřní plocha rámečku vypadá jako zahloubená dovnitř
+ shadow_out - vnitřní plocha rámečku vypadá jako vystouplá ven
+ shadow_ein - vnější okraj rámečku vypadá jako zahloubený dovnitř
+shadow_eout - vnější okraj rámečku vypadá jako vystouplý ven
+
+Nastavení libovolného parametru okraje (none, xor, nebo border) aplikaci stínu vyloučí!!!
+"""
+    ;;
+    set-area-+(border|xor|none)) echo """Nastavení okraje rámečku
+
+  border <BARVA> - nastaví jinou barvu rámečku (výchozí je černá)
+             xor - rámeček je tvořen přerušovanou linkou
+            none - vypne zobrazování rámečku úplně
+
+Okraj je zobrazen tenkou linkou, jejíž tloušťku nelze změnit!!!
+"""
+    ;;
+    set-area-text)  echo """Nastavení pravoúhlé plochy
+    text 0 0 50 50
+         X Y W H
+Do obdélníku o rozměrech WxH, s levým dolním rohem na souřadnicích XxY
+vepíše text. Velikost písma upraví dle množství textu v rámci
+"""
+    ;;
+    set-area-rect) echo """Nastavení pravoúhlé plochy
+    rect 0 0 50 50
+
+Nakreslí čtverec o straně 50x50 pixelů, jehož levý dolní roh bude na souřadnicích
+x,y a pravý horní se odměří jako vzdálenost X,Y
+
+    rect 350 125 100 100
+
+Vykreslí čtverec o straně 100x100 pixelů, co bude mít střed na absolutních
+souřadnicích 450 225
+
+Vykreslení pomocí djvutxt:
+want@schroeder:~$ djvutxt -detail=line -page=1 b.djvu | grep SEIFERT
+  (line 281 498 776 535 \"MILOŠ SEIFERT \")
+
+ ­… set 1 area rect 281 498 $((535-281)) $((776-498)) Miloš Seifert, zakladatel LLM
+
+Nejdřív přes info grep zjistit souřadnice textu
+
+"""
+    ;;
     set-background) echo """
    set global background #F8F8F8
 
@@ -6677,7 +6922,7 @@ case "${CHARSTRING}" in
                         ;;
                         grep*) help "${ACTION}-grep"
                         ;;
-                        *) help "keywords-${ACTION}"
+                        *) # help "keywords-${ACTION}"
                         ;;
                     esac
                 ;;
