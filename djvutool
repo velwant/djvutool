@@ -2635,37 +2635,98 @@ fromdjvu() {
     esac
 }
 
-# ### 
+# ### Původní zpracování - očekává parametry ze startu message
 # Zpracovává stream. pokud se vyskytne, vrátí parametr a zbytek řetězce
 object() {
     # Je tady - vrátí parametr, řetězec a 0
     # Není tady nic - vrátí řetězec a 1
-    log goto "object() ${TYPE} –> $1"
+    log goto "object() ${TYPE} –> $@"
     while [ $# -gt 0 ]
     do
         case ${1} in
-            border_avis|pushpin|none|xor) case ${TYPE} in
-                rect|oval) echo -e "\t$1" && shift
+            border_avis|none|xor) case ${TYPE} in
+                rect|oval|text) echo -e "\t$1" && shift
                 ;;
                 *) return 1
                 ;;
             esac
             ;;
-            hilite|text_clr|back_clr|line_clr)
+            pushpin) case ${TYPE} in
+                text) echo -e "\t$1" && shift
+                ;;
+                *) return 1
+                ;;
+            esac
             ;;
-            border) case ${TYPE} in
-                rect|oval) local PROPERTY="${1}" && shift
+            hilite) case ${TYPE} in
+                rect) local PROPERTY="${1}" && shift
                     case "${1}" in
-                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} $1" && shift
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
                         ;;
-                        *) help set-area-${PROPERTY}
+                        *) help set-${PROPERTY}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                line|oval|text|arrow) shift
+                    case "${1}" in
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
+                            echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
+                            echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
+                            return 1
+                        ;;
+                        *) help set-line
+                            return 1
+                        ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            textclr|backclr|lineclr) case ${TYPE} in
+                rect|oval|text|arrow) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
+                        ;;
+                        *) help set-${PROPERTY}
                             return 1
                         ;;
                     esac
                 ;;
                 line) shift
                     case "${1}" in
-                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
+                            echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
+                            echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
+                            return 1
+                        ;;
+                        *) help set-line
+                            return 1
+                        ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            _blank) echo -e "$1" && shift
+                # Kvůli url
+            ;;
+            border) case "${TYPE}" in
+                rect|oval) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
+                        ;;
+                        *) echo "xxxxx ${1}" >> /dev/stderr
+                            help set-${PROPERTY}
+                            return 1
+                        ;;
+                    esac
+                ;;
+                line) shift
+                    case "${1}" in
+                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
                             echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
                             echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
                             return 1
@@ -2684,7 +2745,7 @@ object() {
                     case "${1}" in
                         [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
                         ;;
-                        *) help set-area-${PROPERTY}
+                        *) help set-${PROPERTY}
                             return 1
                         ;;
                     esac
@@ -2694,7 +2755,7 @@ object() {
                         [1-9]|[1-9][0-9]) shift
                             echo "Nastavení stínovaného okraje by zobrazování objektu ${TYPE} znemožnilo, proto ho ignoruji" >> /dev/stderr
                         ;;
-                        *) help set-area-${TYPE}
+                        *) help set-${PROPERTY}
                             return 1
                         ;;
                     esac
@@ -2703,12 +2764,12 @@ object() {
                 ;;
             esac
             ;;
-            opacity|width) case ${TYPE} in
+            opacity) case ${TYPE} in
                 rect|oval) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
                         ;;
-                        *) help set-area-${PROPERTY}
+                        *) help set-${PROPERTY}
                             return 1
                         ;;
                     esac
@@ -2716,12 +2777,357 @@ object() {
                 *) return 1
                 ;;
             esac
-            ;;            *)  echo "$@"
+            ;;
+            width) case ${TYPE} in
+                line|arrow) local PROPERTY="${1}" && shift
+                    case "${1}" in
+                        [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift ;;
+                        *) help set-${PROPERTY} ; return 1 ;;
+                    esac
+                ;;
+                rect|text|oval|poly)
+                    case "${1}" in
+                        [1-9]|[1-9][0-9]) shift ;;
+                        *) help set-${PROPERTY} ; return 1 ;;
+                    esac
+                ;;
+                *) return 1
+                ;;
+            esac
+            ;;
+            *) # echo "$@"
                 break
             ;;
         esac
     done
     return 0
+}
+
+setdjvu() {
+    log goto "setdjvu() ${FILETYPE} $1 –> $2"
+    case "${2}" in
+        cords+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]]))
+            local TEST=(${2})
+            echo "${TEST[1]} ${TEST[2]} $((${TEST[3]} - ${TEST[1]})) $((${TEST[4]} - ${TEST[2]}))"
+            exit 0
+        ;;
+    esac
+    local RANGE=$(isrange "${2}")
+    if [ ! -n "${RANGE}" ] ; then
+        local RANGE="${2%%+([[:blank:]])*}"
+    fi
+
+    local TEMPORAR="${2#*${RANGE}}"
+    [ ! -n "${TEMPORAR##+([[:blank:]])}" ] && return 1
+
+    case "${RANGE}" in
+        outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+                $0 "${FILE}" export outline > "${TEMPFILE}"
+                echo "${TEMPORAR##+([[:blank:]])}" >> "${TEMPFILE}"
+                outlinetodjvu "${FILE}" "${TEMPFILE}"
+                if [ $? -eq 1 ] ; then
+                    echo "V importované záložce je syntaktická chyba –> ${TEMPORAR}" >> /dev/stderr
+                    return 1
+                else
+                    echo "Pozici naimportované záložky v obsahu lze upravit přes akci edit" >> /dev/stderr
+                fi
+                return $?
+        ;;
+        *) local TEST=($($0 "${1}" info list))
+            case "${TEMPORAR##+([[:blank:]])}" in
+                key+([[:blank:]])*) echo "Metadatový klíč" >> /dev/stderr
+                    local TEMP="${TEMPORAR#+([[:blank:]])key+([[:blank:]])}"
+                    local TYPE="metadata"
+                    local KEY="${TEMP%%+([[:blank:]])}"
+                    local VALUE="${TEMP#*+([[:blank:]])}"
+                ;;
+                note+([[:blank:]])*) echo "Skrytá poznámka" >> /dev/stderr
+                    local TEMP="${TEMPORAR#+([[:blank:]])note+([[:blank:]])}"
+                    local TYPE="note"
+                    local VALUE="${TEMP#+([[:blank:]])}"
+                ;;
+                mode+([[:blank:]])*)
+                    case "${TEMPORAR#*+([[:blank:]])}" in
+                        color|bw|fore|black) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR#+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR#+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR#+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-mode
+                        ;;
+                    esac
+                    return $?
+                ;;
+                pfoot+([[:blank:]])*|\
+                phead+([[:blank:]])*) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat."
+                ;;
+                align+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        +(left|center|right)+([[:blank:]])+(top|center|bottom)) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-align
+                        ;;
+                    esac
+                    return $?
+                ;;
+                background+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-background
+                        ;;
+                    esac
+                    return $?
+                ;;
+                zoom+([[:blank:]])*)
+                    case "${TEMPORAR##*+([[:blank:]])}" in
+                        stretch|one2one|width|page|d+([[:digit:]])) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                else
+                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                    ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    ( $0 "${1}" export ant $i
+                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) help set-zoom
+                        ;;
+                    esac
+                    return $?
+                ;;
+                '')
+                ;;
+                *) # Prvky vyžadující koordináty
+                   # link, oval, rect, text, ram, line, arrow a poly
+                    local TEMP="${TEMPORAR#+([[:blank:]])}"
+                    local TYPE="${TEMP%%+([[:blank:]])*}"
+                    local TEMPX="${TEMP#${TYPE}+([[:blank:]])}"
+                    # odfiltrováná koordinátů
+                    local MESSAGE="${TEMPX//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
+                    local COORDS="${TEMPX%${MESSAGE}}"
+                    # další parametry následují za dvojtečkou
+                    if [[ "${MESSAGE}" =~ ":" ]] ; then
+                        mapfile PARAMS < <( object ${MESSAGE##*:+([[:blank:]])} )
+                        local MESSAGE="${MESSAGE%+([[:blank:]]):*}"
+                    fi
+                    if [[ ${MESSAGE:0:1} =~ [0-9] ]] ; then
+                        echo "Chyba v počtu koordinátů –> ${MESSAGE}" >> /dev/stderr
+                        return 1
+                    else
+                        # Většina typů ploch může mít pouze 4 souřadnice
+                        local TEST=(${COORDS})
+                        case "${TYPE}" in
+                            link|oval|rect|text|ram|line|arrow) [ ${#TEST[@]} -ge 5 ] && help set-${TYPE} && return 1
+                        esac
+                        #echo "MESSAGE ${MESSAGE%+([[:blank:]]):*}" >> /dev/stderr
+                        #echo "COORDS ${COORDS}" >> /dev/stderr
+                        #printf "%s" "${PARAMS[@]}" >> /dev/stderr
+                        #return 0
+                        if [ "${RANGE}" == "global" ] ; then
+                            echo "Globání nastavení oblasti TODO" >> /dev/stderr
+                        else
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                # co mohu mměnit - buď souřadnice, nebo cílovou message
+                                local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                local INCFILE=$(tempfile -d ${TEMPDIR} -s .inc)
+                                $0 "${1}" export ant $i > "${TEMPFILE}"
+                                    (
+echo "maparea"
+case "${MESSAGE}" in
+    +([a-Z0-9])\.djvu+([[:blank:]])*)
+        case ${TYPE} in
+            arrow) echo "U prvku typu arrow a line odkazy nelze použít, proto link na #${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
+                echo -e "\t\"\" \"${MESSAGE#*+([[:blank:]])}\""
+                if [ "${TYPE}" == "arrow" ] ; then
+                    echo -e "\tline ${COORDS}"
+                    echo -e "\tarrow"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                elif [ "${TYPE}" == "line" ] ; then
+                    echo -e "\tline ${COORDS}"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                else
+                    echo -e "\t${TYPE} ${COORDS}"
+                    printf "%s" "${PARAMS[@]}"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                fi
+            ;;
+            *) echo -e "\t\"#${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
+                echo -e "\t${TYPE} ${COORDS}"
+                #printf "%s" "${PARAMS[@]/_blank}"
+                printf "%s" "${PARAMS[@]}"
+            ;;
+        esac
+    ;;
+    http\:\/\/*) # link na www stránku
+        case ${TYPE} in
+            arrow|line) echo "U prvku typu arrow a line odkazy nelze použít, proto link na URL ${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
+                echo -e "\t\"\" \"${MESSAGE}\""
+                if [ "${TYPE}" == "arrow" ] ; then
+                    echo -e "\tline ${COORDS}"
+                    echo -e "\tarrow"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                elif [ "${TYPE}" == "line" ] ; then
+                    echo -e "\tline ${COORDS}"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                else
+                    echo -e "\t${TYPE} ${COORDS}"
+                    printf "%s" "${PARAMS[@]}"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                fi
+            ;;
+            *) if [[ "${PARAMS}" =~ "_blank" ]] ; then
+                    echo -e "\turl \"${MESSAGE%%+([[:blank:]])*}\" \"_blank\" \"${MESSAGE#*+([[:blank:]])}\""
+                    echo -e "\t${TYPE} ${COORDS}"
+                    printf "%s" "${PARAMS[@]/_blank}"
+                else
+                    echo -e "\t\"${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
+                    echo -e "\t${TYPE} ${COORDS}"
+                    printf "%s" "${PARAMS[@]}"
+                fi
+            ;;
+        esac
+    ;;
+    *)  # bez linku
+        echo -e "\t\"\" \"${MESSAGE}\""
+        if [ "${TYPE}" == "arrow" ] ; then
+            echo -e "\tline ${COORDS}"
+            echo -e "\tarrow"
+            printf "%s" "${PARAMS[@]}"
+        elif [ "${TYPE}" == "line" ] ; then
+            echo -e "\tline ${COORDS}"
+            printf "%s" "${PARAMS[@]}"
+        else
+            echo -e "\t${TYPE} ${COORDS}"
+            printf "%s" "${PARAMS[@]}"
+        fi
+    ;;
+esac
+echo -e "\n"
+                                    ) > "${INCFILE}"
+                                local INC=$(cat "${INCFILE}")
+                                local ADRESA=$(infile "${TEMPFILE}")
+                                case "${ADRESA}" in
+                                    +([[:digit:]])\ +([[:digit:]]))
+                                        # echo "${ADRESA/ /,}c" >> /dev/stderr
+                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${ADRESA/ /,}c
+${INC}
+
+.
+w
+q
+EOF
+                                        echo "" >> "${TEMPFILE}"
+                                    ;;
+                                    *) echo "${INC}" >> "${TEMPFILE}"
+                                        echo "" >> "${TEMPFILE}"
+                                    ;;
+                                esac
+                                echo "Před importem ---------"  >> /dev/stderr
+                                cat "${TEMPFILE}"  >> /dev/stderr
+                                cat "${TEMPFILE}" ) | $0 "${1}" import ant
+                            done
+                        fi
+                    fi
+                ;;
+                arrow+([[:blank:]])*) # echo "Šipka na stránce" >> /dev/stderr
+                        # 4 souřadnice
+                    local TEMP="${TEMPORAR#+([[:blank:]])arrow+([[:blank:]])}"
+                    case "${TEMP}" in
+                        +([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*) # Mohu nastavit
+                            if [ "${RANGE}" == "global" ] ; then
+                                echo "Globání šipka na stránce nedává smysl"
+                                return 1
+                            fi
+                            local MESSAGE="${TEMP#+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])}"
+                            local COORDS="${TEMP%${MESSAGE}}"
+                            local PAGES=($(range ${RANGE}))
+                            for i in ${PAGES[@]} ; do
+                                (
+                                $0 "${1}" export ant $i
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\tline ${COORDS}"
+                                echo -e "\tarrow"
+                                echo -e "\n"
+                                ) | $0 "${1}" import ant
+                            done
+                        ;;
+                        *) echo "${TEMP}"
+                            help set-arrow
+                        ;;
+                    esac
+                    return $?
+                
+                ;;
+        esac
+        echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit"
+        ;;
+    esac
 }
 
 # ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
@@ -2735,7 +3141,7 @@ object() {
 # * mask|background|foreground|color|black - oxportuje obrázek pozadí
 # * dsed-*
 # * xml-*
-setdjvu() {
+setdjvu1() {
     log goto "setdjvu() ${FILETYPE} $1 –> $2"
 
     local RANGE=$(isrange "${2}")
@@ -2777,12 +3183,17 @@ setdjvu() {
                     local TEMPX="${TEMP#${TYPE}+([[:blank:]])}"
                     local MESSAGE="${TEMPX//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
                     local COORDS="${TEMPX%${MESSAGE}}"
+                    if [[ "${MESSAGE}" =~ ":" ]] ; then
+                        mapfile PARAMS < <( object ${MESSAGE##*:+([[:blank:]])} )
+                    fi
                     if [[ ${MESSAGE:0:1} =~ [0-9] ]] ; then
                         echo "Chyba v počtu koordinátů –> ${MESSAGE}" >> /dev/stderr
                         return 1
                     else
-                        #echo "MESSAGE ${MESSAGE}" >> /dev/stderr
-                        # echo "COORDS ${COORDS}" >> /dev/stderr
+                        echo "MESSAGE ${MESSAGE%+([[:blank:]]):*}" >> /dev/stderr
+                        echo "COORDS ${COORDS}" >> /dev/stderr
+                        printf "%s" "${PARAMS[@]}" >> /dev/stderr
+                        return 0
                         local TEST=(${COORDS})
                     case "${TYPE}" in
                         oval)
@@ -2792,6 +3203,7 @@ setdjvu() {
                                 echo "Globání nastavení oválné oblasti na stránce nedává smysl"
                                 return 1
                             fi
+
                             local PAGES=($(range ${RANGE}))
                             for i in ${PAGES[@]} ; do
                                 (
@@ -5303,7 +5715,26 @@ djvuinfo() {
         dsed*) log dsed "djvuinfo() –> ${2#dsed+([[:blank:]])}"
             ${DJVUSED} "${1}" -e "${2#dsed+([[:blank:]])}"
         ;;
-        grep*) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
+        grep) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
+            $0 "${1}" info list | \
+            while read line ; do
+                case "${line%% *}" in
+                    O)
+                    ;;
+                    '') return 1
+                    ;;
+                    *) local PAGE="${line#* }"
+                        local ORDER="${line%% *}"
+                        local TEMPORAR=$(${DJVUTXT} "${1}" -page=${ORDER} | ${2} 2>1)
+                        if [ -n "${TEMPORAR}" ] ; then
+                            echo "# ${PAGE} #[P${ORDER}]"
+                            printf "%s\n" "${TEMPORAR}"
+                        fi
+                    ;;
+                esac
+            done
+        ;;
+        grep1*) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
             $0 "${1}" info list | \
             while read line ; do
                 case "${line%% *}" in
@@ -6048,16 +6479,115 @@ Example for set meta attribute:
  TARGET - name or order page which is target of item with hash (#)
     num - item order in outline (see action [2mprint[22m)
     all - attributte is set as meta attribute for every page in DjVu bundle
-   name - attributte is set to page specified by name"""
-		help key
-		help value
-		help range
+   name - attributte is set to page specified by name
+
+METADATA          ELEMENTS          PROPERTY
+    metadata          arrow             align
+    mode              line              backclr
+    note              oval              border
+    outline           poly              border_avis
+    background        rect              lineclr
+    zoom              text              none
+                                        pushpin
+                                        shadow_*
+                                        textclr
+                                        width
+                                        xor
+"""
+#		help key
+#		help value
+#		help range
 		;;
-    set-area) echo """
-Nastavení plošného objektu
+    set-arrow) echo """ (fixní prvek)
+
+Šipka, která se zobrazuje na DjVu stránce je ve skutečnosti element line s nastaveným parametrem arrow
+
+Použitelné parametry:
+   [ border_avis ]
+   [ none | [ linecrl c
+              width w ]]
 """
     ;;
-    set-area-oval) echo """Nastavení oválné plochy
+    set-backclr) echo """ (volitelný prvek)
+Barva pozadí prvku. Dává smysl pouze u typu:
+    rect - barva orámované plochy a
+    text - barva pozadí textu
+
+V případě prvků typu oval, poly, line nebo arrow, se vybarví pravoúhlá plocha
+"""
+    ;;
+    set-background) echo """
+   set global background #F8F8F8
+
+Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
+se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
+barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
+Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+stránky.
+"""
+    ;;
+    set-+(border|xor|none)) echo """Nastavení okraje rámečku
+
+  border <BARVA> - nastaví jinou barvu rámečku (výchozí je černá)
+             xor - rámeček je tvořen přerušovanou linkou
+            none - vypne zobrazování rámečku úplně
+
+Okraj je zobrazen tenkou linkou, jejíž tloušťku nelze změnit!!!
+"""
+    ;;
+    set-border_avis) echo """(volitelný prvek)
+border_avis - nastavení viditelnosti prvku
+
+Není-li řečeno jinak, zůstávají elementy typu rect na DjVu stránce skryté – zobrazují se teprve v okamžiku, kdy nad ně najedete myší.
+Ovšem v případě prvku, co má být ihned viditelný se takové chování nehodí. Proto existuje tento parametr, kterým se nastaví aby byl
+prvek viditelný stále
+"""
+    ;;
+    set-line) echo """
+Čára která se zobrazuje na stránce. Od prvku arrow (šipka) se liší tím, že ve výchozím stavu 
+nemá nastaveno, že má na konci zobrazovat šipka.
+"""
+    ;;
+    set-lineclr) echo """(volitelný prvek)
+Nastavení barvy vykreslené čáry. Dává smysl pouze u typu
+     line - čára
+    arrow - čára se šipkou
+
+U prvků rect, oval, poly a text se nastavuje barva linky, co ohraničuje plochu volitelným parametrem border
+"""
+    ;;
+    set-metadata) echo """
+Nastavení metadatového klíče
+"""
+    ;;
+    set-mode) echo """
+    set global mode bw
+
+color, bw, fore, black
+
+Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
+nejenom globálně, ale také pro konkrétní stránky.
+
+    set 3,6-9 mode color
+
+To se může hodit, pokud jsou v rámci jednoho DjVu svazku kombinované stránky
+zpracované různým způsobe - černobílé, barevné. Uživatel pak nemusí při
+prohlížení přepínat mód zobrazení manuálně.
+"""
+    ;;
+    set-none) echo """(volitelný prvek)
+none - vypne zobrazování okraje plochy
+
+Anuluje nastavení hodnoty border i boorder_avis
+"""
+    ;;
+    set-oval) echo """Nastavení oválné (kruhové) plochy
+Default:
+
+barva a typ okraje - černá, přerušovaná linka (xor) 
+barvu a průhlednost plochy - průhledná (nelze změnit) 
+URL - aktivní
+
     oval 0 0 50 50
 
 Nakreslí kružnici o poloměru 50 pixelů, která bude umístěna v levém dolním
@@ -6072,33 +6602,16 @@ souřadnicích 450 225
 
 """
     ;;
-    set-area-shadow_+(in|out|ein|eout)) echo """Nastavení velikosti stínu u pravoúhlého rámečku
+    set-poly) echo """Polynomický obrys plochy
+Default:
+barva a průhlednost plochy - průhledná. Obarvit lze pouze pravoúhlou plochu ve které je polynom vepsaný
 
-  shadow_in - vnitřní plocha rámečku vypadá jako zahloubená dovnitř
- shadow_out - vnitřní plocha rámečku vypadá jako vystouplá ven
- shadow_ein - vnější okraj rámečku vypadá jako zahloubený dovnitř
-shadow_eout - vnější okraj rámečku vypadá jako vystouplý ven
-
-Nastavení libovolného parametru okraje (none, xor, nebo border) aplikaci stínu vyloučí!!!
+Použitelné parametry:
+  [border_avis]
+  [none|border c] 
 """
     ;;
-    set-area-+(border|xor|none)) echo """Nastavení okraje rámečku
-
-  border <BARVA> - nastaví jinou barvu rámečku (výchozí je černá)
-             xor - rámeček je tvořen přerušovanou linkou
-            none - vypne zobrazování rámečku úplně
-
-Okraj je zobrazen tenkou linkou, jejíž tloušťku nelze změnit!!!
-"""
-    ;;
-    set-area-text)  echo """Nastavení pravoúhlé plochy
-    text 0 0 50 50
-         X Y W H
-Do obdélníku o rozměrech WxH, s levým dolním rohem na souřadnicích XxY
-vepíše text. Velikost písma upraví dle množství textu v rámci
-"""
-    ;;
-    set-area-rect) echo """Nastavení pravoúhlé plochy
+    set-rect) echo """Nastavení pravoúhlé plochy
     rect 0 0 50 50
 
 Nakreslí čtverec o straně 50x50 pixelů, jehož levý dolní roh bude na souřadnicích
@@ -6119,29 +6632,31 @@ Nejdřív přes info grep zjistit souřadnice textu
 
 """
     ;;
-    set-background) echo """
-   set global background #F8F8F8
+    set-shadow_+(in|out|ein|eout)) echo """Nastavení velikosti stínu u pravoúhlého rámečku
 
-Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
-se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
-barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
-Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-stránky.
+  shadow_in - vnitřní plocha rámečku vypadá jako zahloubená dovnitř
+ shadow_out - vnitřní plocha rámečku vypadá jako vystouplá ven
+ shadow_ein - vnější okraj rámečku vypadá jako zahloubený dovnitř
+shadow_eout - vnější okraj rámečku vypadá jako vystouplý ven
+
+Nastavení libovolného parametru okraje (none, xor, nebo border) aplikaci stínu vyloučí!!!
 """
     ;;
-    set-mode) echo """
-    set global mode bw
+    set-text)  echo """Nastavení pravoúhlé plochy
+    text 0 0 50 50
+         X Y W H
+Do obdélníku o rozměrech WxH, s levým dolním rohem na souřadnicích XxY
+vepíše text. Velikost písma upraví dle množství textu v rámci
+"""
+    ;;
+    set-textclr) echo """(volitelný prvek)
+Barva textu - Dává smysl pouze u typu text
 
-color, bw, fore, black
-
-Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
-nejenom globálně, ale také pro konkrétní stránky.
-
-    set 3,6-9 mode color
-
-To se může hodit, pokud jsou v rámci jednoho DjVu svazku kombinované stránky
-zpracované různým způsobe - černobílé, barevné. Uživatel pak nemusí při
-prohlížení přepínat mód zobrazení manuálně.
+V případě prvků rect, oval, poly, line a arrow je tento parametr zbytečný, protože se u nich žádný text nezobrazuje
+"""
+    ;;
+    set-width) echo """(volitelný prvek)
+width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
 """
     ;;
     set-zoom) echo """
@@ -6888,12 +7403,11 @@ do
 done
 
 
-#/ echo "${ACTION}" >> /dev/stderr
-#/ echo "$@" >> /dev/stderr
+# echo "${ACTION}" >> /dev/stderr
+# echo "$@" >> /dev/stderr
 
 FILETYPE=$(testfile "${FILE}")
-case "${CHARSTRING}" in
-    *-h|*--help|-h*|--help*)
+if [[ "${CHARSTRING}" =~ "-h" ]] ; then
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
                 djvu) case "${CHARSTRING}" in
@@ -6907,7 +7421,33 @@ case "${CHARSTRING}" in
                         ;;
                         grep*) help "${ACTION}-grep"
                         ;;
-                        *) # help "keywords-${ACTION}"
+                        *) local TEMP=(${CHARSTRING%%+(-)h*})
+                            local PROPERTY="${TEMP[@]: -1}"
+                            case "${PROPERTY}" in
+                                align|\
+                                arrow|\
+                                backclr|\
+                                background|\
+                                border|\
+                                border_avis|\
+                                line|\
+                                lineclr|\
+                                mode|\
+                                none|\
+                                oval|\
+                                poly|\
+                                pushpin|\
+                                rect|\
+                                shadow_*|\
+                                text|\
+                                textclr|\
+                                width|\
+                                xor|\
+                                zoom) help set-${PROPERTY}
+                                ;;
+                                *) help "keywords-${ACTION}"
+                                ;;
+                            esac
                         ;;
                     esac
                 ;;
@@ -6918,8 +7458,7 @@ case "${CHARSTRING}" in
             help
         fi
         exit 0
-    ;;
-esac
+fi
 
 case ${FILETYPE} in
     djvu) #/ Pracuji se souborem v DjVu formátu
