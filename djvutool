@@ -2794,96 +2794,37 @@ setdjvu() {
                             fi
                             local PAGES=($(range ${RANGE}))
                             for i in ${PAGES[@]} ; do
-#                                (
+                                (
                                 # co mohu mměnit - buď souřadnice, nebo cílovou message
                                 local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                                 $0 "${1}" export ant $i > "${TEMPFILE}"
-                                #/ V případě opravy textu - půjde o nahrazení od prvního řetězce
-#                                cat "${TEMPFILE}" >> /dev/stderr
-                                mapfile -t CORDANT <<< $(grep -n "${COORDS%+([[:blank:]])}" "${TEMPFILE}")
-                                local RADKYCELKEM=$(wc -l ${TEMPFILE})
-                                echo "${RADKYCELKEM}" >> /dev/stderr
-                                mapfile -t POLEOBJEKTU <<< $(grep -n '^[a-Z#]' "${TEMPFILE}" | awk -F\: '{print $1}')
-                                echo "${POLEOBJEKTU[@]}" >> /dev/stderr
-                                mapfile -t MESANT <<< $(grep -n "\t\"\" \"${MESSAGE}\"" "${TEMPFILE}")
-                                echo "CORDANT ${CORDANT[@]}" >> /dev/stderr
-                                echo "MESANT ${MESANT[@]}" >> /dev/stderr
-                                if [ -n "${CORDANT[0]%\:}" ] && [ -n "${MESANT[0]%\:}" ] ; then
-                                    if [ "${MESANT%%:*}" == $(("${CORDANT%%:*}" - 1)) ] ; then
-                                        echo "Obojí patří ke stejnému bloku"
-                                        # editace bloku
-                                        # nejprve zjistit kolik má soubor řádek
-                                        # pak vytáhnout pole řádek které nezačínají tabulátorem,  zjistit první vyšší číslo 
- #                                   else
-#                                        echo "Přidávám jako novou poznámku"
-                                        # zapsání na konec bloku
-#                                    fi
-                                else
-                                    if [ -n "${CORDANT[0]%\:}" ] ; then
-                                        echo "Souřadnice beze změny"
-                                        if [ "${CORDANT[0]%\:}" -gt "${POLEOBJEKTU[@]: -1}" ] ; then
-                                            echo "Je to na konci souboru"
-                                            # objekt začíná na řádku "${POLEOBJEKTU[@]: -1}"
-                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[@]: -1} a končí na řádku ${RADKYCELKEM%%:*}" 
-                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
-                                            # echo zapisovaná zpráva
-                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
-                                            )
-                                        else
-                                            echo "Je někde uprostřed"
-                                            x=0
-                                            for i in ${POLEOBJEKTU[@]} ; do
-                                               if [ "${i}" -lt "${CORDANT[0]%\:}" ] ; then
-                                                    x=$((x + 1))
-                                               else
-                                                    break
-                                               fi
-                                            done
-                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[$x]} a končí na řádku ${POLEOBJEKTU[$(($x + 1))]}" 
-                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
-                                            # echo zapisovaná zpráva
-                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
-                                            )
-                                        fi
-                                    elif [ -n "${MESANT[0]%\:}" ] ; then
-                                        echo "Zpráva beze změny"
-                                        if [ "${MESANT[0]%\:}" -gt "${POLEOBJEKTU[@]: -1}" ] ; then
-                                            echo "Je to na konci souboru"
-                                            # objekt začíná na řádku "${POLEOBJEKTU[@]: -1}"
-                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[@]: -1} a končí na řádku ${RADKYCELKEM%%:*}"
-                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
-                                            # echo zapisovaná zpráva
-                                            )
-                                        else
-                                            echo "Je někde uprostřed"
-                                            x=0
-                                            for i in ${POLEOBJEKTU[@]} ; do
-                                               if [ "${i}" -lt "${MESANT[0]%\:}" ] ; then
-                                                    x=$((x + 1))
-                                               else
-                                                    break
-                                               fi
-                                            done
-                                            echo "Index $x –> Blok začíná na řádku ${POLEOBJEKTU[$x]} a končí na řádku ${POLEOBJEKTU[$(($x + 1))]}" 
-                                            ( head -"${POLEOBJEKTU[@]: -1}" "${TEMPFILE}"
-                                            # echo zapisovaná zpráva
-                                            tail -$(("${RADKYCELKEM%%:*}" - "${POLEOBJEKTU[$(($x + 1))]}")) "${TEMPFILE}"
-                                            )
-                                        fi
-                                    else
-                                        echo "Zcela nová zpráva z – připojuji za"
-                                            ( cat "${TEMPFILE}"
-                                            # echo zapisovaná zpráva
-                                            )
-                                    fi
-                                fi
-#                                echo "maparea"
-#                                echo -e "\t\"\" \"${MESSAGE}\""
-#                                echo -e "\toval ${COORDS}"
-#                                echo -e "\tborder #FF0000"
-#                                echo -e "\tborder_avis"
-#                                echo -e "\n"
-#                                ) | $0 "${1}" import ant
+                                local NEWFILE=$(
+                                echo "maparea"
+                                echo -e "\t\"\" \"${MESSAGE}\""
+                                echo -e "\toval ${COORDS}"
+                                echo -e "\tborder #FF0000"
+                                echo -e "\tborder_avis"
+                                echo -e "\n"
+                                )
+                                local ADRESA=$(infile "${TEMPFILE}")
+                                case "${ADRESA}" in
+                                    +([[:digit:]])\ +([[:digit:]]))
+                                        # echo "${ADRESA/ /,}c" >> /dev/stderr
+                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${ADRESA/ /,}c
+${NEWFILE}
+
+.
+w
+q
+EOF
+                                        echo "" >> "${TEMPFILE}"
+                                    ;;
+                                    *) echo "${NEWFILE}" >> "${TEMPFILE}"
+                                        echo "" >> "${TEMPFILE}"
+                                    ;;
+                                esac
+                                cat "${TEMPFILE}" ) | $0 "${1}" import ant
                             done
                         ;;
                         poly)
@@ -2938,15 +2879,15 @@ setdjvu() {
                                 echo "maparea"
                                 echo -e "\t\"\" \"${MESSAGE}\""
                                 echo -e "\trect ${COORDS}"
-                                object ${MESSAGE}
-                                # echo -e "\thilite #FF0000"
-                                # echo -e "\topacity 75"
-                                # echo -e "\tnone"
-                                # echo -e "\tborder_avis"
+#                                object ${MESSAGE}
+                                 echo -e "\thilite #FF0000"
+                                 echo -e "\topacity 75"
+                                 echo -e "\tnone"
+                                 echo -e "\tborder_avis"
                                 echo -e "\n"
-                                ) >> /dev/stderr
-                                # | $0 "${1}" import ant
-                            done 
+                                ) | tee /tmp/fortest | $0 "${1}" import ant
+                            exit 33
+                            done
                         ;;
                         ramec)
                             [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
@@ -4293,6 +4234,50 @@ listzip() {
 itemzip() {
     log goto "itemzip() From $1 flush –> $2"
     ${ZIP} e -so "${1}" "${2}"
+}
+
+# ### <span id="infile">infile()</span> ([top](#FUNCTIONS))
+# Vrací adresy počátečního a poslední řádku bloku, který vyhovuje odpovídajícímu vzorku
+# $1 - jméno souboru
+# $COORDS
+# $MESSAGE
+infile() {
+    log goto "infile() $1 –> ${COORDS}"
+
+    mapfile -d\: -t -c1 CORDANT <<< $(grep -n "${COORDS%+([[:blank:]])}" "${1}")
+    mapfile -d\: -t -c1 MESANT <<< $(grep -n "${MESSAGE}" "${1}")
+    #echo "${MESSAGE}" >> /dev/stderr
+    #echo "${MESANT}" >> /dev/stderr
+    mapfile -t TEMP <<< $(grep -n '^[a-Z#]' "${1}")
+    local POLEOBJEKTU=(${TEMP[@]%:*})
+    local RADKYCELKEM=$(wc -l < ${1})
+
+    _f() {
+        local z i
+        for i in ${POLEOBJEKTU[@]} ; do [ $i -gt $1 ] && break || ((++z)) ; done
+        if [ $i -lt $1 ] ; then
+            log info "_f() Za řádkem $1 už nebyl žádný objekt"
+            echo "$i" "${RADKYCELKEM}"
+        else
+            log info "_f() Za řádkem $1 začínal další objekt na $i"
+            echo "${POLEOBJEKTU[$((z - 1))]}" "$((i - 1))"
+        fi
+    }
+    
+    case "${MESANT}" in
+        +([[:digit:]])) #/ jenom MESANT
+            _f "${MESANT}"
+        ;;
+        *) case "${CORDANT}" in
+            +([[:digit:]]))
+                _f  "${CORDANT}"
+            ;;
+            *) return 1
+            ;;
+        esac
+        ;;
+    esac
+    return 0
 }
 
 # ### <span id="infoitem">infoitem()</span> ([top](#FUNCTIONS))
