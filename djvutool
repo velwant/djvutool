@@ -2847,18 +2847,63 @@ setdjvu() {
         ;;
         *) local TEST=($($0 "${1}" info list))
             case "${TEMPORAR##+([[:blank:]])}" in
-                key+([[:blank:]])*) echo "Metadatový klíč" >> /dev/stderr
+                note+([[:blank:]])*|key+([[:blank:]])*)
                     local TEMP="${TEMPORAR#+([[:blank:]])key+([[:blank:]])}"
-                    local TYPE="metadata"
-                    local KEY="${TEMP%%+([[:blank:]])}"
-                    local VALUE="${TEMP#*+([[:blank:]])}"
-                ;;
-                note+([[:blank:]])*) echo "Skrytá poznámka" >> /dev/stderr
-                    local TEMP="${TEMPORAR#+([[:blank:]])note+([[:blank:]])}"
-                    local TYPE="note"
-                    local VALUE="${TEMP#+([[:blank:]])}"
-                    echo "Ještě nedokončeno"
-                    return 1
+                    local KEY="${TEMP%%+([[:blank:]])*}"
+                    local VALUE="${TEMP#${KEY}+([[:blank:]])}"
+                    if [ -n "${VALUE}" ] ; then
+                        if [ "${RANGE}" == "global" ] ; then
+                            if [ "${TEST[0]}" -eq "0" ] ; then
+                                case ${ACTION} in
+                                    set) ( $0 "${1}" export ant 0
+                                    case ${KEY} in
+                                        note) echo "note '${VALUE}'"
+                                        ;;
+                                        *) echo "metadata"
+                                            echo -e "\t${KEY} \"${VALUE}\"\n"
+                                        ;;
+                                    esac
+                                        ) | $0 "${1}" import ant
+                                    ;;
+                                    unset) echo "Ruším ${KEY} \"${VALUE}\" TODO"
+                                    ;;
+                                esac
+                            else
+                                case ${ACTION} in
+                                    unset) return 1
+                                esac
+                                ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                ( $0 "${1}" export ant 0
+                                    case ${KEY} in
+                                        note) echo "note \"${VALUE}\""
+                                        ;;
+                                        *) echo "metadata"
+                                            echo -e "\t${KEY} \"${VALUE}\"\n"
+                                        ;;
+                                    esac
+                                ) | $0 "${1}" import ant
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    case ${ACTION} in
+                                        set) ( $0 "${1}" export ant $i
+                                        case ${KEY} in
+                                            note) echo "note \"${VALUE}\""
+                                            ;;
+                                            *) echo "metadata"
+                                                echo -e "\t${KEY} \"${VALUE}\"\n"
+                                            ;;
+                                        esac
+                                        ) | $0 "${1}" import ant
+                                        ;;
+                                        unset) echo "Ruším ${KEY} \"${VALUE}\" TODO"
+                                        ;;
+                                    esac
+                                done
+                            fi
+                    fi
+                    return 0
                 ;;
                 mode+([[:blank:]])*)
                     case "${TEMPORAR#*+([[:blank:]])}" in
@@ -3000,7 +3045,13 @@ setdjvu() {
                         #printf "%s" "${PARAMS[@]}" >> /dev/stderr
                         #return 0
                         if [ "${RANGE}" == "global" ] ; then
-                            echo "Globání nastavení oblasti TODO" >> /dev/stderr
+                            echo """
+  Pokud chcete nastavit tento prvek globálně, tak aby se zobrazoval na
+  všech stránkách, použijte stranu č. 0. Druhá možnost je umístit prvek
+  na libovolnou stránku a pak jej při akci edit přemístit jako prvek
+  stránky pro sdílená metadata - shared_ant
+""" >> /dev/stderr
+                            return 0
                         else
                             local PAGES=($(range ${RANGE}))
                             for i in ${PAGES[@]} ; do
@@ -3009,6 +3060,8 @@ setdjvu() {
                                 local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                                 local INCFILE=$(tempfile -d ${TEMPDIR} -s .inc)
                                 $0 "${1}" export ant $i > "${TEMPFILE}"
+case "${ACTION}" in
+    set)
                                     (
 echo "maparea"
 case "${MESSAGE}" in
@@ -3101,8 +3154,28 @@ EOF
                                         echo "" >> "${TEMPFILE}"
                                     ;;
                                 esac
-                                echo "Před importem ---------"  >> /dev/stderr
-                                cat "${TEMPFILE}"  >> /dev/stderr
+                                ;;
+    unset)
+        local ADRESA=$(infile "${TEMPFILE}")
+                                case "${ADRESA}" in
+                                    +([[:digit:]])\ +([[:digit:]]))
+                                        # echo "${ADRESA/ /,}d" >> /dev/stderr
+                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${ADRESA/ /,}d
+w
+q
+EOF
+                                        echo "" >> "${TEMPFILE}"
+                                    ;;
+                                    *) echo "Pokoušíte se odstranit neexistující položku" >> /dev/stderr
+                                    ;;
+                                esac
+    ;;
+esac
+#echo "---------"  >> /dev/stderr
+case ${DEBUG} in
+    -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
+esac
                                 cat "${TEMPFILE}" ) | $0 "${1}" import ant
                             done
                         fi
@@ -3139,7 +3212,9 @@ EOF
                 
                 ;;
         esac
-        echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit"
+        case ${ACTION} in
+            set) echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit" >> /dev/stderr
+        esac
         ;;
     esac
 }
@@ -7705,7 +7780,7 @@ case ${FILETYPE} in
                 #/ TODO!
                 return 1
             ;;
-            set) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
+            set|unset) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
                         #/ REWORK!
                         # Akce set je určena pro primární nastavení odkazů v obsahu, či poznámek v textu
                         # Souřadnice se při ní přepočítávají podle velikosto stránky
