@@ -394,37 +394,43 @@ function tabs {
 #
 #      local MASTER=$($0 master ${PROCESS})
 #
+# #### Místo zpracování ve skriptu
+# Při testování je třeba vložit do vypisovaného řetězce proměnnou $LINENO
+# ta vypíše číslo řádku zpracovávaného skriptu, kde se zrovna nachází
+# Je-li to místo ve funkci, tak proměnná ${BASH_LINENO[0]} vypíše číslo
+# řádku, ze kterého byla tato funkce zavolaná, a ve ${BASH_LINENO[1]} je uložen
+# index jejího jména v poli ${FUNCNAME[@]}
 log() {
-    local TIMESTAMP="$(date +%T.%N) $(hostname)"
+    local TIMESTAMP="$(date +%T.%N)"
     local LOG="${LOGDIR}/messages"
     if [ -n "${DEBUG}" ] ; then
         case ${DEBUG} in
             -d0) ;;
             -d1) [ "${1^^}" == "ERR" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" >> /dev/stderr
                 ;;
             -d2) [ "${1^^}" == "ERR" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" >> ${LOG}
                 ;;
             -d3) [ "${1^^}" == "ERR" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" | \
                 tee ${LOG} >> /dev/stderr
                 ;;
             -d4) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" >> /dev/stderr
                 ;;
             -d5) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" >> ${LOG}
                 ;;
             -d6) [ "${1^^}" == "ERR" ] || [ "${1^^}" == "WARN" ] && \
-                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+                echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" | \
                 tee ${LOG} >> /dev/stderr
                 ;;
-            -d7) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> /dev/stderr
+            -d7) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${BASH_LINENO[0]}:${FUNCNAME[1]}()\t${@:2}" >> /dev/stderr
                 ;;
-            -d8) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" >> ${LOG}
+            -d8) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" >> ${LOG}
                 ;;
-            -d9) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${@:2}" | \
+            -d9) echo -e "${TIMESTAMP} ${ACTION} ${1^^} ${FUNCNAME[1]}:${BASH_LINENO[0]} ${@:2}" | \
                 tee ${LOG} >> /dev/stderr
                 ;;
             *) help_debug && exit 1
@@ -2022,21 +2028,20 @@ function getocr {
 	fi
 }
 
-# ### <span id="testfile">testfile()</span> ([top](#FUNCTIONS))
+# ### <span id="mimefile">mimefile()</span> ([top](#FUNCTIONS))
 # Function return type file by MIME
 #
 # $1 - jméno testovaného souboru se kterým se pracuje
-testfile () {
-    log goto "testfile() –> ${1}"
+mimefile() {
     local SOURCE=$(${REALPATH} -m -P "${1}")
     local FILE="${SOURCE##*/}"
     if [ -f "${SOURCE}" ] ; then
         local TYPE=$(${MIME} -dbM "${SOURCE}" | awk '{print $1}')
     else
-        log err "testfile() File ${1} is NOT valid."
+        log err "File ${1} is NOT valid."
         return 1
     fi
-    log info "testfile() ${1} –> ${TYPE,,}"
+    log info "${1} –> ${TYPE,,}"
     echo "${TYPE,,}"
     return 0
 }
@@ -2063,18 +2068,18 @@ function targetdir {
 	fi
 }
 
-# ### <span id="identifybundle">identifybundle()</span> ([top](#FUNCTIONS))
+# ### <span id="isbundle">isbundle()</span> ([top](#FUNCTIONS))
 # Function for test type file. For DjVu bundle (0), single (1), or another (1)
 # $1 - file path
-identifybundle() {
-    log goto "identifybundle() $1"
-    if [ $(testfile "${1}") == "djvu" ] ; then
+isbundle() {
+    if [ $(mimefile "${1}") == "djvu" ] ; then
         ${DJVM} -l "${1}" &>/dev/null
-        [ $? -eq 1 ] && return 2
+        [ $? -eq 1 ] && log info "${1} –> DjVu single file" && return 2
     else
-        log err "identifybundle() ${1} –> NOT DjVu file"
+        log err "${1} –> NOT DjVu file"
         return 1
     fi
+    log info "${1} –> DjVu bundle file"
     return 0
 }
 
@@ -2086,9 +2091,9 @@ function comparedjvu {
 	local FILE="${SOURCE##*/}"
 	local FROMPATH=$(${REALPATH} -m -P "${2}")
 	local FROM="${FROMPATH##*/}"
-	if identifybundle ${SOURCE} ; then
+	if isbundle ${SOURCE} ; then
 		${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print $4}' | while read x ; do
-		if identifybundle ${FROMPATH} ; then
+		if isbundle ${FROMPATH} ; then
 			${DJVM} -l "${FROMPATH}" | grep PAGE\ # | awk '{print $4}' | while read y ; do
 				if [ "${x}" == "${y}" ] ; then
 					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
@@ -2106,7 +2111,7 @@ function comparedjvu {
 		done
 	else
 		${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $2}' | while read x ; do
-		if identifybundle ${FROMPATH} ; then
+		if isbundle ${FROMPATH} ; then
 			${DJVM} -l "${FROMPATH}" | grep PAGE\ # | awk '{print $4}' | while read y ; do
 				if [ "${x}" == "${y}" ] ; then
 					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
@@ -2805,13 +2810,6 @@ object() {
 
 setdjvu() {
     log goto "setdjvu() ${FILETYPE} $1 –> $2"
-    case "${2}" in
-        cords+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]]))
-            local TEST=(${2})
-            echo "${TEST[1]} ${TEST[2]} $((${TEST[3]} - ${TEST[1]})) $((${TEST[4]} - ${TEST[2]}))"
-            exit 0
-        ;;
-    esac
     local RANGE=$(isrange "${2}")
     if [ ! -n "${RANGE}" ] ; then
         local RANGE="${2%%+([[:blank:]])*}"
@@ -2823,13 +2821,27 @@ setdjvu() {
     case "${RANGE}" in
         outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
                 $0 "${FILE}" export outline > "${TEMPFILE}"
-                echo "${TEMPORAR##+([[:blank:]])}" >> "${TEMPFILE}"
+                local TEMP="${TEMPORAR#+([[:blank:]])}"
+                case "${TEMP}" in
+                    +([[:digit:]])+([[:blank:]])*) echo "\"${TEMP#+([[:digit:]])+([[:blank:]])}\" \"#${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
+                    ;;
+                    http*)  echo "\"${TEMP#+([[:digit:]])+([[:blank:]])}\" \"${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
+                    ;;
+                    *) local TARGET="${TEMP%%+([[:blank:]])*}"
+                        if [[ "${TARGET}" =~ ".djvu" ]] ; then
+                            echo "\"${TEMP#${TARGET}+([[:blank:]])}\" \"${TARGET}\"" >> "${TEMPFILE}"
+                        else
+                            echo "Neplatná záložka –> z${TEMPORAR}z x${TEMP}x" >> /dev/stderr
+                            return 1
+                        fi
+                    ;;
+                esac
                 outlinetodjvu "${FILE}" "${TEMPFILE}"
                 if [ $? -eq 1 ] ; then
-                    echo "V importované záložce je syntaktická chyba –> ${TEMPORAR}" >> /dev/stderr
+                    echo "Při importu záložek se vyskytla chyba" >> /dev/stderr
                     return 1
                 else
-                    echo "Pozici naimportované záložky v obsahu lze upravit přes akci edit" >> /dev/stderr
+                    echo "Pozici a zanoření záložky v obsahu můžete upravit přes akci edit" >> /dev/stderr
                 fi
                 return $?
         ;;
@@ -2845,6 +2857,8 @@ setdjvu() {
                     local TEMP="${TEMPORAR#+([[:blank:]])note+([[:blank:]])}"
                     local TYPE="note"
                     local VALUE="${TEMP#+([[:blank:]])}"
+                    echo "Ještě nedokončeno"
+                    return 1
                 ;;
                 mode+([[:blank:]])*)
                     case "${TEMPORAR#*+([[:blank:]])}" in
@@ -4796,7 +4810,7 @@ lastpage() {
     log goto "lastpage() –> ${1}"
     local SOURCE=$(${REALPATH} -m -P "${1}")
     local FILE="${SOURCE##*/}"
-    [ "$(testfile ${SOURCE})" == "djvu" ] || return 1
+    [ "$(mimefile ${SOURCE})" == "djvu" ] || return 1
     local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
     log info "lastpage() Count of all pages in ${FILE} –> ${OUTPUT}"
     echo -n "${OUTPUT}"
@@ -4877,7 +4891,7 @@ Každá jiná hodnota parametru je ignorována."""
 		esac
 	fi
 
-	if $(identifybundle "${1}") ; then
+	if $(isbundle "${1}") ; then
 		if [ -z "${IDPAGE}" ] ; then
 			case "${ROTATE}" in
 				0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${SOURCE}"
@@ -5669,7 +5683,7 @@ djvuinfo() {
     log goto "djvuinfo() $1 –> $2"
     case ${2} in
         '') local INFO=($(cat "${1}"|infoitem))
-            identifybundle "${1}"
+            isbundle "${1}"
             case $? in
                 0) local SUMPAGES=$(${DJVM} -l "${1}" | grep PAGE\ # | wc -l)
                  local TEMP=$(${DJVM} -l "${1}" | grep SHARED_ANNO)
@@ -5685,7 +5699,7 @@ djvuinfo() {
                 echo "${INFO[@]} ${SUMPAGES}"
             fi
         ;;
-        pages) identifybundle "${1}"
+        pages) isbundle "${1}"
             case $? in
                 0) ${DJVM} -l "${1}" | grep PAGE\ # | wc -l
                 ;;
@@ -5695,7 +5709,7 @@ djvuinfo() {
                 ;;
             esac
         ;;
-        list) identifybundle "${1}"
+        list) isbundle "${1}"
             case $? in
                 0) ${DJVM} -l "${1}" |\
                     sed -E 's/SHARED_ANNO/#0/ ; s/[[:alnum:][:blank:]]+#// ; /^Size/d ; /^\-/d' | sort -n
@@ -6069,35 +6083,42 @@ Použitelné parametry:
               [3mKeywords[23m - Keywords for indexation DjVu file
                 [3mannote[23m - Notes about origin of document & etc."""
 		;;
-		keywords) echo """
+        '') help keywords && help options
+        ;;
+        keywords) echo """
+ DJVUTOOL - nástroj pro práci s obrázky a DjVu soubory
 
-  [1m${0##*/}[0m {ACTIONS} <DjVu file> {-h|--help}
+       [1m${0##*/}[0m [volby] {AKCE} [SOUBOR] …
+  resp.
+       [1m${0##*/}[0m [volby] [SOUBOR] {AKCE} …
 
-ACTIONS:
-    export - export and convert page into another format
-      info - view info about file or page
-      view - view file, or page from file
+Pro podrobnější informace o volbě, akci či atributu, můžete vždy použít volbu [2m-h[22m
+Viz příklad, demonstrující výpis nápovědy k volbě -v (verbose):
 
-ACTIONS for DjVu:
+   [1m${0##*/}[0m -v -h
 
-    delete - remove page from bundle
-fore, back - move, or insert pages into DjVu bundle
-?    rotate - change orientation page or all pages DjVu bundle
-    export - export from DjVu bundle
-    import - import (content, meta attributes, outline) into DjVu bundle 
-?      edit - edit meta attributes or outline in DjVu bundle
-      info - view info about DjVu bundle or selected page
-?    rename - rename pages in DjVu bundle by pattern
-      view - otevření DjVu souboru v djview4
+AKCE
+    export - export a konverze bitmapových souborů, jejich vrstev či stránek
+             do jiných formátů, včetně DjVu. V případě DjVu souborů lze
+             vyexportovat buď obrazovou vrstvu, ve formě bitmapového obrázku,
+             nebo obsah textové, či metadatové vrstvy.
+      info - zjištuje informace o souboru či stránce
+      view - zobrazuje obrazový soubor či některou z jeho stránek.
 
-OBSOLETE ACTIONS:
-    insert - vložení čehokoliv do DjVu (nahrazuje import)
-     print - výpis meta atributů na konzoli (nahrazuje export)
-       set - nastavení meta atributu (nahrazuje edit)
-     unset - zrušení meta atributu (nahrazuje edit)
+AKCE specifické pro práci s DjVu soubory:
+      edit - editace textové vrstvy DjVu souboru
+    delete - odstranění stránky z DjVu svazku
+? fore, back - přesuny a import stránek v rámci DjVu svazku
+?    rotate - změna rotace stránky v DjVu souboru
+    import - import do textové vrstvy DjVu svazku (obsah, metadata, text)
+? indirect,bundle - mění typ DjVu svazku
+?    rename - přejmenování stránek v DjVu svazku dle vzorku
+       set - jednorázové nastavení meta atributu
+?    unset - zrušení meta atributu
 
-[3mNotice:[23m
-   For more description about any action or option you set on command line as next parameter option -h (--help)
+AKCE které nevyžadují žádný soubor:
+    coords - přepočítává koordináty .dsed souborů
+      help - vypisuje nápovědu
 """
 		;;
     keywords-delete) echo """
@@ -6399,6 +6420,7 @@ SUBKEY
   stejně jako v případě DjVu svazku s jednou stránkou.
 """
     ;;
+    #/OBSOLETE
     keywords-print) echo """
    Action [1mprint[0m
 
@@ -6449,42 +6471,33 @@ Options:
   * If is not any identificator of page, do set global orientation for all DjVu bundle.
 """
 		;;
-		keywords-seti) echo """
-  ACTION [1mset[0m set meta attribute key or outline item from command line
+		keywords-set) echo """
+  AKCE [1mset[0m
 
-  [1m${0##*/}[0m <DjVu> set outline {<num>[:[+|-]]} <ITEM> <TARGET>
- 
-  [1m${0##*/}[0m <DjVu> set meta [all|<RANGE>|<name>] <KEY> <VALUE>
+  Akce je určena pro nastavení metadat a dalších elementů v DjVu souboru
+  z příkazové řádky. Přes [2mset[22m lze také dodatečně vlastnosti ELEMENTU
+  a jeho ATRIBUTY změnit, ale odstranit se dá pouze při akci [2medit[22m!
 
-Example for set outline item:
 
-  [1m${0##*/}[0m bundle.djvu set outline : 'To page 12' '#12'
+  [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {METADATA} …
 
-Example for set meta attribute:
+  [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {ELEMENT} … [: ATRIBUTY ]
 
-  [1m${0##*/}[0m bundle.djvu set meta 1,3,7-12 Creator 'Thomas Jefferson'
+  METADATA - prvky, které obsahují doplňkové informace o stránkách,
+             jejich zobrazení, a to jak se na ně odkazuje.
+  ELEMENTY - jsou metadatové prvky, jimiž lze uživatelsky doplnit
+             informační hodnotu původního obsahu stránky. Jde kupř.
+             o hyperlinky v textu, zvýrazněné oblasti, poznámky,
+             upozornění atp.
+  ATRIBUTY - každý z elementů má své výchozí vlastnosti, které lze
+             v případě potřeby modifikovat nastavením doplňkových
+             atributů. Tyto atributy jsou od základních parametrů elementu
+             odděleny dvojtečkou.
 
-[3mNotice:[23m
-    * If is value of [3mORDER[23m zero or empty, is append ITEM
-      to end outline
-    * Plus, separed by colon from order num, signalize next level for
-      nesting of the item compare to level of a previous item
-    * Count of minus, separed by colon, signalize level for emersion of
-      the outline item compare to level of a previous item.
-    * First item outline can not be nested.
-    * If is not page identificator, is [3mKEY[23m set as shared
-      into shared_anno.iff
-
-   ITEM - text value of bookmark item
- TARGET - name or order page which is target of item with hash (#)
-    num - item order in outline (see action [2mprint[22m)
-    all - attributte is set as meta attribute for every page in DjVu bundle
-   name - attributte is set to page specified by name
-
-METADATA          ELEMENTS          PROPERTY
-    metadata          arrow             align
+METADATA:         ELEMENTY:          ATRIBUTY:
+   *key               arrow             align
     mode              line              backclr
-    note              oval              border
+   *note              oval              border
     outline           poly              border_avis
     background        rect              lineclr
     zoom              text              none
@@ -6493,12 +6506,21 @@ METADATA          ELEMENTS          PROPERTY
                                         textclr
                                         width
                                         xor
+  Bližší podrobnosti jednotlivých prvcích a jejich použití lze vypsat tak,
+  že se za nimi uvede řetězec -h. Viz příklad, demonstrující výpis
+  informací o atributu border:
+
+   … set oval 123 123 123 123 Text k oválnému rámci : border [1m-h[0m FF0000 border_avis
+
 """
 #		help key
 #		help value
 #		help range
 		;;
-    set-arrow) echo """ (fixní prvek)
+    set-arrow) echo """
+ELEMENT [1m$line[0m
+ATRIBUT [1m${1#set-}[0m
+    (fixní prvek)
 
 Šipka, která se zobrazuje na DjVu stránce je ve skutečnosti element line s nastaveným parametrem arrow
 
@@ -6508,7 +6530,9 @@ Použitelné parametry:
               width w ]]
 """
     ;;
-    set-backclr) echo """ (volitelný prvek)
+    set-backclr) echo """
+ATRIBUT [1m${1#set-}[0m
+(volitelný prvek)
 Barva pozadí prvku. Dává smysl pouze u typu:
     rect - barva orámované plochy a
     text - barva pozadí textu
@@ -6517,6 +6541,7 @@ V případě prvků typu oval, poly, line nebo arrow, se vybarví pravoúhlá pl
 """
     ;;
     set-background) echo """
+METADATA [1m${1#set-}[0m
    set global background #F8F8F8
 
 Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
@@ -6526,7 +6551,9 @@ Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkré
 stránky.
 """
     ;;
-    set-+(border|xor|none)) echo """Nastavení okraje rámečku
+    set-+(border|xor|none)) echo """
+ELEMENT [1m${1#set-}[0m
+Nastavení okraje rámečku
 
   border <BARVA> - nastaví jinou barvu rámečku (výchozí je černá)
              xor - rámeček je tvořen přerušovanou linkou
@@ -6535,7 +6562,9 @@ stránky.
 Okraj je zobrazen tenkou linkou, jejíž tloušťku nelze změnit!!!
 """
     ;;
-    set-border_avis) echo """(volitelný prvek)
+    set-border_avis) echo """
+ELEMENT [1m${1#set-}[0m
+(volitelný prvek)
 border_avis - nastavení viditelnosti prvku
 
 Není-li řečeno jinak, zůstávají elementy typu rect na DjVu stránce skryté – zobrazují se teprve v okamžiku, kdy nad ně najedete myší.
@@ -6544,11 +6573,14 @@ prvek viditelný stále
 """
     ;;
     set-line) echo """
+ELEMENT [1m${1#set-}[0m
 Čára která se zobrazuje na stránce. Od prvku arrow (šipka) se liší tím, že ve výchozím stavu 
 nemá nastaveno, že má na konci zobrazovat šipka.
 """
     ;;
-    set-lineclr) echo """(volitelný prvek)
+    set-lineclr) echo """
+ATRIBUT [1m${1#set-}[0m
+(volitelný prvek)
 Nastavení barvy vykreslené čáry. Dává smysl pouze u typu
      line - čára
     arrow - čára se šipkou
@@ -6557,31 +6589,93 @@ U prvků rect, oval, poly a text se nastavuje barva linky, co ohraničuje plochu
 """
     ;;
     set-metadata) echo """
+METADATA [1m${1#set-}[0m
 Nastavení metadatového klíče
 """
     ;;
     set-mode) echo """
-    set global mode bw
+  METADATA [1m${1#set-}[0m
 
-color, bw, fore, black
+ Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
+ jak globálně pro všechny stránky najednou, tak pro konkrétní stránky.
+ Hodí se obzvlástě v situaci, kdy jsou v rámci jednoho DjVu svazku
+ zkombinovány stránky zpracované různým způsobe - černobílé i barevné.
+ Uživatel si pak nemusí při prohlížení přepínat mód zobrazení manuálně.
 
-Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
-nejenom globálně, ale také pro konkrétní stránky.
+ Použít lze buď akci set:
 
-    set 3,6-9 mode color
+  [1m${0##*/}[0m <DjVu svazek> set [RANGE] mode MODE
 
-To se může hodit, pokud jsou v rámci jednoho DjVu svazku kombinované stránky
-zpracované různým způsobe - černobílé, barevné. Uživatel pak nemusí při
-prohlížení přepínat mód zobrazení manuálně.
+MODE
+   color - normální barevné zobrazení
+      bw - černobílé zobrazení masky
+    fore - zobrazení popředí
+   black - černobílé zobrazení
+
+Pokud se místo rozsahu, či seznamu stránek RANGE uvede klíčové slovo
+'global', bude nastaven tento meta atribut do sdílené metadatové vrstvy.
+Tím se zapne nastavená volba jako výchozí pro všechny stránky, u kterých
+nebude nastavená jinak. Atribut lze nastavit také při přímé editaci metadat:
+
+  [1m${0##*/}[0m <DjVu svazek> edit ant
+
+Do bloku příslušné stránky přidejte následující řádek
+    …
+    mode bw
+    …
 """
     ;;
-    set-none) echo """(volitelný prvek)
+    set-note) echo """
+ATRIBUT [1m${1#set-}[0m
+(volitelný prvek)
 none - vypne zobrazování okraje plochy
 
 Anuluje nastavení hodnoty border i boorder_avis
 """
     ;;
-    set-oval) echo """Nastavení oválné (kruhové) plochy
+    set-none) echo """
+ATRIBUT [1m${1#set-}[0m
+(volitelný prvek)
+none - vypne zobrazování okraje plochy
+
+Anuluje nastavení hodnoty border i boorder_avis
+"""
+    ;;
+    set-outline) echo """
+  METADATA [1m${1#set-}[0m
+
+ Záložky (outline), patří mezi metadata. V prohlížeči DjVu souborů se zobrazují
+ jako rozbalovací víceúrovňové menu odkazů na interní stránky resp. externí linky.
+ Jednotlivou záložku lze nastavit prostřednictvím akce set:
+
+  [1m${0##*/}[0m [volby] <DjVu svazek> set outline {TARGET} {DESC}
+
+    TARGET - Cíl záložky. Externí link (řetězec začínající http://…), pořadí (číslo),
+             či jméno stránky v DjVu souboru (např. p0003.djvu)
+      DESC - Popis záložky
+
+Příklady:
+ … set outline 1 Záložka odkazující na stránku č. 1
+ … set outline jmeno_stranky.djvu Záložka odkazující na interní stránku jménem
+ … set outline http://example.org Záložka odkazující na externí web
+
+[3mPoznámka:[23m
+ * Záložky, jejich pořadí či úroveň zanoření lze upravit při akci [2medit[22m.
+ * Záložky lze přes akci [2mexport[22m vyexportovat v [3m.outline[23m či [3m.dsed[23m formátu
+ * Soubor v [3m.outline[23m formátu lze upravit editací v libovolném textovém editoru.
+   Prázdné řádky je třeba smazat. Na rozdíl od nastavení záložky přes akci set,
+   je v .outline formátu na řádce vždy nejprve uveden popis (DESC) a teprve pak
+   následuje cíl (TARGET), kterému předchází znak #
+   Každá z nich je uzavřena v závorkách. Do nižsí úrovně vůči předchozí záložce
+   lze záložku zanořit odsazení celého obsahu řádku tabulátorem:
+                   1 úroveň = 1 tabulátor = 8 mezer
+ * Záložky lze naimportovat buď ze souboru ve formátu [3m.outline[23m přes akci [2mimport[22m,
+  nebo přes [1mdjvused[0m (formát  [3m.dsed[23m)
+"""
+    ;;
+    set-oval) echo """
+ELEMENT [1m${1#set-}[0m
+Nastavení oválné (kruhové) plochy
 Default:
 
 barva a typ okraje - černá, přerušovaná linka (xor) 
@@ -6602,7 +6696,9 @@ souřadnicích 450 225
 
 """
     ;;
-    set-poly) echo """Polynomický obrys plochy
+    set-poly) echo """
+ELEMENT [1m${1#set-}[0m
+Polynomický obrys plochy
 Default:
 barva a průhlednost plochy - průhledná. Obarvit lze pouze pravoúhlou plochu ve které je polynom vepsaný
 
@@ -6611,7 +6707,9 @@ Použitelné parametry:
   [none|border c] 
 """
     ;;
-    set-rect) echo """Nastavení pravoúhlé plochy
+    set-rect) echo """
+ELEMENT [1m${1#set-}[0m
+Nastavení pravoúhlé plochy
     rect 0 0 50 50
 
 Nakreslí čtverec o straně 50x50 pixelů, jehož levý dolní roh bude na souřadnicích
@@ -6632,7 +6730,10 @@ Nejdřív přes info grep zjistit souřadnice textu
 
 """
     ;;
-    set-shadow_+(in|out|ein|eout)) echo """Nastavení velikosti stínu u pravoúhlého rámečku
+    set-shadow_+(in|out|ein|eout)) echo """
+ATRIBUT [1m${1#set-}[0m
+
+Nastavení velikosti stínu u pravoúhlého rámečku
 
   shadow_in - vnitřní plocha rámečku vypadá jako zahloubená dovnitř
  shadow_out - vnitřní plocha rámečku vypadá jako vystouplá ven
@@ -6642,24 +6743,31 @@ shadow_eout - vnější okraj rámečku vypadá jako vystouplý ven
 Nastavení libovolného parametru okraje (none, xor, nebo border) aplikaci stínu vyloučí!!!
 """
     ;;
-    set-text)  echo """Nastavení pravoúhlé plochy
+    set-text)  echo """
+ELEMENT [1m${1#set-}[0m
+Nastavení pravoúhlé plochy
     text 0 0 50 50
          X Y W H
 Do obdélníku o rozměrech WxH, s levým dolním rohem na souřadnicích XxY
 vepíše text. Velikost písma upraví dle množství textu v rámci
 """
     ;;
-    set-textclr) echo """(volitelný prvek)
+    set-textclr) echo """
+ATRIBUT [1m${1#set-}[0m
+(volitelný prvek)
 Barva textu - Dává smysl pouze u typu text
 
 V případě prvků rect, oval, poly, line a arrow je tento parametr zbytečný, protože se u nich žádný text nezobrazuje
 """
     ;;
-    set-width) echo """(volitelný prvek)
+    set-width) echo """
+ATRIBUT [1m${1#set-}[0m
+    (volitelný prvek)
 width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
 """
     ;;
     set-zoom) echo """
+METADATA [1m${1#set-}[0m
     set global zoom stretch
 
 Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
@@ -6728,35 +6836,6 @@ KEY most common attributes:
   * VALUE is normal text string
 """
 		;;
-# ODSTRANIT VVVV
-		keywords-outline) echo """akce [1moutline[0m
-
-Zrušeno, nahrazeno akcí edit a export
-
-  Pomocná akce pro výpis a export obsahu (bookmarks,outline) Djvu svazku.
-
-  [1m${0##*/}[0m <svazek> outline {dump|print|<order>|<name}
-
-         dump  - dump aktuálního obsahu DjVu svazku v dsed formátu
-         print - výpis aktuálního obsahu DjVu svazku ve formátu .outline
-         order - vygenerování šablony pro .outline formát s adresováním
-                 stránek dle pořadových čísel
-         name  - vygenerování šablony pro .outline formát s adresováním
-                 stránek podle jejich názvů
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-
-[3mPoznámka:[23m
-  Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
-  textovém editoru. Řádky s nevyužitými položkami je třeba smazat.
-  Do dalších úrovní lze položky obsahu zanořit pomocí odsazení řádku
-                   1 úroveň = 1 tabulátor = 8 mezer
-  Aktuální obsah lze vyexportovat v .outline formátu parametrem print
-  Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
-[1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
-  jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
-"""
-		;;
 		level) echo """
 [1mParametr[0m
          -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
@@ -6771,27 +6850,6 @@ Zrušeno, nahrazeno akcí edit a export
         --lossless     0 - žádné ztráty (default)
         --clean        1 - ignorují se body o velikosti 1 pixelu
         --lossy        100 - ignorují se plochy
-"""
-		;;
-# ODSTRANIT VVVV
-		meta) echo """
-Export meta atributů
-
-  [1m${0##*/}[0m <svazek> export meta [<num>|<name>|all|global]
-  
-  global - globální meta atributy DjVu svazku
-     all - kompletní výpis atributů ke svazku
-         - výpis atributů stránky identifikované pořadovým číslem nebo jménem
-
-Syntaxe meta souboru:
-
- #<num> '<name>'
- key1 <description>
- key2 ...
- .
-
-Při importu stránky má jméno stránky přednost před pořadovým číslem. To se použije pouze tehdy, pokud identifikační jméno stránky chybí
-Pokud stránka žádné meta atributy nemá, vypíše se pouze prázdná šablona
 """
 		;;
 		move) echo """akce [1mfore[0m a [1mback[0m
@@ -6950,12 +7008,6 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
 [1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
 """
 		;;
-		'') echo """
-DJVUTOOL - tool to work with DjVu files & bundles
-
-Use:  [1m${0##*/}[0m [options] { [-h|--help] | <file> {KEYWORDS} [...] }
-""" && help options && help keywords
-		;;
         *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
             return 1
         ;;
@@ -6969,7 +7021,7 @@ Use:  [1m${0##*/}[0m [options] { [-h|--help] | <file> {KEYWORDS} [...] }
 djvuview() {
     log goto "djvuview() Open –> $@"
     while [ $# -gt 0 ] ; do
-        local TYPE=$(testfile "${1}")
+        local TYPE=$(mimefile "${1}")
         case "${TYPE}" in
             djvu) (${DJVIEW} "${1}" &) ;;
             *) echo "File ${1} is not DjVu file" >> /dev/stderr ;;
@@ -7002,9 +7054,32 @@ function todjvuclassic {
 
 # Zpracování parametrů předaných při startu skriptu
 main() {
+case $# in
+    0) help  && return 0
+esac
 while [ $# -gt 0 ]
 do
     case ${1} in
+        coords) case "$@" in
+                coords+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]]))
+                echo "${2} ${3} $((${4} - ${2})) $((${5} - ${3}))"
+                ;;
+                coords+([[:blank:]])+([[:digit:]]),+([[:digit:]]),+([[:digit:]]),+([[:digit:]]))
+                # LEFT,TOP,SIRKA,VYSKA
+                local TEMP=(${@//,/ })
+                echo "${TEMP[3]},${TEMP[4]},${TEMP[1]#*+([[:blank:]])},${TEMP[2]}"
+                ;;
+                coords+([[:blank:]])+([[:digit:]])x+([[:digit:]])\++([[:digit:]])\++([[:digit:]]))
+                #SIRKAxVYSKA+LEFT+TOP
+                local TEMP=(${@//[x+]/ })
+                echo "${TEMP[3]},${TEMP[4]},${TEMP[1]#*+([[:blank:]])},${TEMP[2]}"
+                ;;
+            esac
+            return 0
+            ;;
+        help) echo "Otevřít ke čtení externí manuál"
+            return 0
+        ;;
         -a|--algorithm) #/ Volba pro akci insert
             #/ Není-li uveden žádný kompresní algoritmus, je aplikováno
             #/ výchozí nastavení proměnné $ALG z konfigurace"
@@ -7296,7 +7371,7 @@ do
                     esac
                     ;;
             esac
-            log set "main() DEBUG –> ${DEBUG}"
+            log set "DEBUG –> ${DEBUG}"
             ;;
         -x|--xml) # Volba pro akci export
             case "${2}" in
@@ -7334,8 +7409,8 @@ do
                     ACTION=${1}
                     shift
                     local CHARSTRING="$@"
-                    log info "main() ACTION –> ${ACTION}"
-                    log info "main() CHARSTRING –> ${CHARSTRING}"
+                    log info "ACTION –> ${ACTION}"
+                    log info "CHARSTRING –> ${CHARSTRING}"
                     break
                 else
                     case ${1} in
@@ -7393,7 +7468,8 @@ do
                         help keywords
                         return 0
                     ;;
-                    *) echo "Neimplementovaný parametr ${1}" >> /dev/stderr
+                    *) log warn "Neimplementovaný parametr ${1}"
+                        help options
                         return 1
                     ;;
                 esac
@@ -7406,7 +7482,7 @@ done
 # echo "${ACTION}" >> /dev/stderr
 # echo "$@" >> /dev/stderr
 
-FILETYPE=$(testfile "${FILE}")
+FILETYPE=$(mimefile "${FILE}")
 if [[ "${CHARSTRING}" =~ "-h" ]] ; then
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
@@ -7434,6 +7510,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 lineclr|\
                                 mode|\
                                 none|\
+                                outline|\
                                 oval|\
                                 poly|\
                                 pushpin|\
