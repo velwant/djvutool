@@ -2211,6 +2211,8 @@ isformat() {
             ;;
         meta) #/ Volba pro DjVu
             ;;
+        line|word|para) #/ Volby pro djvutxt
+            ;;
         outline) #/ Volba pro DjVu
             #/ Obsah
             ;;
@@ -2496,7 +2498,8 @@ fromdjvu() {
 #/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
 #/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
-        djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*)
+        djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*|\
+        line|word|para)
             if [ -n "${RANGE}" ] ; then
                 local PAGES=($(range "${RANGE}"))
             else
@@ -2528,6 +2531,8 @@ fromdjvu() {
                             none)
                             ;;
                             *) case ${INTO} in
+                                line|word|para)
+                                ;;
                                 ant) printf "# 'shared_anno.iff'\n"
                                     ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                                 ;;
@@ -2554,13 +2559,16 @@ fromdjvu() {
                     ;;
                     *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
+                            line|word|para)  printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
+                                ${DJVUTXT} -page="${PAGEORDER}" -detail="${INTO}" "${FILE}" 
+                                ;;
                             ant) printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed
                             ;;
                             meta) printf "# '${PAGENAME}' # page ${PAGEORDER} "
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
                                 local META=$(${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-meta" | decode)
-                                echo -e "${META}"
+                                [ -n "${META}" ] && echo -e "${META}"
                             ;;
                             djvu) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
                                 if [ -f "${TARGET}" ] ; then
@@ -2808,6 +2816,33 @@ object() {
     return 0
 }
 
+# ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
+# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
+# __$2__ obsahuje parametry
+#
+# * ant - Exportuje hyperlinky a meta atributy ve formátu .ant
+# * meta - Exportuje meta informace stránky, její rozměry a stav rotace
+# * djvu - Exportuje DjVu stránky
+# * mask|background|foreground|color|black - oxportuje obrázek pozadí
+# * dsed-*
+# * xml-*#
+#
+# Akce set je určena pro primární nastavení odkazů v obsahu, či poznámek v textu
+# Souřadnice se při ní přepočítávají podle velikosto stránky
+# a zároveň se kontroluje syntaxe.
+# Dodatečné úpravy lze pak provádět buď přes djvusmooth, nebo editací vrstvy .ant
+# set outline : "#cíl" "popis"
+# set meta RANGE : key "Popis"
+# set note RANGE : key "Obsah skryté poznámky"
+# set poly RANGE : "" "" {none|xor|border} [border_avis] x1 y1 x2 y2 …
+# set rect : "" {none|xor|border c} [hilite c] [border_avis] x1 y1 x2 y2
+# set oval : "" {none|xor|border} [border_avis] x1 y1 x2 y2
+# set line : 
+# Jak upravit line - nejprve někam nastavit a pak přes djvusmooth upravit odkud kam
+# set text : x1 y1 x2 x3
+# URL
+# maparea
 setdjvu() {
     log goto "setdjvu() ${FILETYPE} $1 –> $2"
     local RANGE=$(isrange "${2}")
@@ -3215,358 +3250,6 @@ esac
         case ${ACTION} in
             set) echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit" >> /dev/stderr
         esac
-        ;;
-    esac
-}
-
-# ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
-# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
-# __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
-# __$2__ obsahuje parametry
-#
-# * ant - Exportuje hyperlinky a meta atributy ve formátu .ant
-# * meta - Exportuje meta informace stránky, její rozměry a stav rotace
-# * djvu - Exportuje DjVu stránky
-# * mask|background|foreground|color|black - oxportuje obrázek pozadí
-# * dsed-*
-# * xml-*
-setdjvu1() {
-    log goto "setdjvu() ${FILETYPE} $1 –> $2"
-
-    local RANGE=$(isrange "${2}")
-    if [ ! -n "${RANGE}" ] ; then
-        local RANGE="${2%%+([[:blank:]])*}"
-    fi
-
-    local TEMPORAR="${2#*${RANGE}}"
-    [ ! -n "${TEMPORAR##+([[:blank:]])}" ] && return 1
-
-    case "${RANGE}" in
-        outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-                $0 "${FILE}" export outline > "${TEMPFILE}"
-                echo "${TEMPORAR##+([[:blank:]])}" >> "${TEMPFILE}"
-                outlinetodjvu "${FILE}" "${TEMPFILE}"
-                if [ $? -eq 1 ] ; then
-                    echo "V importované záložce je syntaktická chyba –> ${TEMPORAR}" >> /dev/stderr
-                    return 1
-                else
-                    echo "Pozici naimportované záložky v obsahu lze upravit přes akci edit" >> /dev/stderr
-                fi
-                return $?
-        ;;
-        *) local TEST=($($0 "${1}" info list))
-            case "${TEMPORAR##+([[:blank:]])}" in
-                key+([[:blank:]])*)
-                        echo "nastavuji metadatový klíč" >> /dev/stderr
-                        # vypsat do TEMPFILE
-                        # zapsat klíč
-                        # naimportovat tempfile
-                ;;
-                note+([[:blank:]])*) echo "Skrytá poznámka" >> /dev/stderr
-                ;;
-                link+([[:blank:]])*) echo "Odkaz na stránce - první položka musí být http nebo hash" >> /dev/stderr
-                ;;
-                area+([[:blank:]])*) echo "Zvýrazněná oblast na stránce" >> /dev/stderr
-                    local TEMP="${TEMPORAR#+([[:blank:]])area+([[:blank:]])}"
-                    local TYPE="${TEMP%%+([[:blank:]])*}"
-                    local TEMPX="${TEMP#${TYPE}+([[:blank:]])}"
-                    local MESSAGE="${TEMPX//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
-                    local COORDS="${TEMPX%${MESSAGE}}"
-                    if [[ "${MESSAGE}" =~ ":" ]] ; then
-                        mapfile PARAMS < <( object ${MESSAGE##*:+([[:blank:]])} )
-                    fi
-                    if [[ ${MESSAGE:0:1} =~ [0-9] ]] ; then
-                        echo "Chyba v počtu koordinátů –> ${MESSAGE}" >> /dev/stderr
-                        return 1
-                    else
-                        echo "MESSAGE ${MESSAGE%+([[:blank:]]):*}" >> /dev/stderr
-                        echo "COORDS ${COORDS}" >> /dev/stderr
-                        printf "%s" "${PARAMS[@]}" >> /dev/stderr
-                        return 0
-                        local TEST=(${COORDS})
-                    case "${TYPE}" in
-                        oval)
-                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
-                            # 4 souřadnice
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání nastavení oválné oblasti na stránce nedává smysl"
-                                return 1
-                            fi
-
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                # co mohu mměnit - buď souřadnice, nebo cílovou message
-                                local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-                                $0 "${1}" export ant $i > "${TEMPFILE}"
-                                local NEWFILE=$(
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\toval ${COORDS}"
-                                echo -e "\tborder #FF0000"
-                                echo -e "\tborder_avis"
-                                echo -e "\n"
-                                )
-                                local ADRESA=$(infile "${TEMPFILE}")
-                                case "${ADRESA}" in
-                                    +([[:digit:]])\ +([[:digit:]]))
-                                        # echo "${ADRESA/ /,}c" >> /dev/stderr
-                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
-${ADRESA/ /,}c
-${NEWFILE}
-
-.
-w
-q
-EOF
-                                        echo "" >> "${TEMPFILE}"
-                                    ;;
-                                    *) echo "${NEWFILE}" >> "${TEMPFILE}"
-                                        echo "" >> "${TEMPFILE}"
-                                    ;;
-                                esac
-                                cat "${TEMPFILE}" ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        poly)
-                            # x 2 souřadnic
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání nastavení polynomní oblasti na stránce nedává smysl"
-                                return 1
-                            fi
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\tpoly ${COORDS}"
-                                echo -e "\tborder #FF0000"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        text)
-                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
-                            # 4 souřadnice
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání nastavení textové poznámky na stránce nedává smysl"
-                                return 1
-                            fi
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\ttext ${TEST[0]} ${TEST[1]} $((${TEST[2]} - ${TEST[0]})) $((${TEST[3]} - ${TEST[1]}))"
-                                echo -e "\tpushpin"
-                                echo -e "\tnone"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        rect)
-                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
-                            # 4 souřadnice
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání nastavení zvýrazněné oblasti na stránce nedává smysl"
-                                return 1
-                            fi
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\trect ${COORDS}"
-#                                object ${MESSAGE}
-                                 echo -e "\thilite #FF0000"
-                                 echo -e "\topacity 75"
-                                 echo -e "\tnone"
-                                 echo -e "\tborder_avis"
-                                echo -e "\n"
-                                ) | tee /tmp/fortest | $0 "${1}" import ant
-                            exit 33
-                            done
-                        ;;
-                        ramec)
-                            [ ${#TEST[@]} -ge 5 ] && help set-area && return 1
-                            # 4 souřadnice
-                            case "${MESSAGE##* }" in
-                                -h|--help) help set-area-ramec
-                            esac
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání nastavení zvýrazněné oblasti na stránce nedává smysl"
-                                return 1
-                            fi
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\trect ${COORDS}"
-                                echo -e "\tshadow_eout 5"
-                                echo -e "\topacity 75"
-                                echo -e "\tborder_avis"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        *) echo "Neplatný typ oblasti –> ${TYPE}" >> /dev/stderr
-                            help set-area
-                            return 1
-                        ;;
-                    esac
-                    fi
-                ;;
-                arrow+([[:blank:]])*) # echo "Šipka na stránce" >> /dev/stderr
-                        # 4 souřadnice
-                    local TEMP="${TEMPORAR#+([[:blank:]])arrow+([[:blank:]])}"
-                    case "${TEMP}" in
-                        +([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání šipka na stránce nedává smysl"
-                                return 1
-                            fi
-                            local MESSAGE="${TEMP#+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])}"
-                            local COORDS="${TEMP%${MESSAGE}}"
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\tline ${COORDS}"
-                                echo -e "\tarrow"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        *) echo "${TEMP}"
-                            help set-arrow
-                        ;;
-                    esac
-                    return $?
-                ;;
-                mode+([[:blank:]])*)
-                    case "${TEMPORAR#*+([[:blank:]])}" in
-                        color|bw|fore|black) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR#+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR#+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR#+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-mode
-                        ;;
-                    esac
-                    return $?
-                ;;
-                pfoot+([[:blank:]])*|\
-                phead+([[:blank:]])*) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat."
-                ;;
-                align+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        +(left|center|right)+([[:blank:]])+(top|center|bottom)) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-align
-                        ;;
-                    esac
-                    return $?
-                ;;
-                background+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-background
-                        ;;
-                    esac
-                    return $?
-                ;;
-                zoom+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        stretch|one2one|width|page|d+([[:digit:]])) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-zoom
-                        ;;
-                    esac
-                    return $?
-                ;;
-                '')
-                ;;
-                *) echo "Nepodporovaný parametr ${TEMPORAR}"
-                ;;
-        esac
-        echo "Nastavuji informaci pro sdílenou stránku - pozici v obsahu upravte přes akci edit"
         ;;
     esac
 }
@@ -4171,6 +3854,51 @@ fromcontainer() {
 # Při exportu jpeg souborů z archívu uloží do podadresáře example
 # exportované stránky pod názvy: example_00001.jpg, example_00002.jpg, …
 #
+# #### export
+# Operace export slouží k extrakci stránek (vrstev)
+# z formátů, které mohou obsahovat více stránek, případně
+# k jejich transormaci na jiný rozměr či konverzi do
+# jiného formát. Viz příklad:
+#
+#      djvutool soubor.jpg export 1 jpg 30%
+#
+# Vygeneruje JPEG obrázek s názvem soubor_30%.jpg jehož
+# obsahem bude původní obrázek, zmenšený na 30% velikost
+#
+# U kontejnerů, které mají uloženy v sobě obrázky,
+# lze provést export pouze s uvedením rozsahu. Cílové
+# soubory se pak budou jmenovat stejně, jako v archívu:
+#
+# djvutool soubor.zip export 2-7
+# 
+# U formátů s podporou více stránek, které mají
+# uložen název vrstvy či stránky, je vhodné uvést
+# cílový formát souboru. Jméno cílového souboru pak
+# bude stejné jako název příslušné vrstvy či stránky:
+# 
+# djvutool soubor.xcf export 2-7
+#
+# V případě PDF souborů, které mohou obsahovat mix textu
+# a obrázků volbou přípony sdělíte, že chcete vyexportovat
+# pouze obrázky:
+#
+# djvutool soubor.pdf export 1 jpg
+#
+# V tomto případě se budou jmenovat soubory bůhví jak.
+# Je tedy v tomto případě žádoucí uvést případně jméno
+# a případně i výchozí cestu:
+#
+# djvutool soubor.pdf export 1 jpg 30% example/
+#
+# V tomto případě se obrázky nasypou do adresáře example.
+# Pokud neexistuje, tak se založí.
+#
+#  djvutool soubor.pdf export 1 jpg 30% example
+#
+# Pokud nekončí řádek lomítkem, použije se celý zbytek
+# řetězce jako výchozí vzor pro pojmenování stránky
+# (obrázku) cílový soubor se tedy bude v tomto případě
+# jmenovat example_30%_001.jpg
 exportimg() {
     log goto "exportimg() ${FILE} –> ${CHARSTRING}"
     if [[ "${CHARSTRING}" =~ "?" ]] ||\
@@ -4922,14 +4650,14 @@ deletepage() {
     return $?
 }
 
-function djvurotate {
-	# $1 - soubor se kterým se pracuje
-	# $2 - číslo, nebo název strany která se má rotovat
-	# $3 - hodnota rotace
+# ### <span id="djvurotate">djvurotate()</span> ([top](#FUNCTIONS))
+# $1 - soubor se kterým se pracuje
+# $2 - číslo, nebo název strany která se má rotovat
+# $3 - hodnota rotace
 #	echo "$*" >> /dev/stderr
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local INFO="""
+function djvurotate {
+    log goto "$1 –> $2"
+    local INFO="""
 Uvedenou hodnotu rotace nelze akceptovat. Rotaci lze nastavit buď 
 absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
 
@@ -4942,105 +4670,89 @@ absolutně, a nebo relativně (pootočit o 90°). AKceptované hodnoty:
     180 - přetočení o 180°
 
 Každá jiná hodnota parametru je ignorována."""
-	local PARAMS=($2)
-	if [ "${#PARAMS[@]}" -gt "1" ] ; then
-		case "${PARAMS[$((${#PARAMS[@]} -1))]}" in
-			0|1|2|3|180|left|right) # echo "Jak mám otáčet $1" >> /dev/stderr
-				local ROTATE="${PARAMS[$((${#PARAMS[@]} -1))]}"
-#				echo "rotate: před ořezáním -$2-"
-				local TEMP="${2% ${ROTATE}}"
-				local IDPAGE=${TEMP##+([[:blank:]])}
-#				echo "rotate: po ořezání -${IDPAGE}-"
-			;;
-			*) printf "%s - is not valid rotate VALUE" "${2}" >> /dev/stderr
-				exit 1
-			;;
-		esac
-	else
-		case "${PARAMS}" in
-			0|1|2|3|180|left|right) local ROTATE="${PARAMS}"
-			;;
-			*) printf "%s - is not valid rotate VALUE" "${PARAMS}" >> /dev/stderr
-				exit 1
-			;;
-		esac
-	fi
 
-	if $(isbundle "${1}") ; then
-		if [ -z "${IDPAGE}" ] ; then
-			case "${ROTATE}" in
-				0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${SOURCE}"
-				;;
-				left) ${DJVUSED} -e "set-rotation +1; save" "${SOURCE}"
-				;;
-				right) ${DJVUSED} -e "set-rotation -1; save" "${SOURCE}"
-				;;
-				180) ${DJVUSED} -e "set-rotation +2; save" "${SOURCE}"
-				;;
-				*) echo "${INFO}" >> /dev/stderr
-				;;
-			esac
-		else
-			printf "DjVu file is single page. Param %s is non sense, continue in rotate?" "${IDPAGE}" >> /dev/stderr
-			if $(potvrdit) ; then
-				case "${ROTATE}" in
-					0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${SOURCE}"
-					;;
-					left) ${DJVUSED} -e "set-rotation +1; save" "${SOURCE}"
-					;;
-					right) ${DJVUSED} -e "set-rotation -1; save" "${SOURCE}"
-					;;
-					180) ${DJVUSED} -e "set-rotation +2; save" "${SOURCE}"
-					;;
-					*) echo "${INFO}" >> /dev/stderr
-					;;
-				esac
-			else
-				exit 0
-			fi
-		fi
-	else
-		if [ -z "${IDPAGE}" ] ; then
-			echo "Warning: If you want c a global orientation of pages Při globálním natočení stránek dokumentu dávejte pozor, zda-li nastavujete absolutní hodnotu natočení, nebo, zda-li otáčíte stránky relativně (left/right). Při točení se upravuje natočení všech stránek. Buďte tedy při této operaci opatrní a raději si předem zkontrolujte, zda-li tím neovlivníte i některou ze stránek. Pokud ano, pak zvolte buť relativní parametr natočení, nebo ji pak otočte do správné pozice dodatečně."
-			if $(potvrdit) ; then
-				case "${ROTATE}" in
-					0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${SOURCE}"
-					;;
-					left) ${DJVUSED} -e "set-rotation +1; save" "${SOURCE}"
-					;;
-					right) ${DJVUSED} -e "set-rotation -1; save" "${SOURCE}"
-					;;
-					180) ${DJVUSED} -e "set-rotation +2; save" "${SOURCE}"
-					;;
-					*) echo "${INFO}" >> /dev/stderr
-					;;
-				esac
-			else
-				exit 0
-			fi
-		else
-#			echo "Je třeba provést identifikaci stránky ${IDPAGE}"
-			local NAMEPAGE=$(identifypage name "${1}" "${IDPAGE}")
-			if [ -z "${NAMEPAGE}" ] ; then
-				printf "Page %s is not valid for file %s" "${IDPAGE}" "${FILE}" >> /dev/stderr
-				exit 1
-			else
-				printf "Change orientation page %s in %s by %s" "${NAMEPAGE}" "${FILE}" "${ROTATE}" >> ${LOG}
-				case "${ROTATE}" in
-					0|1|2|3)  ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation ${ROTATE}; save" "${SOURCE}"
-					;;
-					left) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation +1; save" "${SOURCE}"
-					;;
-					right) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation -1; save" "${SOURCE}"
-					;;
-					180) ${DJVUSED} -e "select '${NAMEPAGE}'; set-rotation +2; save" "${SOURCE}"
-					;;
-					*) echo "${INFO}" >> /dev/stderr
-					;;
-			esac
-			fi
-		fi
-	fi
+    local ROTATE="${2%%+([[:blank:]])*}"
+    case "${ROTATE}" in
+        0|1|2|3|180|left|right)
+            local TEMPORAR="${2#${ROTATE}+([[:blank:]])}"
+            mapfile -t ARRAY <<< $($0 "${1}" info list)
+            case "${ARRAY:0:1}" in
+                0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                ;;
+                *) LISTPAGES="0 none"
+                    mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                ;;
+            esac
+            RANGE=$(isrange "${TEMPORAR}")
+            if [ -n "${RANGE}" ] ; then
+                local PAGES=($(range "${RANGE}"))
+            else
+                case "${TEMPORAR//+([[:blank:]])/}" in
+                    '') echo "${INFO}" >> /dev/stderr
+                        return 1
+                    ;;
+                    *) # seznam stránek oddělených čárkou
+                        local IFS_BAK=$IFS
+                        local IFS=$','
+                        local SEZNAM=($TEMPORAR)
+                        local IFS=$IFS_BAK
+                        for i in "${LISTPAGES[@]}" ; do
+                            if [[ "${SEZNAM[@]}" =~ "${i##+([[:digit:]])+([[:blank:]])}" ]] ; then
+                                local TEMP="$TEMP${i%% *} "
+                            fi
+                            x=$((x + 1))
+                        done
+                        local PAGES=($TEMP)
+                    ;;
+                esac
+            fi
+            #/  echo "PAGES ${#PAGES[@]} ${PAGES[@]}" >> /dev/stderr
+            for i in ${PAGES[@]} ; do
+                local PAGENAME="${LISTPAGES[$i]##+([[:digit:]])+([[:blank:]])}"
+                local PAGEORDER="${LISTPAGES[$i]%% *}"
+                case "${PAGEORDER}" in
+                    0) case "${PAGENAME}" in
+                            none)
+                            ;;
+                            *) # globální rotace
+                                case "${ROTATE}" in
+                                    0|1|2|3)  ${DJVUSED} -e "set-rotation ${ROTATE}; save" "${1}"
+                                    ;;
+                                    left) ${DJVUSED} -e "set-rotation +1; save" "${1}"
+                                    ;;
+                                    right) ${DJVUSED} -e "set-rotation -1; save" "${1}"
+                                    ;;
+                                    180) ${DJVUSED} -e "set-rotation +2; save" "${1}"
+                                    ;;
+                                    *) echo "${INFO}" >> /dev/stderr
+                                    ;;
+                                esac
+                            ;;
+                        esac
+                    ;;
+                    '') #/ nic
+                    ;;
+                    *) #/ stránky dle rozsahu či seznamu
+                        case "${ROTATE}" in
+                            0|1|2|3)  ${DJVUSED} -e "select '${PAGEORDER}'; set-rotation ${ROTATE}; save" "${1}"
+                            ;;
+                            left) ${DJVUSED} -e "select '${PAGEORDER}'; set-rotation +1; save" "${1}"
+                            ;;
+                            right) ${DJVUSED} -e "select '${PAGEORDER}'; set-rotation -1; save" "${1}"
+                            ;;
+                            180) ${DJVUSED} -e "select '${PAGEORDER}'; set-rotation +2; save" "${1}"
+                            ;;
+                            *) echo "${INFO}" >> /dev/stderr
+                            ;;
+                        esac
+                    ;;
+                esac
+            done
+        ;;
+        *) printf "%s - is not valid rotate VALUE" "${ROTATE}" >> /dev/stderr
+            return 1
+        ;;
+    esac
 }
 
 function djvumove {
@@ -5744,7 +5456,7 @@ EOF
 }
 
 # ### <span id="djvuinfo">djvuinfo()</span> ([top](#FUNCTIONS))
-# Prvním parametrem __$1__ je cesta k DjVu souboru a druhým $2 pořadovaná
+# Prvním parametrem __$1__ je cesta k DjVu souboru a druhým $2 požadovaná
 # informace:
 #
 # * list
@@ -5753,9 +5465,10 @@ EOF
 # * pages
 # * grep
 #
-# Pokud není předaná, vrátí se pouze informace o typu souboru
+# Pokud není předaná platná hodnota , vrací funkce pouze informaci o typu
+# souboru, ev. doplněnou o počet stran či vrstev
 djvuinfo() {
-    log goto "djvuinfo() $1 –> $2"
+    log goto "$1 –> $2"
     case ${2} in
         '') local INFO=($(cat "${1}"|infoitem))
             isbundle "${1}"
@@ -5804,26 +5517,7 @@ djvuinfo() {
         dsed*) log dsed "djvuinfo() –> ${2#dsed+([[:blank:]])}"
             ${DJVUSED} "${1}" -e "${2#dsed+([[:blank:]])}"
         ;;
-        grep) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
-            $0 "${1}" info list | \
-            while read line ; do
-                case "${line%% *}" in
-                    O)
-                    ;;
-                    '') return 1
-                    ;;
-                    *) local PAGE="${line#* }"
-                        local ORDER="${line%% *}"
-                        local TEMPORAR=$(${DJVUTXT} "${1}" -page=${ORDER} | ${2} 2>1)
-                        if [ -n "${TEMPORAR}" ] ; then
-                            echo "# ${PAGE} #[P${ORDER}]"
-                            printf "%s\n" "${TEMPORAR}"
-                        fi
-                    ;;
-                esac
-            done
-        ;;
-        grep1*) log grep "djvuinfo() –> ${2#grep+([[:blank:]])}"
+        grep*) log grep "grep –> ${2#grep+([[:blank:]])}"
             $0 "${1}" info list | \
             while read line ; do
                 case "${line%% *}" in
@@ -6184,7 +5878,7 @@ AKCE specifické pro práci s DjVu soubory:
       edit - editace textové vrstvy DjVu souboru
     delete - odstranění stránky z DjVu svazku
 ? fore, back - přesuny a import stránek v rámci DjVu svazku
-?    rotate - změna rotace stránky v DjVu souboru
+     rotate - změna rotace stránky v DjVu souboru
     import - import do textové vrstvy DjVu svazku (obsah, metadata, text)
 ? indirect,bundle - mění typ DjVu svazku
 ?    rename - přejmenování stránek v DjVu svazku dle vzorku
@@ -6282,8 +5976,8 @@ AKCE které nevyžadují žádný soubor:
 [1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
   jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
 """
-		help range
-		;;
+    help range
+    ;;
     keywords-export) echo """
   ACTION: [1mexport[0m
 
@@ -6294,7 +5988,7 @@ FORMAT
       xml - na výstup bude vypsán XML obsah vybraného rozsahu stránek
      dsed - na výstup bude vypsán obsah vybraného rozsahu stránek v dsed formátu
   outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
- ?   meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
 
      color - plnobarevná stránka
      black - černobílá kresba
@@ -6376,6 +6070,12 @@ Nápověda pro export metainformacé
 Nápověda pro export grafické vrstvy
     """
     ;;
+    export-line|\
+    export-word|\
+    export-para) echo """
+Nápověda pro export textové vrstvy
+    """
+    ;;
     export-grep|export-pages|export-exif) help keywords-export
     ;;
 		keywords-import) echo """
@@ -6429,9 +6129,12 @@ SUBKEY
      exif - vypisuje exif informace k DjVu souboru, včetně meta informací
             ze stránek
      meta - vypisuje rozměry stránek DjVu souboru a info o případné rotaci
-     dsed - aplikuje na soubor příkaz přes djvused
-     grep - aplikuje příkaz grep s předanými parametry na textový obsah DjVu svazku
+     dsed - aplikuje nad soubor příkaz předaný utilitě [1mdjvused[0m
+     grep - aplikuje na plain textový výstup z DjVu souboru příkaz [1mgrep[0m
+            s předanými parametry
 
+[3mPoznámka:[23m
+  * Výstupy lze dále zpracovávat přes rouru, nebo používat ve skriptech
 """
     ;;
     info-dsed) echo """
@@ -6520,39 +6223,34 @@ SUBKEY
   akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
 """
 		;;
-		keywords-rotate) echo """
-  ACTION [1mrotate[0m
+    keywords-rotate) echo """
+  AKCE [1mrotate[0m
 
-  For change of default orientation page in DjVu file.
+  Mění výchozí orientaci stránek v DjVu souboru.
 
-  [1m${0##*/}[0m [option] <DjVu> rotate {<num>|<name>} <VALUE>
+  [1m${0##*/}[0m [option] <DjVu> rotate {VALUE} {RANGE}
 
-         num   - order of page to change in DjVu bundle
-         name  - name of page to change in DjVu bundle
+Pro nastavení orientace všech stránek na výchozí hodnotu, použijte: 0
 
-Options:
-    -f|--force   Force rotate without any questions
+  [1m${0##*/}[0m [option] <DjVu> rotate 0 0
 
   VALUE:
-             0 - normal orientation (0°)
-             1 - rotate page 90° to right
-             2 - rotate page 180°
-             3 - rotate page 90° to left (270°)
-          left - rotate page 90° in left direction
-         right - rotate page 90° in right direction
-           180 - turn the page on the contrary
-
-[3mWarning:[23m
-  * If is not any identificator of page, do set global orientation for all DjVu bundle.
+             0 - výchozí orientace (0°)
+             1 - otočit stránku o 90° doprava
+             2 - otočit stránku o 180° (vzhůru nohama)
+             3 - otočit stránku o 90° doleva (na 270°)
+          left - rotovat stránku o 90° směrem doleva
+         right - rotovat stránku o 90° směrem doprava
+           180 - otočit stránku opačně než aktuálně je
 """
-		;;
+    help range
+    ;;
 		keywords-set) echo """
   AKCE [1mset[0m
 
   Akce je určena pro nastavení metadat a dalších elementů v DjVu souboru
   z příkazové řádky. Přes [2mset[22m lze také dodatečně vlastnosti ELEMENTU
   a jeho ATRIBUTY změnit, ale odstranit se dá pouze při akci [2medit[22m!
-
 
   [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {METADATA} …
 
@@ -7561,16 +7259,10 @@ FILETYPE=$(mimefile "${FILE}")
 if [[ "${CHARSTRING}" =~ "-h" ]] ; then
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
-                djvu) case "${CHARSTRING}" in
-                        ant*) help "${ACTION}-ant"
+                djvu) case "${CHARSTRING%%+([[:blank:]])*}" in
+                        ant|dsed|meta) help "${ACTION}-${CHARSTRING%%+([[:blank:]])*}"
                         ;;
-                        exif*) help "${ACTION}-exif"
-                        ;;
-                        meta*) help "${ACTION}-meta"
-                        ;;
-                        pages*) help "${ACTION}-pages"
-                        ;;
-                        grep*) help "${ACTION}-grep"
+                        exif|grep|list|pages) help "info-${CHARSTRING%%+([[:blank:]])*}"
                         ;;
                         *) local TEMP=(${CHARSTRING%%+(-)h*})
                             local PROPERTY="${TEMP[@]: -1}"
@@ -7613,6 +7305,9 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
 fi
 
 case ${FILETYPE} in
+    '') echo "${FILE} –> invalid path!" >> /dev/stderr
+        return 1
+    ;;
     djvu) #/ Pracuji se souborem v DjVu formátu
         log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
         case "${ACTION}" in
@@ -7772,109 +7467,39 @@ case ${FILETYPE} in
                 esac
                 return 33
             ;;
-            info) #/ Info o DjVu svazku
-                djvuinfo "${FILE}" "${CHARSTRING}"
+            info) djvuinfo "${FILE}" "${CHARSTRING}"
                 return 0
             ;;
             rename) log info "main() Rename pages in ${FILE} by TEMPLATE –> ${CHARSTRING}"
                 #/ TODO!
                 return 1
             ;;
-            set|unset) log info "main() Set bookmark or ant into ${FILE} –> ${CHARSTRING}"
-                        #/ REWORK!
-                        # Akce set je určena pro primární nastavení odkazů v obsahu, či poznámek v textu
-                        # Souřadnice se při ní přepočítávají podle velikosto stránky
-                        # a zároveň se kontroluje syntaxe.
-                        # Dodatečné úpravy lze pak provádět buď přes djvusmooth, nebo editací vrstvy .ant
-                        # set outline : "#cíl" "popis"
-                        # set meta RANGE : key "Popis"
-                        # set note RANGE : key "Obsah skryté poznámky"
-                        # set poly RANGE : "" "" {none|xor|border} [border_avis] x1 y1 x2 y2 …
-                        # set rect : "" {none|xor|border c} [hilite c] [border_avis] x1 y1 x2 y2
-                        # set oval : "" {none|xor|border} [border_avis] x1 y1 x2 y2
-                        # set line : 
-                        # Jak upravit line - nejprve někam nastavit a pak přes djvusmooth upravit odkud kam
-                        # set text : x1 y1 x2 x3
-                        # URL
-                        # maparea
-                # set global key "zbytek"
-                # set 1-5 key "zbytek"
-#                case "${CHARSTRING%% *}" in
-#                            meta) setmeta "${FILE}" "${CHARSTRING}"
-#                            ;;
-#                            outline) outlineset "${FILE}" "${CHARSTRING#outline *}"
-#                            ;;
-#                            *) help keyword-meta
-#                            ;;
-#                        esac
-                setdjvu  "${FILE}" "${CHARSTRING}"
+            set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
                 return 0
             ;;
-            '') echo "${FILE} –> invalid path!" >> /dev/stderr
-                return 1
+            view) log info "View –> ${FILE}"
+                (${DJVIEW} "${FILE}" &)
+                return 0
             ;;
-            *) log info "main() Input bitmap file (or archive) ${FILE} is in format –> ${FILETYPE}"
-                case ${ACTION} in
-                    # ### export
-                    # Operace export slouží k extrakci stránek (vrstev)
-                    # z formátů, které mohou obsahovat více stránek, případně
-                    # k jejich transormaci na jiný rozměr či konverzi do
-                    # jiného formát. Viz příklad:
-                    #
-                    #      djvutool soubor.jpg export 1 jpg 30%
-                    #
-                    # Vygeneruje JPEG obrázek s názvem soubor_30%.jpg jehož
-                    # obsahem bude původní obrázek, zmenšený na 30% velikost
-                    #
-                    # U kontejnerů, které mají uloženy v sobě obrázky,
-                    # lze provést export pouze s uvedením rozsahu. Cílové
-                    # soubory se pak budou jmenovat stejně, jako v archívu:
-                    #
-                    # djvutool soubor.zip export 2-7
-                    # 
-                    # U formátů s podporou více stránek, které mají
-                    # uložen název vrstvy či stránky, je vhodné uvést
-                    # cílový formát souboru. Jméno cílového souboru pak
-                    # bude stejné jako název příslušné vrstvy či stránky:
-                    # 
-                    # djvutool soubor.xcf export 2-7
-                    #
-                    # V případě PDF souborů, které mohou obsahovat mix textu
-                    # a obrázků volbou přípony sdělíte, že chcete vyexportovat
-                    # pouze obrázky:
-                    #
-                    # djvutool soubor.pdf export 1 jpg
-                    #
-                    # V tomto případě se budou jmenovat soubory bůhví jak.
-                    # Je tedy v tomto případě žádoucí uvést případně jméno
-                    # a případně i výchozí cestu:
-                    #
-                    # djvutool soubor.pdf export 1 jpg 30% example/
-                    #
-                    # V tomto případě se obrázky nasypou do adresáře example.
-                    # Pokud neexistuje, tak se založí.
-                    #
-                    #  djvutool soubor.pdf export 1 jpg 30% example
-                    #
-                    # Pokud nekončí řádek lomítkem, použije se celý zbytek
-                    # řetězce jako výchozí vzor pro pojmenování stránky
-                    # (obrázku) cílový soubor se tedy bude v tomto případě
-                    # jmenovat example_30%_001.jpg
-                    export) exportimg
-                    ;;
-                    info) infoimg
-                    ;;
-                    view) viewimg
-                    ;;
-                    set) log info "main() set exif tag in img ${FILE} –> ToDo"
-                            ;;
-                    unset) log info "main() unset exif tag in ${FILE} –> ToDo"
-                            ;;
-                    rotate) log info "main() rotate ${FILE}"
-                            ;;
-                    rename) log info "main() rename ${FILE}"
-                            ;;
-                    import) echo '''Pokud následuje djvu soubor'''
+        esac
+    ;;
+    *) log info "main() Input bitmap file (or archive) ${FILE} is in format –> ${FILETYPE}"
+        case ${ACTION} in
+            export) exportimg
+            ;;
+            info) infoimg
+            ;;
+            view) viewimg
+            ;;
+            set) log info "main() set exif tag in img ${FILE} –> ToDo"
+            ;;
+            unset) log info "main() unset exif tag in ${FILE} –> ToDo"
+            ;;
+            rotate) log info "main() rotate ${FILE}"
+            ;;
+            rename) log info "main() rename ${FILE}"
+            ;;
+            import) echo '''Pokud následuje djvu soubor'''
                 echo '''Pokud následuje adresář'''
                 echo '''to je existující soubor typu bundle a:
 - nenásleduje žádný další existující soubor typu djvu, nebo adresář
@@ -7885,37 +7510,34 @@ case ${FILETYPE} in
     - soubor typu dsed má se zpracovat
     - jiný soubor - obrázek, který se má převést a vložit
     '''
-
-                    log info "main() import ${FILE} into DjVu"
-                        case ${FILETYPE} in
-                                djvu) echo "Konvertovat vstupní soubor a vložit do předchozeného DjVu souboru - TODO" >> /dev/stderr
-                                    #/ Sestavit z nich soubor typu bundle
-                                    ;;
-                                gif) #/ může být mít více vrstev 'Animation frames
-                                    ;;
-                                mng) #/ může být mít více vrstev 'Animation frames'
-                                    ;;
-                                png) #/ může být mít více vrstev 'Animation frames'
-                                    ;;
-                                gimp|xcf) #/může mít více vrstev
-                                    ;;
-                                tiff) #/ může mít více stránek
-                                    ;;
-                                pdf) #/ může mít více stránek
-                                    ;;
-                                xml|XML) #/ imporuji soubor s textovou vrstvou
-                                    ;;
-                                unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
-                                    exit 1
-                                    ;;
-                                *) echo "Záleží na typu " >> /dev/stderr
-                                ;;
-                        esac
+                log info "main() import ${FILE} into DjVu"
+                case ${FILETYPE} in
+                    djvu) echo "Konvertovat vstupní soubor a vložit do předchozeného DjVu souboru - TODO" >> /dev/stderr
+                        #/ Sestavit z nich soubor typu bundle
                         ;;
+                    gif) #/ může být mít více vrstev 'Animation frames
+                        ;;
+                    mng) #/ může být mít více vrstev 'Animation frames'
+                        ;;
+                    png) #/ může být mít více vrstev 'Animation frames'
+                        ;;
+                    gimp|xcf) #/může mít více vrstev
+                        ;;
+                    tiff) #/ může mít více stránek
+                        ;;
+                    pdf) #/ může mít více stránek
+                        ;;
+                    xml|XML) #/ imporuji soubor s textovou vrstvou
+                        ;;
+                    unknown) echo "Pokud je soubor ${1} typu DjVU, může jít o tzv. SecureDjVu formát, který má kryptované vrstvy. S takovým souborem nelze s opensource nástroji pracovat." >> /dev/stderr
+                        exit 1
+                        ;;
+                    *) echo "Záleží na typu " >> /dev/stderr
+                    ;;
                 esac
-                ;;
+            ;;
         esac
-        ;;
+    ;;
 esac
 }
 
