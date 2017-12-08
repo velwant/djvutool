@@ -119,86 +119,89 @@ TEMPDIR=$(mktemp -d -p /tmp ${NAME}-XXX) || exit 1
 #   * feh      ( http://feh.finalrewind.org/ )
 #   * exiftool ( http://www.sno.phy.queensu.ca/~phil/exiftool ) in Debian package: libimage-exiftool-perl 
 #   * yad      ( http://sourceforge.net/projects/yad-dialog )
-REALPATH=$(which realpath)
+REALPATH=$(command -v realpath)
 [ ! ${REALPATH} ] && exit 1
 REALPATH="$REALPATH -e "
-
-FEH=$(which feh)
+if ! command -v ed >/dev/null 2>&1 ; then
+    echo "Musí být nainstalován editor ed" >> /dev/stderr
+    exit 1
+fi
+FEH=$(command -v feh)
 [ ! ${FEH} ] && exit 18
-GEEQIE=$(which geeqie)
+GEEQIE=$(command -v geeqie)
 [ ! ${GEEQIE} ] && exit 18
-DIDJVU=$(which didjvu)
+DIDJVU=$(command -v didjvu)
 [ ! ${DIDJVU} ] && echo 'Není nainstalován balík didjvu, nebude možné aplikovat pokročilé algoritmy pro separaci popředí při konverzi do DjVu' >> /dev/stderr && DIDJVU=false
-OCRODJVU=$(which ocrodjvu)
+OCRODJVU=$(command -v ocrodjvu)
 [ ! ${OCRODJVU} ] && OCRODJVU=31
-DJVIEW=$(which djview)
+DJVIEW=$(command -v djview)
 [ ! ${DJVIEW} ] && echo 'Není nainstalován balík djview, nebude fungovat testovací zobrazení djvu.souborů' >> /dev/stderr && DJVIEW=false
-DDJVU=$(which ddjvu)
+DDJVU=$(command -v ddjvu)
 [ ! ${DDJVU} ] && exit 20
-DJVUTXT=$(which djvutxt)
+DJVUTXT=$(command -v djvutxt)
 [ ! ${DJVUTXT} ] && exit 20
-DJVUSED=$(which djvused)
+DJVUSED=$(command -v djvused)
 [ ! ${DJVUSED} ] && exit 20
-DJVUTOXML=$(which djvutoxml)
+DJVUTOXML=$(command -v djvutoxml)
 [ ! ${DJVUTOXML} ] && exit 20
-DJVUXMLPARSER=$(which djvuxmlparser)
+DJVUXMLPARSER=$(command -v djvuxmlparser)
 [ ! ${DJVUXMLPARSER} ] && exit 20
-DJVMCVT=$(which djvmcvt)
+DJVMCVT=$(command -v djvmcvt)
 [ ! ${DJVMCVT} ] && exit 20
-DJVUEXTRACT=$(which djvuextract)
+DJVUEXTRACT=$(command -v djvuextract)
 [ ! ${DJVUEXTRACT} ] && exit 20
-DJVM=$(which djvm)
+DJVM=$(command -v djvm)
 [ ! ${DJVM} ] && exit 20
-CJB2=$(which cjb2)
+CJB2=$(command -v cjb2)
 [ ! ${CJB2} ] && exit 20
-DJVUMAKE=$(which djvumake)
+DJVUMAKE=$(command -v djvumake)
 [ ! ${DJVUMAKE} ] && exit 20
-#YAD=$(which yad)
+#YAD=$(command -v yad)
 #[ ! ${YAD} ] && echo 'Není nainstalován balík yad' && exit 1
-MIME=$(which mimetype)
+MIME=$(command -v mimetype)
 [ ! -x "${MIME}" ] && exit 21
-STAT=$(which readlink)
+STAT=$(command -v readlink)
 [ ! -x "${STAT}" ] && exit 22
-EXIFTOOL=$(which exiftool)
+EXIFTOOL=$(command -v exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
 # Přesunuto do funkce main k volbě -o|--ocr
-#TESSERACT=$(which tesseract)
+#TESSERACT=$(command -v  tesseract)
 #[ ! -x "${TESSERACT}" ] && exit 31
-IDENTIFY=$(which identify)
+IDENTIFY=$(command -v identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
-CONVERT=$(which convert)
+CONVERT=$(command -v convert)
 [ ! -x "${CONVERT}" ] && echo exit 24
-IMGVIEW=$(which display)
+IMGVIEW=$(command -v display)
 [ ! -x "${IMGVIEW}" ] && echo exit 24
-XCFINFO=$(which xcfinfo)
+XCFINFO=$(command -v xcfinfo)
 [ ! -x "${XCFINFO}" ] && echo exit 26
-XCF2PNM=$(which xcf2pnm)
+XCF2PNM=$(command -v xcf2pnm)
 [ ! -x "${XCF2PNM}" ] && echo exit 26
-TIFFINFO=$(which tiffinfo)
+TIFFINFO=$(command -v tiffinfo)
 [ ! -x "${TIFFINFO}" ] && echo exit 27
-PDFVIEW=$(which xpdf)
+PDFVIEW=$(command -v xpdf)
 if [ ! -x "${PDFVIEW}" ] ; then
-    PDFVIEW=$(which evince)
+    PDFVIEW=$(command -v evince)
     if [ ! -x "${PDFVIEW}" ] ; then
         if [ ! -x "${xournal}" ] ; then
             echo exit 30
         fi
     fi
 fi
-PDFTK=$(which pdftk)
+PDFTK=$(command -v pdftk)
 [ ! -x "${PDFTK}" ] && echo exit 19
-PDFTOPPM=$(which pdftoppm)
+PDFTOPPM=$(command -v pdftoppm)
 [ ! -x "${PDFTOPPM}" ] && echo exit 18
 
 # Konverze z formátu JPEG2000 (jp2)
-JP2TO=$(which opj_decompress)
+JP2TO=$(command -v opj_decompress)
 [ ! ${JP2TO} ] && exit 28
-JP2IN=$(which opj_compress)
+JP2IN=$(command -v opj_compress)
 [ ! ${JP2IN} ] && exit 28
 # Nástroje pro konverzi animovaných gifů a png souborů
 # apng2gif, gif2apng, 
 
-ZIP=$(which 7z)
+ZIP=$(command -v 7z)
 [ ! -x "${ZIP}" ] && echo exit 29
 
 # ## Implementované akce
@@ -244,50 +247,50 @@ FORMATS_CONT=(
 )
 FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]})
 
-PGMTOPBM=$(which pgmtopbm)
+PGMTOPBM=$(command -v pgmtopbm)
 [ ! -x "${PGMTOPBM}" ] && exit 23
-BMPTOPNM=$(which bmptopnm)
+BMPTOPNM=$(command -v bmptopnm)
 [ ! -x "${BMPTOPNM}" ] && exit 23
-JPEGTOPNM=$(which jpegtopnm)
+JPEGTOPNM=$(command -v jpegtopnm)
 [ ! -x "${JPEGTOPNM}" ] && exit 23
-GIFTOPNM=$(which giftopnm)
+GIFTOPNM=$(command -v giftopnm)
 [ ! -x "${GIFTOPNM}" ] && exit 23
-PNGTOPNM=$(which pngtopnm)
+PNGTOPNM=$(command -v pngtopnm)
 [ ! -x "${PNGTOPNM}" ] && exit 23
-PNMTOJPEG=$(which pnmtojpeg)
+PNMTOJPEG=$(command -v pnmtojpeg)
 [ ! -x "${PNMTOJPEG}" ] && exit 23
-TIFFTOPNM=$(which tifftopnm)
+TIFFTOPNM=$(command -v tifftopnm)
 [ ! -x "${TIFFTOPNM}" ] && exit 23
-PNMTOPNG=$(which pnmtopng)
+PNMTOPNG=$(command -v pnmtopng)
 [ ! -x "${PNMTOPNG}" ] && exit 23
-PAMTOJPEG2K=$(which pamtojpeg2k)
+PAMTOJPEG2K=$(command -v pamtojpeg2k)
 [ ! -x "${PAMTOJPEG2K}" ] && exit 23
-JPEG2KTOPAM=$(which jpeg2ktopam)
+JPEG2KTOPAM=$(command -v jpeg2ktopam)
 [ ! -x "${JPEG2KTOPAM}" ] && exit 23
-PNMTOJPEG=$(which pnmtojpeg)
+PNMTOJPEG=$(command -v pnmtojpeg)
 [ ! -x "${PNMTOJPEG}" ] && exit 23
-PNMTOPLAINPNM=$(which pnmtoplainpnm)
+PNMTOPLAINPNM=$(command -v pnmtoplainpnm)
 [ ! -x "${PNMTOPLAINPNM}" ] && exit 23
 #/ Konvertuje barvy na stupně šedi
-PPMTOPGM=$(which ppmtopgm)
+PPMTOPGM=$(command -v ppmtopgm)
 #/ Konvertuje stupně šedi na černobílou mmasku
 [ ! -x "${PPMTOPGM}" ] && exit 23
 #/ Konvertuje binární formát PAM do PNM
-PAMTOPNM=$(which pamtopnm)
+PAMTOPNM=$(command -v pamtopnm)
 [ ! -x "${PAMTOPNM}" ] && exit 23
 #/ Vysekne oblast z obrázku dle souřadnic
-PAMCUT=$(which pamcut)
+PAMCUT=$(command -v pamcut)
 [ ! -x "${PAMCUT}" ] && exit 23
 #/ Odseparuje masku
-PAMARITH=$(which pamarith)
+PAMARITH=$(command -v pamarith)
 [ ! -x "${PAMARITH}" ] && exit 23
 #/ generátor prázdných ploch pro masku
-PBMMAKE=$(which pbmmake)
+PBMMAKE=$(command -v pbmmake)
 [ ! -x "${PBMMAKE}" ] && exit 23
 #/ integruje plochy do masky
-PNMPASTE=$(which pnmpaste)
+PNMPASTE=$(command -v pnmpaste)
 [ ! -x "${PNMPASTE}" ] && exit 23
-NETPBMSCALE=$(which pamscale)
+NETPBMSCALE=$(command -v pamscale)
 if [ -x "${NETPBMSCALE}" ] ; then
     # Akceptované škálovací filtry
     FILTERS=(
@@ -574,8 +577,11 @@ testsyntaxant() {
                 if [ -n "${START}" ] ; then
                     unset START
                 else
-                    case ${META} in
-                        metadata) echo "(${META} ${KEYS})"
+                    case "${META}" in
+                        metadata)  case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
@@ -599,8 +605,11 @@ testsyntaxant() {
                 if [ -n "${START}" ] ; then
                     unset START
                 else
-                    case ${META} in
-                        metadata) echo "(${META} ${KEYS})"
+                    case "${META}" in
+                        metadata)  case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
@@ -626,7 +635,10 @@ testsyntaxant() {
                 printf "set-ant\n"
             ;;
             metadata) case "${META}" in
-                        metadata) printf "(${META} ${KEYS})\n"
+                        metadata) case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
                         ;;
                         maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
                         ;;
@@ -637,7 +649,10 @@ testsyntaxant() {
                 META='metadata'
             ;;
             maparea) case "${META}" in
-                        metadata) echo "(${META} ${KEYS})"
+                        metadata)  case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
@@ -647,13 +662,20 @@ testsyntaxant() {
                 unset URL
                 META='maparea'
             ;;
+            align+([[:blank:]])+(left|center|right)+([[:blank:]])+(top|center|bottom)|\
             background+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]|\
             mode+([[:blank:]])+(color|bw|fore|black)|\
+            pfoot+([[:blank:]])*|\
+            phead+([[:blank:]])*|\
             zoom+([[:blank:]])d+([[:digit:]])|\
             zoom+([[:blank:]])+(stretch|one2one|width|page)|\
             note*)
-                case ${META} in
-                        metadata) echo "(${META} ${KEYS})"
+                echo "Nastavuji ($line) " >> /dev/stderr
+                case "${META}" in
+                        metadata)  case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
@@ -782,7 +804,7 @@ testsyntaxant() {
     printf "\n.\n"
 }
 
-# ###
+# ### <span id="testsyntaxdsed">testsyntaxdsed()</span> ([top](#FUNCTIONS))
 # Funkce pro zpracování výstupu příkazu output-ant
 testsyntaxdsed() {
     local ANTFILE=$(tempfile -d ${TEMPDIR} -s .ant)
@@ -2182,16 +2204,16 @@ istarget() {
 }
 
 # ### <span id="isrange">isrange()</span> ([top](#FUNCTIONS))
-# Nastavuje proměnnou RANGE a vrací ořezaný řetězec
+# Testuje, jestli předaný řetězec __$1__ nezačíná rozsahem (RANGE).
 isrange() {
-    log goto "isrange() input –> $1"
     local PARAMS=($1)
     case "${PARAMS[0]}" in
         +([0-9\-,]))
-            log value "isrange() OK –> ${PARAMS[0]}"
+            log info "OK range –> ${PARAMS[0]}"
             echo "${PARAMS[0]}"
             ;;
-        *) return 1
+        *) log info "NOT range –> ${PARAMS[0]}"
+            return 1
             ;;
     esac
     return 0
@@ -2844,16 +2866,18 @@ object() {
 # URL
 # maparea
 setdjvu() {
-    log goto "setdjvu() ${FILETYPE} $1 –> $2"
+    log goto "$1 –> $2"
     local RANGE=$(isrange "${2}")
     if [ ! -n "${RANGE}" ] ; then
         local RANGE="${2%%+([[:blank:]])*}"
     fi
 
-    local TEMPORAR="${2#*${RANGE}}"
+    local TEMPORAR="${2#*${RANGE}+([[:blank:]])}"
     [ ! -n "${TEMPORAR##+([[:blank:]])}" ] && return 1
 
     case "${RANGE}" in
+        mode|align|background|zoom|note|key) echo "Pokud chcete nastavit parametr globálně, musíte uvést jako číslo stránky 0" >> /dev/stderr
+        ;;
         outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
                 $0 "${FILE}" export outline > "${TEMPFILE}"
                 local TEMP="${TEMPORAR#+([[:blank:]])}"
@@ -2882,173 +2906,238 @@ setdjvu() {
         ;;
         *) local TEST=($($0 "${1}" info list))
             case "${TEMPORAR##+([[:blank:]])}" in
-                note+([[:blank:]])*|key+([[:blank:]])*)
-                    local TEMP="${TEMPORAR#+([[:blank:]])key+([[:blank:]])}"
-                    local KEY="${TEMP%%+([[:blank:]])*}"
-                    local VALUE="${TEMP#${KEY}+([[:blank:]])}"
-                    if [ -n "${VALUE}" ] ; then
-                        if [ "${RANGE}" == "global" ] ; then
-                            if [ "${TEST[0]}" -eq "0" ] ; then
-                                case ${ACTION} in
-                                    set) ( $0 "${1}" export ant 0
-                                    case ${KEY} in
-                                        note) echo "note '${VALUE}'"
+                note+([[:blank:]])*|\
+                key+([[:blank:]])*)
+                    local TEMP=(${TEMPORAR//+([[:blank:]])/ })
+                    case "${TEMP[0]}" in
+                        note) local KEY="${TEMP[0]}"
+                            local VALUE="${TEMPORAR#${TEMP[0]}+([[:blank:]])}"
+                        ;;
+                        key) local KEY="${TEMP[1]}"
+                            local VALUE="${TEMPORAR#${TEMP[0]}+([[:blank:]])${TEMP[1]}+([[:blank:]])}"
+                        ;;
+                        *) #/ ještě nevím
+                            return 1
+                        ;;
+                    esac
+                    if [ "${RANGE}" == "global" ] || [ "${RANGE}" == "0" ] ; then
+                        if [ "${TEST[0]}" -eq "0" ] ; then
+                            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            log info "From shared_ant –> $i"
+                            $0 "${1}" export ant 0 > "${TEMPFILE}"
+                            mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
+                            echo "${LINE[0]}" >> /dev/stderr
+                            case "${ACTION}" in
+                                unset) case "${LINE[0]}" in
+                                        +([[:digit:]])) #/ vyskytuje se
+                                            echo "Ruším \t${KEY}" >> /dev/stderr
+                                            setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
                                         ;;
-                                        *) echo "metadata"
-                                            echo -e "\t${KEY} \"${VALUE}\"\n"
-                                        ;;
-                                    esac
-                                        ) | $0 "${1}" import ant
-                                    ;;
-                                    unset) echo "Ruším ${KEY} \"${VALUE}\" TODO"
-                                    ;;
-                                esac
-                            else
-                                case ${ACTION} in
-                                    unset) return 1
-                                esac
-                                ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                ( $0 "${1}" export ant 0
-                                    case ${KEY} in
-                                        note) echo "note \"${VALUE}\""
-                                        ;;
-                                        *) echo "metadata"
-                                            echo -e "\t${KEY} \"${VALUE}\"\n"
+                                        *) #/ nevyskytuje se
                                         ;;
                                     esac
-                                ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    case ${ACTION} in
-                                        set) ( $0 "${1}" export ant $i
-                                        case ${KEY} in
-                                            note) echo "note \"${VALUE}\""
+                                ;;
+                                set) case "${LINE[0]}" in
+                                        +([[:digit:]])) #/ vyskytuje se nedělám nic
+                                        ;;
+                                        *) #/ nevyskytuje se
+                                            case "${KEY}" in
+                                                note) echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                ;;
+                                                *) echo "metadata" >> "${TEMPFILE}"
+                                                    echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                ;;
+                                            esac
+                                        ;;
+                                    esac
+                                ;;
+                            esac
+                            cat "${TEMPFILE}" | $0 "${1}" import ant
+                        else
+                            case "${ACTION}" in
+                                set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                    ( $0 "${1}" export ant 0
+                                        case "${KEY}" in
+                                            note) echo -e "${KEY} \"${VALUE}\"\n"
                                             ;;
-                                            *) echo "metadata"
+                                            *) echo "metadata" >> "${TEMPFILE}"
                                                 echo -e "\t${KEY} \"${VALUE}\"\n"
                                             ;;
                                         esac
-                                        ) | $0 "${1}" import ant
+                                    ) | $0 "${1}" import ant
+                                ;;
+                            esac
+                        fi
+                    else
+                        local PAGES=($(range ${RANGE}))
+                        for i in ${PAGES[@]} ; do
+                            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            log info "From page –> $i"
+                            $0 "${1}" export ant $i > "${TEMPFILE}"
+                            echo "" >> "${TEMPFILE}"
+                            mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
+                            case "${ACTION}" in
+                                unset) case "${LINE[0]}" in
+                                        +([[:digit:]])) #/ vyskytuje se
+                                            log info "Odstraňuji ${KEY} –> ${KEY} \"${VALUE}\""
+                                            setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
                                         ;;
-                                        unset) echo "Ruším ${KEY} \"${VALUE}\" TODO"
+                                        *) #/ nevyskytuje se
+                                            case "${KEY}" in
+                                                note) #/ jiná poznámka, kterou ignoruji
+                                                    log warn "Poznámka odpovídající parametrům na stránce neexistuje –> ${KEY} \"${VALUE}\""
+                                                ;;
+                                                *) #/ zjistit jestli se vyskytuje klíč
+                                                    log info "Testuji zda-li se v souboru vyskytuje klíč ${KEY}"
+                                                    mapfile -d\: -t -c1 ITEMKEY <<< $(grep -n "${KEY}" "${TEMPFILE}")
+                                                    case "${ITEMKEY[0]}" in
+                                                        +([[:digit:]])) #/ vyskytuje se, je třeba odstranit, ovšem pozor!
+                                                            log info "Klíč se vyskytuje na řádku ${ITEMKEY[0]}"
+                                                            setmeta "${TEMPFILE}" "${KEY}"
+                                                            echo "${TEMPFILE}" >> /dev/stderr
+                                                        ;;
+                                                        *) #/ nevyskytuje se
+                                                            log warn "Neexistující klíč –> ${KEY}"
+#                                                            echo "metadata" >> "${TEMPFILE}"
+#                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                        ;;
+                                                    esac
+                                                ;;
+                                            esac
                                         ;;
                                     esac
-                                done
-                            fi
+                                ;;
+                                set) case "${LINE[0]}" in
+                                        +([[:digit:]])) #/ vyskytuje se
+                                            log info "Na stránce $i řádek vyhovující parametrům již existuje ${LINE[0]} –> ${KEY} \"${VALUE}\""
+                                            cat "${TEMPFILE}" >> /dev/stderr
+                                        ;;
+                                        *) #/ nevyskytuje se
+                                            case "${KEY}" in
+                                                note) log info "Přidávám poznámku –> ${KEY} \"${VALUE}\""
+                                                    echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                ;;
+                                                *) #/ zjistit jestli se vyskytuje klíč
+                                                    log info "Testuji zda-li se v souboru vyskytuje klíč ${KEY}"
+                                                    mapfile -d\: -t -c1 ITEMKEY <<< $(grep -n "${KEY}" "${TEMPFILE}")
+                                                    case "${ITEMKEY[0]}" in
+                                                        +([[:digit:]])) #/ vyskytuje se, nahradit
+                                                            log info "Aktualizuji klíč –> ${KEY} \"${VALUE}\""
+                                                            setmeta "${TEMPFILE}" "${KEY}" "${KEY} \"${VALUE}\""
+                                                        ;;
+                                                        *) #/ nevyskytuje se
+                                                            log info "Přidávám nový klíč –> ${KEY} \"${VALUE}\""
+                                                            echo "metadata" >> "${TEMPFILE}"
+                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                        ;;
+                                                    esac
+                                                ;;
+                                            esac
+                                        ;;
+                                    esac
+                                ;;
+                            esac
+                            cat "${TEMPFILE}" | $0 "${1}" import ant
+                        done
                     fi
-                    return 0
-                ;;
-                mode+([[:blank:]])*)
-                    case "${TEMPORAR#*+([[:blank:]])}" in
-                        color|bw|fore|black) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR#+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR#+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR#+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-mode
-                        ;;
-                    esac
                     return $?
                 ;;
+                align+([[:blank:]])*|\
+                background+([[:blank:]])*|\
+                mode+([[:blank:]])*|\
                 pfoot+([[:blank:]])*|\
-                phead+([[:blank:]])*) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat."
-                ;;
-                align+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        +(left|center|right)+([[:blank:]])+(top|center|bottom)) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-align
-                        ;;
+                phead+([[:blank:]])*|\
+                zoom+([[:blank:]])*) #/ Metadata co se mohou vyskytovat vždy pouze jednou
+                    local KEY="${TEMPORAR%%+([[:blank:]])*}"
+                    local VALUE="${TEMPORAR#${KEY}+([[:blank:]])}"
+                    case "${KEY}" in
+                        align) case ${VALUE} in
+                            +(left|center|right)+([[:blank:]])+(top|center|bottom))
+                                ;;
+                                *) log err "align invalid value –> #${VALUE}#"
+                                    help set-align
+                                    return 1
+                                ;;
+                            esac
+                            ;;
+                        background) case "${VALUE}" in
+                                [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
+                                local VALUE="#${VALUE}"
+                                ;;
+                                *) log err "background invalid value –> ${VALUE}#"
+                                    help set-background
+                                    return 1
+                                ;;
+                            esac
+                            ;;
+                        mode) case "${VALUE}" in
+                                color|bw|fore|black) # Mohu nastavit
+                                ;;
+                                *) log err "mode invalid value –> #${VALUE}#"
+                                    help set-mode
+                                    return 1
+                                ;;
+                            esac
+                            ;;
+                        pfoot|phead) case ${VALUE} in
+                                '') log err "${KEY} invalid value –> #${VALUE}#"
+                                    help set-${KEY}
+                                    return 1
+                                ;;
+                                *) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat, ale když chcete…"
+                                    local VALUE="\"${VALUE}\""
+                                ;;
+                            esac
+                            ;;
+                        zoom) case ${VALUE} in
+                            stretch|one2one|width|page|d+([[:digit:]]))
+                                ;;
+                                *) log err "zoom invalid value –> #${VALUE}#"
+                                    help set-zoom
+                                    return 1
+                                ;;
+                            esac
+                            ;;
+                        *) #/ ještě nevím
+                            return 1
+                            ;;
                     esac
-                    return $?
-                ;;
-                background+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        \#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
+                    if [ "${RANGE}" == "global" ] || [ "${RANGE}" == "0" ] ; then
+                        if [ "${TEST[0]}" -eq "0" ] ; then
+                            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            log info "From shared_ant –> $i"
+                            $0 "${1}" export ant 0 > "${TEMPFILE}"
+                            case "${ACTION}" in
+                                unset) setmeta "${TEMPFILE}" "${KEY}"
+                                ;;
+                                set) setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}"
+                                ;;
+                            esac
+                            cat "${TEMPFILE}" | $0 "${1}" import ant
+                        else
+                            case "${ACTION}" in
+                                set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
                                     ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
+                                        echo "${KEY} ${VALUE}"
                                     ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-background
-                        ;;
-                    esac
-                    return $?
-                ;;
-                zoom+([[:blank:]])*)
-                    case "${TEMPORAR##*+([[:blank:]])}" in
-                        stretch|one2one|width|page|d+([[:digit:]])) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                if [ "${TEST[0]}" -eq "0" ] ; then                                        
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                else
-                                    ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${TEMPORAR##+([[:blank:]])}"
-                                    ) | $0 "${1}" import ant
-                                fi
-                            else
-                                local PAGES=($(range ${RANGE}))
-                                for i in ${PAGES[@]} ; do
-                                    ( $0 "${1}" export ant $i
-                                    echo "${TEMPORAR##+([[:blank:]])}" ) | $0 "${1}" import ant
-                                done
-                            fi
-                        ;;
-                        *) help set-zoom
-                        ;;
-                    esac
+                                    ;;
+                            esac
+                        fi
+                    else
+                        local PAGES=($(range ${RANGE}))
+                        for i in ${PAGES[@]} ; do
+                            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            log info "From page –> $i"
+                            $0 "${1}" export ant $i > "${TEMPFILE}"
+                            case "${ACTION}" in
+                                unset) setmeta "${TEMPFILE}" "${KEY}"
+                                ;;
+                                set) setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}"
+                                ;;
+                            esac
+                            cat "${TEMPFILE}" | $0 "${1}" import ant
+                        done
+                    fi
                     return $?
                 ;;
                 '')
@@ -5323,136 +5412,46 @@ function changemeta {
 }
 
 # ### <span id="setmeta">setmeta()</span> ([top](#FUNCTIONS))
-#
+# V souboru $1 najít $2, pokud se vyskytuje, tak ho nahradit za $3,
+# pokud nevyskytuje, přidat $3 na konec
 setmeta() {
-        log goto "setmeta() $1 –> $2"
-
-}
-
-function setmeta1 {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
-	local CHARSET="${2}"
-	local RANGE="${CHARSET%%\ *}"
-	if [ "${RANGE}" == "all" ] ; then
-		local ITEM="${CHARSET#* }"
-		local KEY=(${ITEM})
-		if [ "${#KEY[@]}" -lt "2" ] ; then
-			printf "setmeta: FAIL - you must set meta attribute key and any value for it.\n"
-			exit 1
-		else
-			for i in $(seq $(lastpage "${SOURCE}")) ; do
-				printf "set meta: Set meta attribute key %s into all pages in DjVu bundle %s\n" "${KEY[0]}" "${FILE}" >> ${LOG}
-				printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${KEY}
+    mapfile -d\: -t -c1 ITEM <<< $(grep -n "${2}" "${1}")
+    case "${ITEM[0]}" in
+        +([[:digit:]])) #/ vyskytuje se
+            case "${3}" in
+                '') log info "Delete –> $2"
+                    ed "${1}" 2>/dev/null <<-EOF
+${ITEM[0]}
 d
 w
 q
 EOF
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-i
-${ITEM}
+                ;;
+                *) #/ nahrazuji
+                    log info "Replace $2 –> $3"
+                    log info "${ITEM[0]}c"
+                    ed "${1}" 2>/dev/null <<-EOF
+${ITEM[0]}c
+${3}
 .
 w
 q
 EOF
-				${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
-			done 1>/dev/null
-		fi
-	elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
-		local ITEM="${CHARSET}"
-		printf "set meta: Set global meta attribute key %s into DjVu bundle %s\n" "${RANGE}" "${FILE}" >> ${LOG}
-		printmeta "${SOURCE}" global | grep -v '^[#.]\|^$' > ${TEMPFILE}
-		ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${RANGE}
-d
-w
-q
-EOF
-		ed ${TEMPFILE} 2>/dev/null <<-EOF
-i
-${ITEM}
-.
-w
-q
-EOF
-		${DJVUSED} "${SOURCE}" -e "select; set-meta ${TEMPFILE}" -s
-	else
-		local IDPAGES=($(range "${RANGE}"))
-		local ITEM="${CHARSET#* }"
-		local KEY=(${ITEM})
-		for i in ${IDPAGES[@]} ; do
-			printf "set meta: Set meta attribute key %s into page %s in DjVu bundle %s\n" "${KEY[0]}" "$i" "${FILE}" >> ${LOG}
-			printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
-			ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${KEY}
-d
-w
-q
-EOF
-			ed ${TEMPFILE} 2>/dev/null <<-EOF
-i
-${ITEM}
-.
-w
-q
-EOF
-			${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
-		done 1>/dev/null
-	fi
-	return 0
-}
-
-
-function unsetmeta {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
-	local CHARSET="${2}"
-	local RANGE="${CHARSET%%\ *}"
-	if [ "${RANGE}" == "all" ] ; then
-		local ITEM="${CHARSET#* }"
-		local KEY=(${ITEM})
-		printf "unset meta: Remove attribute key %s from all pages DjVu bundle %s\n" "${KEY[0]}" "${FILE}" >> ${LOG}
-		for i in $(seq $(lastpage "${SOURCE}")) ; do
-			printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
-			ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${KEY}
-d
-w
-q
-EOF
-			${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
-		done  1>/dev/null
-	elif [ "${RANGE//+([[:alpha:]])/}" == "" ] ; then
-		printf "unset meta: Remove global attribute key %s from DjVu bundle %s\n" "${RANGE}" "${FILE}" >> ${LOG}
-		printmeta "${SOURCE}" global | grep -v '^[#.]\|^$' > ${TEMPFILE}
-		ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${RANGE}
-d
-w
-q
-EOF
-		${DJVUSED} "${SOURCE}" -e "select; set-meta ${TEMPFILE}" -s
-	else
-		local IDPAGES=($(range "${RANGE}"))
-		local ITEM="${CHARSET#* }"
-		local KEY=(${ITEM})
-		for i in ${IDPAGES[@]} ; do
-			printf "unset meta: Remove attribute key %s from page %s\n" "${KEY[0]}" "$i" >> ${LOG}
-			printmeta "${SOURCE}" "$i" | grep -v '^[#.]\|^$' > ${TEMPFILE}
-			ed ${TEMPFILE} 2>/dev/null <<-EOF
-/${KEY}
-d
-w
-q
-EOF
-			${DJVUSED} "${SOURCE}" -e "select $i; set-meta ${TEMPFILE}" -s
-		done  1>/dev/null
-	fi
-	return 0
+                ;;
+            esac
+        ;;
+        *) #/ nevyskytuje se
+            case "${3}" in
+                '')
+                ;;
+                *) #/ přidám na konec
+                    echo "${3}" >> "${1}"
+                    log info "Add $3 to end"
+                ;;
+            esac
+        ;;
+    esac
+    return $?
 }
 
 # ### <span id="djvuinfo">djvuinfo()</span> ([top](#FUNCTIONS))
@@ -6469,6 +6468,13 @@ souřadnicích 450 225
 
 """
     ;;
+    set-+(pfoot|phead)) echo """
+METADATA [1m${1#set-}[0m
+Záhlaví a zápatí
+
+Většina prohlížečů je neumí zobrazit. Je tedy zbytečné je nastavovat.
+"""
+    ;;
     set-poly) echo """
 ELEMENT [1m${1#set-}[0m
 Polynomický obrys plochy
@@ -6547,6 +6553,8 @@ Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
 Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
 stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné různě
 velké stránky.
+
+Bohužel většina prohlížečů s tímto parametrem neumí pracovat
 """
     ;;
 		keywords-unset) echo """
@@ -6991,7 +6999,7 @@ do
                         # ${OCR[0]} engine
                         # ${OCR[1]} jazyk
                         case "${OCR[0]:0:1}" in
-                            c) CUNEIFORM=$(which cuneiform)
+                            c) CUNEIFORM=$(command -v cuneiform)
                                 [ ! -x "${CUNEIFORM}" ] && exit 31
                                 if [ "${OCR[1]}" == "?" ] ; then
                                     ${CUNEIFORM} -l
@@ -7004,7 +7012,7 @@ do
                                     fi
                                 fi
                                 ;;
-                            t) TESSERACT=$(which tesseract)
+                            t) TESSERACT=$(command -v tesseract)
                                 [ ! -x "${TESSERACT}" ] && exit 31
                                 if [ "${OCR[1]}" == "?" ] ; then
                                     ${TESSERACT} --list-langs
@@ -7024,7 +7032,7 @@ do
                     elif [ "${#OCR[@]}" -eq 1 ] ; then
                         # ${OCR[0]} jazyk
                         # výchozí engine je tesseract
-                        TESSERACT=$(which tesseract)
+                        TESSERACT=$(command -v tesseract)
                         [ ! -x "${TESSERACT}" ] && exit 31
                         if [ "${OCR[0]}" == "?" ] ; then
                             ${TESSERACT} --list-langs
@@ -7309,7 +7317,7 @@ case ${FILETYPE} in
         return 1
     ;;
     djvu) #/ Pracuji se souborem v DjVu formátu
-        log info "main() DjVu file ${FILE} –> #${CHARSTRING}#"
+        log goto "Actions for DjVu file"
         case "${ACTION}" in
             delete) local TEST=$(isrange "${CHARSTRING}")
                 if [ -n "${TEST}" ] ; then
@@ -7483,7 +7491,7 @@ case ${FILETYPE} in
             ;;
         esac
     ;;
-    *) log info "main() Input bitmap file (or archive) ${FILE} is in format –> ${FILETYPE}"
+    *) log info "Input bitmap file (or archive) ${FILE} in format –> ${FILETYPE}"
         case ${ACTION} in
             export) exportimg
             ;;
