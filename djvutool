@@ -1,51 +1,43 @@
 #!/bin/bash
 # -*- mode: sh -*-
 
-# https://elpa.gnu.org/packages/djvu.html
+# https://…
 # djvutool - tool for conversion and work with DjVu files
 #
-# Author: Aleš Kapica <kapica@fel.cvut.cz>, 2015-2016
+# Author: Aleš Kapica <kapica@fel.cvut.cz>, 2015-2017
 #
-# Použití...
-# convertor [test] image
-#	provede testovací konverzi pro všechny dostupné separační algoritmy didjvu
 shopt -s extglob
 
 # Changelog
-# - ošetřena situace, kdy není nainstalován ocrodjvu
-# - ošetřit situaci, kdy soubor neobsahuje žádný textový obsah a soubor dsed, ani xml neexistuje
-# - mezi klíčové operace přidáno delete a insert
-# - OCR zpracované do samostatné funkce
-# - výchozí algoritmus djvu; testovací konverze pro všechny algoritmy se
-#   provede pouze je-li uveden parametr --test-conversion
-# - implementována rotace stránky
-# - implementovány přesuny stránek (akce fore a back)
-# - implementováno generování náhledů do exportu
-# - upraveny funkce pro export náhledů a souborů textové vrstvy
-# - akce 'delete' odstraňuje stránky
-# - akce 'fore' a 'back' přesouvají stránky podle udaných parametrů
-# - akce 'unset outline' umožňuje odstraňovat záložky na základě čísla řádky
-# - akce 'set outline' dovoluje vložit záložku z příkazové řádky
-# - do akce 'export' byla přidána možnost interaktivní volby
-# - akce 'print outline', 'edit outline', 'export outline', 'convert outline', 'convert bookmarks'
+# * akce 'info' - umožňuje získávat různé užitečné informace
+# * akce 'export' funguje zároveň jako konverzní nástroj
+# * implementována akce 'rotate'
+# * akce 'delete' odstraňuje stránky
+# * akce 'edit', 'export', 'import'
 
 # Otestovat
 # - export ze single-page dokumentu
 #
 
 # ToDo
+# - dopsat manuál pro akci set, argumenty, xmp, atp.
+# V odstraňování metadat typu zoom, nebo background je nějaká chybka. Vezme to
+# o řádku více než by mělo
+#
+# - OCR zpracované do samostatné funkce
+# - ošetřena situace, kdy není nainstalován ocrodjvu
+# - akce 'fore' a 'back' přesouvají stránky podle udaných parametrů
+# - implementovány přesuny stránek (akce fore a back)
+# - implementováno generování náhledů do exportu
+# - upraveny funkce pro export náhledů a souborů textové vrstvy
 # Odstranění vrstvy ze stránky
 # Odstranění sdíleného chunku
 # Doplnit nové funkce do wiki souboru
-# Opravit akci edit meta - dočasný soubor je někde v pytli - binec dělá asi realpath nebo co..
 # implementovat kontrolu do funkce todjvu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
 # - přidat kontrolu do akce insert na duplicitní soubory při vkládání
 #   vícestránkových DjVu souborů. to ovšem bude vyžadovat samostatnou
 #   funkci...
-# - dopsat manuál pro akci set, argumenty, xmp, atp.
 # - implementovat import
-# doplnit nápovědu k rotaci stránky (akce rotate)
-# opravit volby --algoritmus a --view
 NAME="djvutool"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
 
@@ -670,7 +662,6 @@ testsyntaxant() {
             zoom+([[:blank:]])d+([[:digit:]])|\
             zoom+([[:blank:]])+(stretch|one2one|width|page)|\
             note*)
-                echo "Nastavuji ($line) " >> /dev/stderr
                 case "${META}" in
                         metadata)  case "${KEYS}" in
                             '') continue ;;
@@ -2878,31 +2869,33 @@ setdjvu() {
     case "${RANGE}" in
         mode|align|background|zoom|note|key) echo "Pokud chcete nastavit parametr globálně, musíte uvést jako číslo stránky 0" >> /dev/stderr
         ;;
-        outline) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-                $0 "${FILE}" export outline > "${TEMPFILE}"
-                local TEMP="${TEMPORAR#+([[:blank:]])}"
-                case "${TEMP}" in
-                    +([[:digit:]])+([[:blank:]])*) echo "\"${TEMP#+([[:digit:]])+([[:blank:]])}\" \"#${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
-                    ;;
-                    http*)  echo "\"${TEMP#+([[:digit:]])+([[:blank:]])}\" \"${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
-                    ;;
-                    *) local TARGET="${TEMP%%+([[:blank:]])*}"
-                        if [[ "${TARGET}" =~ ".djvu" ]] ; then
-                            echo "\"${TEMP#${TARGET}+([[:blank:]])}\" \"${TARGET}\"" >> "${TEMPFILE}"
-                        else
-                            echo "Neplatná záložka –> z${TEMPORAR}z x${TEMP}x" >> /dev/stderr
-                            return 1
-                        fi
-                    ;;
-                esac
-                outlinetodjvu "${FILE}" "${TEMPFILE}"
-                if [ $? -eq 1 ] ; then
-                    echo "Při importu záložek se vyskytla chyba" >> /dev/stderr
-                    return 1
-                else
-                    echo "Pozici a zanoření záložky v obsahu můžete upravit přes akci edit" >> /dev/stderr
-                fi
-                return $?
+        outline)
+            [ "${ACTION}" == "unset" ] && echo "Nastavené záložky lze odstraňovat jedině při akci edit" && return 1
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+            $0 "${FILE}" export outline > "${TEMPFILE}"
+            local TEMP="${TEMPORAR#+([[:blank:]])}"
+            case "${TEMP}" in
+                +([[:digit:]])+([[:blank:]])*) echo "\"${TEMP#+([[:digit:]])+([[:blank:]])}\" \"#${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
+                ;;
+                http*)  echo "\"${TEMP#http*+([[:blank:]])}\" \"${TEMP%%+([[:blank:]])*}\"" >> "${TEMPFILE}"
+                ;;
+                *) local TARGET="${TEMP%%+([[:blank:]])*}"
+                    if [[ "${TARGET}" =~ ".djvu" ]] ; then
+                        echo "\"${TEMP#${TARGET}+([[:blank:]])}\" \"${TARGET}\"" >> "${TEMPFILE}"
+                    else
+                        echo "Neplatná záložka –> z${TEMPORAR}z x${TEMP}x" >> /dev/stderr
+                        return 1
+                    fi
+                ;;
+            esac
+            outlinetodjvu "${FILE}" "${TEMPFILE}"
+            if [ $? -eq 1 ] ; then
+                echo "Při importu záložek se vyskytla chyba" >> /dev/stderr
+                return 1
+            else
+                echo "Pozici a zanoření záložky v obsahu můžete upravit přes akci edit" >> /dev/stderr
+            fi
+            return $?
         ;;
         *) local TEST=($($0 "${1}" info list))
             case "${TEMPORAR##+([[:blank:]])}" in
@@ -4795,7 +4788,7 @@ Každá jiná hodnota parametru je ignorována."""
                     ;;
                 esac
             fi
-            #/  echo "PAGES ${#PAGES[@]} ${PAGES[@]}" >> /dev/stderr
+            echo "ROTATE ${ROTATE} PAGES ${#PAGES[@]} ${PAGES[@]}" >> /dev/stderr
             for i in ${PAGES[@]} ; do
                 local PAGENAME="${LISTPAGES[$i]##+([[:digit:]])+([[:blank:]])}"
                 local PAGEORDER="${LISTPAGES[$i]%% *}"
@@ -6241,6 +6234,10 @@ Pro nastavení orientace všech stránek na výchozí hodnotu, použijte: 0
           left - rotovat stránku o 90° směrem doleva
          right - rotovat stránku o 90° směrem doprava
            180 - otočit stránku opačně než aktuálně je
+
+Pozor! Je-li uvedeno pouze jedno číslo, je aplikováno zároveň jako nastavení
+       rotace i rozsah RANGE.
+
 """
     help range
     ;;
@@ -6255,35 +6252,41 @@ Pro nastavení orientace všech stránek na výchozí hodnotu, použijte: 0
 
   [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {ELEMENT} … [: ATRIBUTY ]
 
-  METADATA - prvky, které obsahují doplňkové informace o stránkách,
-             jejich zobrazení, a to jak se na ně odkazuje.
-  ELEMENTY - jsou metadatové prvky, jimiž lze uživatelsky doplnit
-             informační hodnotu původního obsahu stránky. Jde kupř.
-             o hyperlinky v textu, zvýrazněné oblasti, poznámky,
-             upozornění atp.
-  ATRIBUTY - každý z elementů má své výchozí vlastnosti, které lze
-             v případě potřeby modifikovat nastavením doplňkových
-             atributů. Tyto atributy jsou od základních parametrů elementu
-             odděleny dvojtečkou.
+METADATA:       
+      *key - metadatový klíč (vypisuje se přes exiftools)
+     *note - skrytá poznámka v metadatové vrstvě DjVu dokumentu
+   outline - položka aktivního obsahu DjVu dokumentu (záložka)
+      mode - výchozí zobrazovací mód obrazové vrstvy
+background - barva pozadí okna prohlížeče DjVu souboru (djview)
+      zoom - výchozí velikost zobrazení stránky
 
-METADATA:         ELEMENTY:          ATRIBUTY:
-   *key               arrow             align
-    mode              line              backclr
-   *note              oval              border
-    outline           poly              border_avis
-    background        rect              lineclr
-    zoom              text              none
-                                        pushpin
-                                        shadow_*
-                                        textclr
-                                        width
-                                        xor
-  Bližší podrobnosti jednotlivých prvcích a jejich použití lze vypsat tak,
-  že se za nimi uvede řetězec -h. Viz příklad, demonstrující výpis
-  informací o atributu border:
+ELEMENTY:
+  Jsou prvky, jimiž lze uživatelsky doplnit informační hodnotu původního
+  obsahu stránky. Jde kupř. o hyperlinky v textu, zvýrazněné oblasti,
+  poznámky, upozornění atp.
 
-   … set oval 123 123 123 123 Text k oválnému rámci : border [1m-h[0m FF0000 border_avis
+     arrow - šipka
+      line - čára
+      oval - oválné ohraničení oblasti
+      poly - ohraničení oblasti polygonem
+      rect - ograničení oblasti rámcem
+      text - textová poznámka
+            
+Každý z elementů má své výchozí vlastnosti, které lze v případě modifikovat
+nastavením dalších  atributů. Tyto atributy jsou při nastavení elementu od
+základních parametrů  odděleny dvojtečkou. Viz příklad:
 
+   … set oval 123 123 123 123 Popis oblasti : border FF0000
+
+ATRIBUTY elementů:
+    align               lineclr               textclr
+    backclr             none                  width
+    border              pushpin               xor
+    border_avis         shadow_*
+
+[3mPoznámka:[23m
+  Více informací o každém z atributů a použití elemntů či metadat lze
+  vypsat tak, že se bezprostředně za ně napíše volba -h.
 """
 #		help key
 #		help value
@@ -6313,14 +6316,24 @@ V případě prvků typu oval, poly, line nebo arrow, se vybarví pravoúhlá pl
 """
     ;;
     set-background) echo """
-METADATA [1m${1#set-}[0m
-   set global background #F8F8F8
+  METADATA [1m${1#set-}[0m
 
-Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
-se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
-barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
-Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-stránky.
+  Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
+  se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
+  barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
+  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+  stránky.
+
+  [1m${0##*/}[0m [volby] <DjVu svazek> set {RANGE} background {COLOR}
+
+     COLOR - Barva v RGB
+
+Příklad:
+ … set set 0 background F8F8F8
+ … set set 1,5,10-25 background FF0000
+
+[3mPoznámka:[23m
+  Pro globální nastavení barnu pozadí použijte hodnota RANGE nula – 0.
 """
     ;;
     set-+(border|xor|none)) echo """
@@ -6546,15 +6559,37 @@ width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
 """
     ;;
     set-zoom) echo """
-METADATA [1m${1#set-}[0m
-    set global zoom stretch
+  METADATA [1m${1#set-}[0m
 
-Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
-Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné různě
-velké stránky.
+  Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
+  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+  stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné
+  různě velké stránky.
 
-Bohužel většina prohlížečů s tímto parametrem neumí pracovat
+  Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
+  se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
+  barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
+  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+  stránky.
+
+  [1m${0##*/}[0m [volby] <DjVu svazek> set {RANGE} zoom {SIZE}
+
+SIZE
+  stretch - roztáhne stránku podle okna
+  one2one - zobrazení 1:1
+    width - na maximální šířku stránky
+     page - celá stránka
+ d1-99999 - velikost stránky v procentech
+     
+
+Příklad:
+ … set set 0 zoom stretch
+ … set set 1,5,10-25 zoom 150d
+
+[3mPoznámka:[23m
+  * Pro globální nastavení velikosti stránky použijte hodnotu RANGE nula – 0.
+  * Bohužel většina prohlížečů s tímto parametrem (ani djview), ale plugin
+    založený na djvulibre ano.
 """
     ;;
 		keywords-unset) echo """
