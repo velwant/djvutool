@@ -6198,7 +6198,7 @@ Pozor! Je-li uvedeno pouze jedno číslo, je aplikováno zároveň jako nastaven
 
 METADATA:       
       *key - metadatový klíč (vypisuje se přes exiftools)
-     *note - skrytá poznámka v metadatové vrstvě DjVu dokumentu
+      note - skrytá poznámka v metadatové vrstvě DjVu dokumentu
    outline - položka aktivního obsahu DjVu dokumentu (záložka)
       mode - výchozí zobrazovací mód obrazové vrstvy
 background - barva pozadí okna prohlížeče DjVu souboru (djview)
@@ -6427,11 +6427,34 @@ Do bloku příslušné stránky přidejte následující řádek
 """
     ;;
     set-note) echo """
-ATRIBUT [1m${1#set-}[0m
-(volitelný prvek)
-none - vypne zobrazování okraje plochy
+  METADATA [1m${1#set-}[0m
 
-Anuluje nastavení hodnoty border i boorder_avis
+  Nastavuje skrytou poznámku, kterou nezobrazuje a nezpracovává žádný prohlížeč
+  DjVu souborů. Lze ji využít pro uložení informací o průběhu zpracování
+  dokumentu, digitálních podpisů obrazových vrstev & etc.
+
+   … set 0 note NOTE
+
+NOTE
+  Může být libovolný textový řetězec, který neobsahuje kulaté závorky.
+  Do poznámky lze vložit také soubor. Podmínkou je, že musí být zakryptovaný
+  do textového řetězce. Viz následující příklad vložení binárního archivu,
+  zakódovaného do řetězce pomocí base64:
+
+  djvutool a.djvu set 0 note \$(base64 archiv.zip | tr '\n' '-')
+
+  A jeho vytažení:
+
+  djvutool a.djvu export ant 0 | grep ^note | sed 's/ /=/' |\\
+  { read a ; eval $a ; echo $note | tr '-' '\n' | base64 -d > kopie.zip ; }
+
+[3mPoznámka:[23m
+  Na rozdíl od exif tagů, vkládaných přes metadatový klíč [1mkey[0m, může být
+  skrytých poznámek vložených do metadatové vrstvy neomezeně. Pro zrušení
+  skryté poznámky při akci [2munset[22m ovšem musí být uveden i řetězec, který
+  obsahuje. Ten však lze získat při akci [2mexport[22m.
+
+  Alternativní možností je odstranění skryté poznámky při akci [2medit[22m.
 """
     ;;
     set-none) echo """
@@ -7286,6 +7309,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 lineclr|\
                                 mode|\
                                 none|\
+                                note|\
                                 outline|\
                                 oval|\
                                 poly|\
