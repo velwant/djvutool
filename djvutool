@@ -6608,6 +6608,15 @@ Příklad:
     založený na djvulibre ano.
 """
     ;;
+    keywords-view) echo """
+  AKCE: [1mview[0m
+
+  [1m${0##*/}[0m [volby] <SOUBOR> view
+
+  Otevře na pozadí soubor v prohlížeči. V případě bitmapových obrázků se
+  použije [1mfeh[0m a v případě DjVu souborů [1mdjview4[0m.
+"""
+    ;;
 		level) echo """
 [1mParametr[0m
          -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
@@ -7192,7 +7201,7 @@ do
                             help keywords
                             return 0
                         ;;
-                        *) echo "Neimplementovaný parametr" >> /dev/stderr
+                        *) echo "Neimplementovaná ekce, nebo parametr –> ${1}" >> /dev/stderr
                             return 1
                         ;;
                     esac
