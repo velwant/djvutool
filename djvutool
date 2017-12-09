@@ -5783,6 +5783,28 @@ Pokud má být číslování jiné než výchozí pětimístné, vypadá vzorek 
   * Exportovaná data se ukládají do souborů s příponou [3m.dsed[23m.
 """
 		;;
+    exif) echo """Nastavení exif tagu Creator:
+
+    [1m${0##*/}[0m soubor.djvu set 1,3,7-12 key Creator Thomas Jefferson
+
+Přehled nejpoužívanějších EXIF tagů:
+        [3mTitle[23m - Název dokumentu
+      [3mCreator[23m - Osoba, která zpracovala sken do DjVu stránky
+ [3mCreationDate[23m - Datum pořízení skenu
+     [3mKeywords[23m - Klíčová slova pro indexaci DjVu souboru
+       [3mannote[23m - Poznámka o původu dokumentu & etc.
+  [3mDescription[23m - Popis obsahu dokumentu
+       [3mAuthor[23m - Autor dokumentu
+     [3mNickname[23m - Přezdívka
+  [3mContactInfo[23m - Kontaktní informace na zpracovatele dokumentu
+     [3mProducer[23m - Software kterým byl sken zpracován do DjVu
+  [3mCreatorTool[23m - Zařízení na kterém byl sken či snímek pořízen
+      [3mModDate[23m - Čas zpracování do DjVu
+   [3mModifyDate[23m - Čas zpracování do DjVu
+ [3mMetadataDate[23m - Čas, kdy byla naposled aktualizována metadata
+                              na stránce
+"""
+    ;;
 		existed) echo """
   Soubor $2 existuje. Pokud se má přepsat, musí být
   uveden parametr -f (--force)
@@ -5877,14 +5899,6 @@ Použitelné parametry:
   Pro finalizaci DjVu svazku je pak lepší svazek překonvertovat na typ
   bundled, kdy je vše zabaleno v jednom souboru
 """
-		;;
-		key) echo """    KEY - name of meta attribute, single word without diacritical chars
-          and spaces. Example commonly used keys:
-                 [3mTitle[23m - Title of DjVu page or bundle
-               [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
-          [3mCreationDate[23m - Creation date of DjVu bundle or page
-              [3mKeywords[23m - Keywords for indexation DjVu file
-                [3mannote[23m - Notes about origin of document & etc."""
 		;;
         '') help keywords && help options
         ;;
@@ -6270,7 +6284,7 @@ Pozor! Je-li uvedeno pouze jedno číslo, je aplikováno zároveň jako nastaven
   [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {ELEMENT} … [: ATRIBUTY ]
 
 METADATA:       
-      *key - metadatový klíč (vypisuje se přes exiftools)
+       key - metadatový klíč (vypisuje se přes exiftools)
       note - skrytá poznámka v metadatové vrstvě DjVu dokumentu
    outline - položka aktivního obsahu DjVu dokumentu (záložka)
       mode - výchozí zobrazovací mód obrazové vrstvy
@@ -6305,9 +6319,7 @@ ATRIBUTY elementů:
   Více informací o každém z atributů a použití elemntů či metadat lze
   vypsat tak, že se bezprostředně za ně napíše volba -h.
 """
-#		help value
-#		help range
-		;;
+    ;;
     set-arrow) echo """
   ELEMENT [1m${1#set-}[0m
 
@@ -6384,50 +6396,32 @@ prvek viditelný stále
     set-key) echo """
   METADATA [1m${1#set-}[0m
 
-
+  Přes metadatový element key se nastavují metadatové klíče, které mohou
+  být interpretovány jako EXIF tagy. Do DjVu souboru lze vložit rovněž
+  XMP kód, ovšem pouze přes akci edit.
 
 Nastavení, resp. přenastavení klíče:
 
-  [1m${0##*/}[0m <DjVu> set {RANGE} key {KEY} [VALUE]
+  [1m${0##*/}[0m <DjVu> set RANGE key KEY VALUE
 
 Zrušení klíče:
 
-  [1m${0##*/}[0m <DjVu> uset {RANGE} key {KEY}
+  [1m${0##*/}[0m <DjVu> uset RANGE key KEY [VALUE]
 
 KEY
   Řetězec znaků bez mezer a diakritiky, který nesmí začínat číslem
 
 VALUE
-  Hodnota klíče. Vyvarujte se pokud možno použití kulatých závorek!
-
-Příklad použití:
-
-    [1m${0##*/}[0m soubor.djvu set 1,3,7-12 key Creator Thomas Jefferson
-
+  Hodnota klíče. Vyvarujte se použití kulatých závorek!
 
 [3mPoznámka:[23m
-  * I když je to technicky možné, deden klíč nelze na stránce vícekrát než
-    jednou. Při pokusu o nastavení klíče s jinou hodnotou VALUE, dojde k
-    nahrazení obsahu klíče stávajícího
-  * Nastavené klíče se zobrazují jako EXIF informace, proto je doporučeno
-    používat jako klíče standardizované exif tagy
+  * I když je to technicky možné, jeden klíč nelze na stránce použít víc
+    než jednou. Při pokusu o nastavení klíče s jinou hodnotou VALUE, dojde
+    k nahrazení obsahu klíče stávajícího  novým obsahem.
 
-Nejčastěji používané exif tagy:
-        [3mTitle[23m - Název dokumentu
-      [3mCreator[23m - Osoba, která zpracovala sken do DjVu stránky
- [3mCreationDate[23m - Datum pořízení skenu
-     [3mKeywords[23m - Klíčová slova pro indexaci DjVu souboru
-       [3mannote[23m - Poznámka o původu dokumentu & etc.
-  [3mDescription[23m - Popis obsahu dokumentu
-       [3mAuthor[23m - Autor dokumentu
-     [3mNickname[23m - Přezdívka
-  [3mContactInfo[23m - Kontaktní informace na zpracovatele dokumentu
-Producer - Zařízení či software na kterém byl spracován sken
-CreatorTool - (Zařízení na kterém byl sken či snímek pořízen; případně )
-ModDate "" (Čas zpracování do DjVu)
-ModifyDate (Čas zpracování do DjVu)
-MetadataDate (Čas poslední úpravy metadat v DjVu)
+Pro přehled nejčastěji používaných EXIF (či XMP) tagů spusťte:
 
+  [1m${0##*/}[0m exif
 """
 		;;
     set-line) echo """
@@ -6909,7 +6903,7 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
   XMP lze pouze přes akci set nastavit. Pro další úpravy už je nutné 
   použít akci edit. Při nastavení XMP přes akci set, musí tvořit celý
   XMP kód jeden řetězec. Viz příklad:
-  
+
   … set 0 key xmp '<rdf:RDF xmlns:rdf=…     …scription></rdf:RDF>'
 """
     ;;
