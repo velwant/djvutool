@@ -210,7 +210,6 @@ ACTIONS=(
     info
     rename
     insert
-    print
     set
     unset
     view
@@ -6160,31 +6159,6 @@ SUBKEY
   stejně jako v případě DjVu svazku s jednou stránkou.
 """
     ;;
-    #/OBSOLETE
-    keywords-print) echo """
-   Action [1mprint[0m
-
-   Action [2mprint[22m meta attribute keys or outline into stdout
-
-  [1m${0##*/}[0m <DjVu> print outline
-
-  [1m${0##*/}[0m <DjVu> print meta
-
-  [1m${0##*/}[0m <svazek> print <attr>
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} [all]
-  [1m${0##*/}[0m <svazek> print {<num>|<name>} <attr>
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
-         attr - jméno atributu
-         all  - klíčové slovo (vypsat vše)
-
-[3mPoznámka:[23m
-  Jednotlivé atributy lze nastavovat přes [2mset[22m, více atributů najednou
-  lze do DjVu stránky či svazku importovat z externího souboru při
-  akci [2mimport[22m. Metadata lze z DjVu souborů také exportovat ([2mexport[22m).
-"""
-		;;
     keywords-rotate) echo """
   AKCE [1mrotate[0m
 
