@@ -2663,28 +2663,30 @@ fromdjvu() {
 
 # ### Původní zpracování - očekává parametry ze startu message
 # Zpracovává stream. pokud se vyskytne, vrátí parametr a zbytek řetězce
+#
+# Funkce je závislá na obsahu lokální proměnné ELEMENT z funkce setdjvu
 object() {
     # Je tady - vrátí parametr, řetězec a 0
     # Není tady nic - vrátí řetězec a 1
-    log goto "object() ${TYPE} –> $@"
+    log goto "object() ${ELEMENT} –> $@"
     while [ $# -gt 0 ]
     do
         case ${1} in
-            border_avis|none|xor) case ${TYPE} in
+            border_avis|none|xor) case ${ELEMENT} in
                 rect|oval|text) echo -e "\t$1" && shift
                 ;;
                 *) return 1
                 ;;
             esac
             ;;
-            pushpin) case ${TYPE} in
+            pushpin) case ${ELEMENT} in
                 text) echo -e "\t$1" && shift
                 ;;
                 *) return 1
                 ;;
             esac
             ;;
-            hilite) case ${TYPE} in
+            hilite) case ${ELEMENT} in
                 rect) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
@@ -2697,7 +2699,7 @@ object() {
                 line|oval|text|arrow) shift
                     case "${1}" in
                         [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
-                            echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
+                            echo "Nastavení parametru border (barva okraje) u objektu ${ELEMENT} nedává smysl, proto ho ignoruji" >> /dev/stderr
                             echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
                             return 1
                         ;;
@@ -2710,7 +2712,7 @@ object() {
                 ;;
             esac
             ;;
-            textclr|backclr|lineclr) case ${TYPE} in
+            textclr|backclr|lineclr) case ${ELEMENT} in
                 rect|oval|text|arrow) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
@@ -2723,7 +2725,7 @@ object() {
                 line) shift
                     case "${1}" in
                         [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) shift
-                            echo "Nastavení parametru border (barva okraje) u objektu ${TYPE} nedává smysl, proto ho ignoruji" >> /dev/stderr
+                            echo "Nastavení parametru border (barva okraje) u objektu ${ELEMENT} nedává smysl, proto ho ignoruji" >> /dev/stderr
                             echo "Barvu linky lze změnit parametrem lineclr" >> /dev/stderr
                             return 1
                         ;;
@@ -2739,7 +2741,7 @@ object() {
             _blank) echo -e "$1" && shift
                 # Kvůli url
             ;;
-            border) case "${TYPE}" in
+            border) case "${ELEMENT}" in
                 rect|oval) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) echo -e "\t${PROPERTY} #$1" && shift
@@ -2766,7 +2768,7 @@ object() {
                 ;;
             esac
             ;;
-            shadow_+(in|out|ein|eout)) case ${TYPE} in
+            shadow_+(in|out|ein|eout)) case ${ELEMENT} in
                 rect) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
@@ -2790,7 +2792,7 @@ object() {
                 ;;
             esac
             ;;
-            opacity) case ${TYPE} in
+            opacity) case ${ELEMENT} in
                 rect|oval) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift
@@ -2804,7 +2806,7 @@ object() {
                 ;;
             esac
             ;;
-            width) case ${TYPE} in
+            width) case ${ELEMENT} in
                 line|arrow) local PROPERTY="${1}" && shift
                     case "${1}" in
                         [1-9]|[1-9][0-9]) echo -e "\t${PROPERTY} $1" && shift ;;
@@ -2867,7 +2869,15 @@ setdjvu() {
     [ ! -n "${TEMPORAR##+([[:blank:]])}" ] && return 1
 
     case "${RANGE}" in
-        mode|align|background|zoom|note|key) echo "Pokud chcete nastavit parametr globálně, musíte uvést jako číslo stránky 0" >> /dev/stderr
+        global|all|\
+        mode|align|background|zoom|note|key) echo """
+Pokud chcete nastavit element, či parametr, tak aby ho obsahovala každá
+stránka, tak máte dvě možnosti:
+  1, Buď nastavíte RANGE na hodnotu 0 (nula). V takovém případě se prvek
+     vloží mezi sdílená metadata.
+  2, Nebo nastavíte RANGE na rozsah od první do poslední stránky (např. 1-99)
+     Prvek se pak nastaví pro každou z nich samostatně.
+""" >> /dev/stderr
         ;;
         outline)
             [ "${ACTION}" == "unset" ] && echo "Nastavené záložky lze odstraňovat jedině při akci edit" && return 1
@@ -2898,22 +2908,24 @@ setdjvu() {
             return $?
         ;;
         *) local TEST=($($0 "${1}" info list))
-            case "${TEMPORAR##+([[:blank:]])}" in
-                note+([[:blank:]])*|\
-                key+([[:blank:]])*)
-                    local TEMP=(${TEMPORAR//+([[:blank:]])/ })
+            local STRING="${TEMPORAR#+([[:blank:]])}"
+            local ELEMENT="${STRING%%+([[:blank:]])*}"
+            case "${ELEMENT}" in
+                note|\
+                key)
+                    local TEMP=(${STRING//+([[:blank:]])/ })
                     case "${TEMP[0]}" in
                         note) local KEY="${TEMP[0]}"
-                            local VALUE="${TEMPORAR#${TEMP[0]}+([[:blank:]])}"
+                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])}"
                         ;;
                         key) local KEY="${TEMP[1]}"
-                            local VALUE="${TEMPORAR#${TEMP[0]}+([[:blank:]])${TEMP[1]}+([[:blank:]])}"
+                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])${TEMP[1]}+([[:blank:]])}"
                         ;;
                         *) #/ ještě nevím
                             return 1
                         ;;
                     esac
-                    if [ "${RANGE}" == "global" ] || [ "${RANGE}" == "0" ] ; then
+                    if [ "${RANGE}" == "0" ] ; then
                         if [ "${TEST[0]}" -eq "0" ] ; then
                             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                             log info "From shared_ant –> $i"
@@ -3035,86 +3047,86 @@ setdjvu() {
                     fi
                     return $?
                 ;;
-                align+([[:blank:]])*|\
-                background+([[:blank:]])*|\
-                mode+([[:blank:]])*|\
-                pfoot+([[:blank:]])*|\
-                phead+([[:blank:]])*|\
-                zoom+([[:blank:]])*) #/ Metadata co se mohou vyskytovat vždy pouze jednou
-                    local KEY="${TEMPORAR%%+([[:blank:]])*}"
-                    local VALUE="${TEMPORAR#${KEY}+([[:blank:]])}"
-                    case "${KEY}" in
-                        align) case ${VALUE} in
-                            +(left|center|right)+([[:blank:]])+(top|center|bottom))
-                                ;;
-                                *) log err "align invalid value –> #${VALUE}#"
-                                    help set-align
+                align|\
+                background|\
+                mode|\
+                pfoot|\
+                phead|\
+                zoom) #/ Metadata co se mohou vyskytovat vždy pouze jednou
+                    local KEY="${ELEMENT}"
+                    case "${ACTION}" in
+                        unset)
+                        ;;
+                        set)
+                            local VALUE="${STRING#${KEY}+([[:blank:]])}"
+                            case "${KEY}" in
+                                align) case "${VALUE}" in
+                                    +(left|center|right)+([[:blank:]])+(top|center|bottom))
+                                        ;;
+                                        *) log err "align invalid value –> #${VALUE}#"
+                                            help set-align
+                                            return 1
+                                        ;;
+                                    esac
+                                    ;;
+                                background) case "${VALUE}" in
+                                        [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
+                                        local VALUE="#${VALUE}"
+                                        ;;
+                                        *) log err "background invalid value –> ${VALUE}#"
+                                            help set-background
+                                            return 1
+                                        ;;
+                                    esac
+                                    ;;
+                                mode) case "${VALUE}" in
+                                        color|bw|fore|black) # Mohu nastavit
+                                        ;;
+                                        *) log err "mode invalid value –> #${VALUE}#"
+                                            help set-mode
+                                            return 1
+                                        ;;
+                                    esac
+                                    ;;
+                                pfoot|phead) case "${VALUE}" in
+                                        '') log err "${KEY} invalid value –> #${VALUE}#"
+                                            help set-${KEY}
+                                            return 1
+                                        ;;
+                                        *) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat, ale když chcete…"
+                                            local VALUE="\"${VALUE}\""
+                                        ;;
+                                    esac
+                                    ;;
+                                zoom) case "${VALUE}" in
+                                    stretch|one2one|width|page|d+([[:digit:]]))
+                                        ;;
+                                        *) log err "zoom invalid value –> #${VALUE}#"
+                                            help set-zoom
+                                            return 1
+                                        ;;
+                                    esac
+                                    ;;
+                                *) #/ ještě nevím
                                     return 1
-                                ;;
+                                    ;;
                             esac
-                            ;;
-                        background) case "${VALUE}" in
-                                [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]) # Mohu nastavit
-                                local VALUE="#${VALUE}"
-                                ;;
-                                *) log err "background invalid value –> ${VALUE}#"
-                                    help set-background
-                                    return 1
-                                ;;
-                            esac
-                            ;;
-                        mode) case "${VALUE}" in
-                                color|bw|fore|black) # Mohu nastavit
-                                ;;
-                                *) log err "mode invalid value –> #${VALUE}#"
-                                    help set-mode
-                                    return 1
-                                ;;
-                            esac
-                            ;;
-                        pfoot|phead) case ${VALUE} in
-                                '') log err "${KEY} invalid value –> #${VALUE}#"
-                                    help set-${KEY}
-                                    return 1
-                                ;;
-                                *) echo "Záhlaví a zápatí není ve většině prohlížečů, proto ani nedává smysl ho nastavovat, ale když chcete…"
-                                    local VALUE="\"${VALUE}\""
-                                ;;
-                            esac
-                            ;;
-                        zoom) case ${VALUE} in
-                            stretch|one2one|width|page|d+([[:digit:]]))
-                                ;;
-                                *) log err "zoom invalid value –> #${VALUE}#"
-                                    help set-zoom
-                                    return 1
-                                ;;
-                            esac
-                            ;;
-                        *) #/ ještě nevím
-                            return 1
-                            ;;
+                        ;;
                     esac
-                    if [ "${RANGE}" == "global" ] || [ "${RANGE}" == "0" ] ; then
+                    if [ "${RANGE}" == "0" ] ; then
                         if [ "${TEST[0]}" -eq "0" ] ; then
                             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                             log info "From shared_ant –> $i"
                             $0 "${1}" export ant 0 > "${TEMPFILE}"
-                            case "${ACTION}" in
-                                unset) setmeta "${TEMPFILE}" "${KEY}"
-                                ;;
-                                set) setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}"
-                                ;;
-                            esac
+                            [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
-                            case "${ACTION}" in
-                                set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
-                                    ( $0 "${1}" export ant 0
-                                        echo "${KEY} ${VALUE}"
-                                    ) | $0 "${1}" import ant
-                                    ;;
-                            esac
+                            if [ -n "${VALUE}" ] ; then
+                                ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                ( $0 "${1}" export ant 0
+                                    echo "${KEY} ${VALUE}"
+                                ) | $0 "${1}" import ant
+                            fi
                         fi
                     else
                         local PAGES=($(range ${RANGE}))
@@ -3122,30 +3134,22 @@ setdjvu() {
                             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                             log info "From page –> $i"
                             $0 "${1}" export ant $i > "${TEMPFILE}"
-                            case "${ACTION}" in
-                                unset) setmeta "${TEMPFILE}" "${KEY}"
-                                ;;
-                                set) setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}"
-                                ;;
-                            esac
+                            [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
                     fi
                     return $?
                 ;;
-                '')
-                ;;
                 *) # Prvky vyžadující koordináty
                    # link, oval, rect, text, ram, line, arrow a poly
-                    local TEMP="${TEMPORAR#+([[:blank:]])}"
-                    local TYPE="${TEMP%%+([[:blank:]])*}"
-                    local TEMPX="${TEMP#${TYPE}+([[:blank:]])}"
+                    local TEMP="${STRING#${ELEMENT}+([[:blank:]])}"
                     # odfiltrováná koordinátů
-                    local MESSAGE="${TEMPX//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
-                    local COORDS="${TEMPX%${MESSAGE}}"
+                    local MESSAGE="${TEMP//+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])/}"
+                    local COORDS="${TEMP%${MESSAGE}}"
                     # další parametry následují za dvojtečkou
                     if [[ "${MESSAGE}" =~ ":" ]] ; then
                         mapfile PARAMS < <( object ${MESSAGE##*:+([[:blank:]])} )
+                        #object "${MESSAGE##*:+([[:blank:]])}"
                         local MESSAGE="${MESSAGE%+([[:blank:]]):*}"
                     fi
                     if [[ ${MESSAGE:0:1} =~ [0-9] ]] ; then
@@ -3154,110 +3158,100 @@ setdjvu() {
                     else
                         # Většina typů ploch může mít pouze 4 souřadnice
                         local TEST=(${COORDS})
-                        case "${TYPE}" in
-                            link|oval|rect|text|ram|line|arrow) [ ${#TEST[@]} -ge 5 ] && help set-${TYPE} && return 1
+                        case "${ELEMENT}" in
+                            link|oval|rect|text|ram|line|arrow) [ ${#TEST[@]} -ge 5 ] && help set-${ELEMENT} && return 1
                         esac
-                        #echo "MESSAGE ${MESSAGE%+([[:blank:]]):*}" >> /dev/stderr
-                        #echo "COORDS ${COORDS}" >> /dev/stderr
-                        #printf "%s" "${PARAMS[@]}" >> /dev/stderr
+                        echo "MESSAGE ${MESSAGE%+([[:blank:]]):*}" >> /dev/stderr
+                        echo "COORDS ${COORDS}" >> /dev/stderr
+                        printf "%s" "${PARAMS[@]}" >> /dev/stderr
                         #return 0
-                        if [ "${RANGE}" == "global" ] ; then
-                            echo """
-  Pokud chcete nastavit tento prvek globálně, tak aby se zobrazoval na
-  všech stránkách, použijte stranu č. 0. Druhá možnost je umístit prvek
-  na libovolnou stránku a pak jej při akci edit přemístit jako prvek
-  stránky pro sdílená metadata - shared_ant
-""" >> /dev/stderr
-                            return 0
-                        else
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                # co mohu mměnit - buď souřadnice, nebo cílovou message
-                                local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-                                local INCFILE=$(tempfile -d ${TEMPDIR} -s .inc)
-                                $0 "${1}" export ant $i > "${TEMPFILE}"
-case "${ACTION}" in
-    set)
-                                    (
-echo "maparea"
-case "${MESSAGE}" in
-    +([a-Z0-9])\.djvu+([[:blank:]])*)
-        case ${TYPE} in
-            arrow) echo "U prvku typu arrow a line odkazy nelze použít, proto link na #${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
-                echo -e "\t\"\" \"${MESSAGE#*+([[:blank:]])}\""
-                if [ "${TYPE}" == "arrow" ] ; then
-                    echo -e "\tline ${COORDS}"
-                    echo -e "\tarrow"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                elif [ "${TYPE}" == "line" ] ; then
-                    echo -e "\tline ${COORDS}"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                else
-                    echo -e "\t${TYPE} ${COORDS}"
-                    printf "%s" "${PARAMS[@]}"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                fi
-            ;;
-            *) echo -e "\t\"#${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
-                echo -e "\t${TYPE} ${COORDS}"
-                #printf "%s" "${PARAMS[@]/_blank}"
-                printf "%s" "${PARAMS[@]}"
-            ;;
-        esac
-    ;;
-    http\:\/\/*) # link na www stránku
-        case ${TYPE} in
-            arrow|line) echo "U prvku typu arrow a line odkazy nelze použít, proto link na URL ${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
-                echo -e "\t\"\" \"${MESSAGE}\""
-                if [ "${TYPE}" == "arrow" ] ; then
-                    echo -e "\tline ${COORDS}"
-                    echo -e "\tarrow"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                elif [ "${TYPE}" == "line" ] ; then
-                    echo -e "\tline ${COORDS}"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                else
-                    echo -e "\t${TYPE} ${COORDS}"
-                    printf "%s" "${PARAMS[@]}"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                fi
-            ;;
-            *) if [[ "${PARAMS}" =~ "_blank" ]] ; then
-                    echo -e "\turl \"${MESSAGE%%+([[:blank:]])*}\" \"_blank\" \"${MESSAGE#*+([[:blank:]])}\""
-                    echo -e "\t${TYPE} ${COORDS}"
-                    printf "%s" "${PARAMS[@]/_blank}"
-                else
-                    echo -e "\t\"${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
-                    echo -e "\t${TYPE} ${COORDS}"
-                    printf "%s" "${PARAMS[@]}"
-                fi
-            ;;
-        esac
-    ;;
-    *)  # bez linku
-        echo -e "\t\"\" \"${MESSAGE}\""
-        if [ "${TYPE}" == "arrow" ] ; then
-            echo -e "\tline ${COORDS}"
-            echo -e "\tarrow"
-            printf "%s" "${PARAMS[@]}"
-        elif [ "${TYPE}" == "line" ] ; then
-            echo -e "\tline ${COORDS}"
-            printf "%s" "${PARAMS[@]}"
-        else
-            echo -e "\t${TYPE} ${COORDS}"
-            printf "%s" "${PARAMS[@]}"
-        fi
-    ;;
-esac
-echo -e "\n"
+                        local PAGES=($(range ${RANGE}))
+                        for i in ${PAGES[@]} ; do
+                            (
+                            # co mohu mměnit - buď souřadnice, nebo cílovou message
+                            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                            local INCFILE=$(tempfile -d ${TEMPDIR} -s .inc)
+                            $0 "${1}" export ant $i > "${TEMPFILE}"
+                            case "${ACTION}" in
+                                set) (
+                                    echo "maparea"
+                                    case "${MESSAGE}" in
+                                        +([a-Z0-9])\.djvu+([[:blank:]])*)
+                                            case "${ELEMENT}" in
+                                                arrow) echo "U prvku typu arrow a line odkazy nelze použít, proto link na #${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
+                                                    echo -e "\t\"\" \"${MESSAGE#*+([[:blank:]])}\""
+                                                    if [ "${ELEMENT}" == "arrow" ] ; then
+                                                        echo -e "\tline ${COORDS}"
+                                                        echo -e "\tarrow"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    elif [ "${ELEMENT}" == "line" ] ; then
+                                                        echo -e "\tline ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    else
+                                                        echo -e "\t${ELEMENT} ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]}"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    fi
+                                                ;;
+                                                *) echo -e "\t\"#${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
+                                                    echo -e "\t${ELEMENT} ${COORDS}"
+                                                    #printf "%s" "${PARAMS[@]/_blank}"
+                                                    printf "%s" "${PARAMS[@]}"
+                                                ;;
+                                            esac
+                                        ;;
+                                        http\:\/\/*) # link na www stránku
+                                            case "${ELEMENT}" in
+                                                arrow|line) echo "U prvku typu arrow a line odkazy nelze použít, proto link na URL ${MESSAGE%%+([[:blank:]])*} ignoruji" >> /dev/stderr
+                                                    echo -e "\t\"\" \"${MESSAGE}\""
+                                                    if [ "${ELEMENT}" == "arrow" ] ; then
+                                                        echo -e "\tline ${COORDS}"
+                                                        echo -e "\tarrow"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    elif [ "${ELEMENT}" == "line" ] ; then
+                                                        echo -e "\tline ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    else
+                                                        echo -e "\t${ELEMENT} ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]}"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    fi
+                                                ;;
+                                                *) if [[ "${PARAMS}" =~ "_blank" ]] ; then
+                                                        echo -e "\turl \"${MESSAGE%%+([[:blank:]])*}\" \"_blank\" \"${MESSAGE#*+([[:blank:]])}\""
+                                                        echo -e "\t${ELEMENT} ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]/_blank}"
+                                                    else
+                                                        echo -e "\t\"${MESSAGE%%+([[:blank:]])*}\" \"${MESSAGE#*+([[:blank:]])}\""
+                                                        echo -e "\t${ELEMENT} ${COORDS}"
+                                                        printf "%s" "${PARAMS[@]}"
+                                                    fi
+                                                ;;
+                                            esac
+                                        ;;
+                                        *)  # bez linku
+                                            echo -e "\t\"\" \"${MESSAGE}\""
+                                            if [ "${ELEMENT}" == "arrow" ] ; then
+                                                echo -e "\tline ${COORDS}"
+                                                echo -e "\tarrow"
+                                                printf "%s" "${PARAMS[@]}"
+                                            elif [ "${ELEMENT}" == "line" ] ; then
+                                                echo -e "\tline ${COORDS}"
+                                                printf "%s" "${PARAMS[@]}"
+                                            else
+                                                echo -e "\t${ELEMENT} ${COORDS}"
+                                                printf "%s" "${PARAMS[@]}"
+                                            fi
+                                        ;;
+                                    esac
+                                    echo -e "\n"
                                     ) > "${INCFILE}"
-                                local INC=$(cat "${INCFILE}")
-                                local ADRESA=$(infile "${TEMPFILE}")
-                                case "${ADRESA}" in
+                                    local INC=$(cat "${INCFILE}")
+                                    local ADRESA=$(infile "${TEMPFILE}")
+                                    case "${ADRESA}" in
                                     +([[:digit:]])\ +([[:digit:]]))
-                                        # echo "${ADRESA/ /,}c" >> /dev/stderr
-                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
+                                            # echo "${ADRESA/ /,}c" >> /dev/stderr
+                                            ed "${TEMPFILE}" 2>/dev/null <<-EOF
 ${ADRESA/ /,}c
 ${INC}
 
@@ -3265,68 +3259,36 @@ ${INC}
 w
 q
 EOF
-                                        echo "" >> "${TEMPFILE}"
-                                    ;;
-                                    *) echo "${INC}" >> "${TEMPFILE}"
-                                        echo "" >> "${TEMPFILE}"
-                                    ;;
-                                esac
+                                            echo "" >> "${TEMPFILE}"
+                                        ;;
+                                        *) echo "${INC}" >> "${TEMPFILE}"
+                                            echo "" >> "${TEMPFILE}"
+                                        ;;
+                                    esac
                                 ;;
-    unset)
-        local ADRESA=$(infile "${TEMPFILE}")
-                                case "${ADRESA}" in
-                                    +([[:digit:]])\ +([[:digit:]]))
-                                        # echo "${ADRESA/ /,}d" >> /dev/stderr
-                                        ed "${TEMPFILE}" 2>/dev/null <<-EOF
+                                unset) local ADRESA=$(infile "${TEMPFILE}")
+                                    case "${ADRESA}" in
+                                        +([[:digit:]])\ +([[:digit:]]))
+                                            # echo "${ADRESA/ /,}d" >> /dev/stderr
+                                            ed "${TEMPFILE}" 2>/dev/null <<-EOF
 ${ADRESA/ /,}d
 w
 q
 EOF
-                                        echo "" >> "${TEMPFILE}"
-                                    ;;
-                                    *) echo "Pokoušíte se odstranit neexistující položku" >> /dev/stderr
-                                    ;;
-                                esac
-    ;;
-esac
-#echo "---------"  >> /dev/stderr
-case ${DEBUG} in
-    -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
-esac
-                                cat "${TEMPFILE}" ) | $0 "${1}" import ant
-                            done
-                        fi
+                                            echo "" >> "${TEMPFILE}"
+                                        ;;
+                                        *) echo "Pokoušíte se odstranit neexistující položku" >> /dev/stderr
+                                        ;;
+                                    esac
+                                ;;
+                            esac
+                            #echo "---------"  >> /dev/stderr
+                            case ${DEBUG} in
+                                -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
+                            esac
+                            cat "${TEMPFILE}" ) | $0 "${1}" import ant
+                        done
                     fi
-                ;;
-                arrow+([[:blank:]])*) # echo "Šipka na stránce" >> /dev/stderr
-                        # 4 souřadnice
-                    local TEMP="${TEMPORAR#+([[:blank:]])arrow+([[:blank:]])}"
-                    case "${TEMP}" in
-                        +([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])*) # Mohu nastavit
-                            if [ "${RANGE}" == "global" ] ; then
-                                echo "Globání šipka na stránce nedává smysl"
-                                return 1
-                            fi
-                            local MESSAGE="${TEMP#+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])+([[:digit:]])+([[:blank:]])}"
-                            local COORDS="${TEMP%${MESSAGE}}"
-                            local PAGES=($(range ${RANGE}))
-                            for i in ${PAGES[@]} ; do
-                                (
-                                $0 "${1}" export ant $i
-                                echo "maparea"
-                                echo -e "\t\"\" \"${MESSAGE}\""
-                                echo -e "\tline ${COORDS}"
-                                echo -e "\tarrow"
-                                echo -e "\n"
-                                ) | $0 "${1}" import ant
-                            done
-                        ;;
-                        *) echo "${TEMP}"
-                            help set-arrow
-                        ;;
-                    esac
-                    return $?
-                
                 ;;
         esac
         case ${ACTION} in
@@ -5534,7 +5496,10 @@ djvuinfo() {
     return $?
 }
 
-function help {
+# ### <span id="help">help()</span> ([top](#FUNCTIONS))
+#
+help() {
+    log info "$1"
 	case "$1" in
         actions) echo """Implementované akce: """
         ;;
@@ -6293,16 +6258,24 @@ ATRIBUTY elementů:
 #		help range
 		;;
     set-arrow) echo """
-ELEMENT [1m$line[0m
-ATRIBUT [1m${1#set-}[0m
-    (fixní prvek)
+  ELEMENT [1m${1#set-}[0m
 
-Šipka, která se zobrazuje na DjVu stránce je ve skutečnosti element line s nastaveným parametrem arrow
+  Šipka, je ve skutečnosti element line, s nastaveným atributem arrow,
+  která se pak na stránce zobrazuje jako šipka.
 
-Použitelné parametry:
-   [ border_avis ]
-   [ none | [ linecrl c
-              width w ]]
+   … set arrow X1 Y1 X2 Y2 DESC : [lineclr COLOR] [width SIZE]
+
+X1 Y1
+  Současnice bodu, ze kterého bude šipka vycházet
+X2 Y2
+  Souřadnice bodu do kterého bude šipka ukazovat
+
+DESC
+  Popis k šipce
+
+Použitelné atributy:
+  linecrl - barva šipky v RGB
+    width - tloušťka čáry šipky
 """
     ;;
     set-backclr) echo """
@@ -6357,18 +6330,82 @@ Ovšem v případě prvku, co má být ihned viditelný se takové chování neh
 prvek viditelný stále
 """
     ;;
+    set-key) echo """
+  METADATA [1m${1#set-}[0m
+
+
+
+Nastavení, resp. přenastavení klíče:
+
+  [1m${0##*/}[0m <DjVu> set {RANGE} key {KEY} [VALUE]
+
+Zrušení klíče:
+
+  [1m${0##*/}[0m <DjVu> uset {RANGE} key {KEY}
+
+KEY
+  Řetězec znaků bez mezer a diakritiky, který nesmí začínat číslem
+
+VALUE
+  Hodnota klíče. Vyvarujte se pokud možno použití kulatých závorek!
+
+Příklad použití:
+
+    [1m${0##*/}[0m soubor.djvu set 1,3,7-12 key Creator Thomas Jefferson
+
+
+[3mPoznámka:[23m
+  * I když je to technicky možné, deden klíč nelze na stránce vícekrát než
+    jednou. Při pokusu o nastavení klíče s jinou hodnotou VALUE, dojde k
+    nahrazení obsahu klíče stávajícího
+  * Nastavené klíče se zobrazují jako EXIF informace, proto je doporučeno
+    používat jako klíče standardizované exif tagy
+
+Nejčastěji používané exif tagy:
+        [3mTitle[23m - Název dokumentu
+      [3mCreator[23m - Osoba, která zpracovala sken do DjVu stránky
+ [3mCreationDate[23m - Datum pořízení skenu
+     [3mKeywords[23m - Klíčová slova pro indexaci DjVu souboru
+       [3mannote[23m - Poznámka o původu dokumentu & etc.
+  [3mDescription[23m - Popis obsahu dokumentu
+       [3mAuthor[23m - Autor dokumentu
+     [3mNickname[23m - Přezdívka
+  [3mContactInfo[23m - Kontaktní informace na zpracovatele dokumentu
+Producer - Zařízení či software na kterém byl spracován sken
+CreatorTool - (Zařízení na kterém byl sken či snímek pořízen; případně )
+ModDate "" (Čas zpracování do DjVu)
+ModifyDate (Čas zpracování do DjVu)
+MetadataDate (Čas poslední úpravy metadat v DjVu)
+
+"""
+		;;
     set-line) echo """
-ELEMENT [1m${1#set-}[0m
-Čára která se zobrazuje na stránce. Od prvku arrow (šipka) se liší tím, že ve výchozím stavu 
-nemá nastaveno, že má na konci zobrazovat šipka.
+  ELEMENT [1m${1#set-}[0m
+
+  Linka která se zobrazuje na stránce. Od prvku arrow (šipka) se liší tím,
+  nemá nastaveno aby se na jejím konci zobrazovala šipka.
+
+   … set line X1 Y1 X2 Y2 DESC : [lineclr COLOR] [width SIZE]
+
+X1 Y1
+  Současnice bodu, ze kterého bude linka vycházet
+X2 Y2
+  Souřadnice bodu ve kterém bude linka končit
+
+DESC
+  Popis k lince
+
+Použitelné atributy:
+  linecrl - barva čáry v RGB
+    width - tloušťka čáry
 """
     ;;
     set-lineclr) echo """
 ATRIBUT [1m${1#set-}[0m
 (volitelný prvek)
 Nastavení barvy vykreslené čáry. Dává smysl pouze u typu
-     line - čára
-    arrow - čára se šipkou
+     line - linka
+    arrow - šipka
 
 U prvků rect, oval, poly a text se nastavuje barva linky, co ohraničuje plochu volitelným parametrem border
 """
@@ -6592,66 +6629,6 @@ Příklad:
     založený na djvulibre ano.
 """
     ;;
-		keywords-unset) echo """
-  ACTION [1munset[0m remove item from outline or meta attributes
-
-  [1m${0##*/}[0m <DjVu> unset outline <num>
-
-  [1m${0##*/}[0m <DjVu> unset meta [all|<RANGE>|<name>] <KEY>
-
-Example for remove bookmark item:
-
-    [1m${0##*/}[0m bundle.djvu unset outline 3
-
-Examle for remove meta attribute:
-
-    [1m${0##*/}[0m bundle.djvu unset meta 1,3,7-12 Creator
-
-    all - item is set as meta attribute for every page in DjVu bundle
-    num - item order in outline (see action [2mprint[22m)
-   name - name page in DjVu bundle"""
-		help range
-		help key
-		help value
-		;;
-		keywords-meta) echo """
-  ACTION [1mset[0m or [1munset[0m
-
-  Keywords [2mset[22m or [2munset[22m work only with meta attribute key.
-  For view meta attribute use keyword [2minfo[22m and [2mexport[22m for output in
-  format which is usable to [2mimport[22m. You may [2medit[22m attribute too.
-
-  [1m${0##*/}[0m <DjVu> unset meta [all|<RANGE>] <KEY>
-
-  [1m${0##*/}[0m <DjVu> set meta [all|<RANGE>] <KEY> <VALUE>
-
-          all - item is set as meta attribute for every
-                page in DjVu bundle
-        RANGE - range specified pages
-          KEY - key name of meta attribute
-        VALUE - value of meta attribute key
-
-[3mNotice:[23m
-  * If is not given key word [3mall[23m or [3mRANGE[23m of pages, is item KEY accepted
-    as global meta attribute of DjVu bundle
-  * Range is 
-
-RANGE example:
-
-    [1m${0##*/}[0m bundle.djvu set meta 1,3,7-12 Creator 'Thomas Jefferson'
-
-KEY most common attributes:
-        [3mTitle[23m - Title of DjVu page or bundle
-      [3mCreator[23m - Creator DjVu bundle or DjVu page from scan
- [3mCreationDate[23m - Creation date of DjVu bundle or page
-     [3mKeywords[23m - Keywords for indexation DjVu file
-       [3mannote[23m - Notes about origin of document & etc.
-
-[3mNotice:[23m
-  * KEY is single word without diacritical chars and spaces
-  * VALUE is normal text string
-"""
-		;;
 		level) echo """
 [1mParametr[0m
          -l|--level  <[2mčíslo[22m> Hodnota akceptovatelných ztrát u černobílé kresby
@@ -7316,6 +7293,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 background|\
                                 border|\
                                 border_avis|\
+                                key|\
                                 line|\
                                 lineclr|\
                                 mode|\
