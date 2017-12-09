@@ -574,9 +574,15 @@ testsyntaxant() {
                             *) printf "(${META} ${KEYS})\n" ;;
                             esac
                         ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
                     esac
+                    unset XMP
                     unset KEYS
                     unset BORDER
                     unset URL
@@ -602,9 +608,15 @@ testsyntaxant() {
                             *) printf "(${META} ${KEYS})\n" ;;
                             esac
                         ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
                     esac
+                    unset XMP
                     unset KEYS
                     unset BORDER
                     unset URL
@@ -625,15 +637,23 @@ testsyntaxant() {
                 esac
                 printf "set-ant\n"
             ;;
+            \<*) local XMP="${XMP}${line}"
+            ;;
             metadata) case "${META}" in
                         metadata) case "${KEYS}" in
                             '') continue ;;
                             *) printf "(${META} ${KEYS})\n" ;;
                             esac
                         ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
                         maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
                         ;;
                 esac
+                unset XMP
                 unset KEYS
                 unset BORDER
                 unset URL
@@ -645,13 +665,39 @@ testsyntaxant() {
                             *) printf "(${META} ${KEYS})\n" ;;
                             esac
                         ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
                 esac
+                unset XMP
                 unset KEYS
                 unset BORDER
                 unset URL
                 META='maparea'
+            ;;
+            xmp) case "${META}" in
+                        metadata) case "${KEYS}" in
+                            '') continue ;;
+                            *) printf "(${META} ${KEYS})\n" ;;
+                            esac
+                        ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
+                        maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
+                        ;;
+                esac
+                unset XMP
+                unset KEYS
+                unset BORDER
+                unset URL
+                META='xmp'
             ;;
             align+([[:blank:]])+(left|center|right)+([[:blank:]])+(top|center|bottom)|\
             background+([[:blank:]])\#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]|\
@@ -667,10 +713,16 @@ testsyntaxant() {
                             *) printf "(${META} ${KEYS})\n" ;;
                             esac
                         ;;
+                        xmp) case "${XMP}" in
+                            '') continue ;;
+                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            esac
+                        ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
                         ;;
                 esac
                 printf "($line) "
+                unset XMP
                 unset KEYS
                 unset BORDER
                 unset URL
@@ -763,17 +815,26 @@ testsyntaxant() {
             ;;
             '') #echo "Prázdný řádek - vypíše položku a vypne přechozí volbu"
                 if [ "${META}" == "metadata" ] ; then
-                    echo "(${META} ${KEYS})"
+                    echo -e "(${META} ${KEYS})\n"
                     unset META
+                    unset XMP
+                    unset KEYS
+                    unset BORDER
+                    unset URL
+                elif [ "${META}" == "xmp" ] ; then
+                    echo -e "(${META} \"${XMP//\"/\\\"}\")\n"
+                    unset META
+                    unset XMP
                     unset KEYS
                     unset BORDER
                     unset URL
                 elif [ "${META}" == "maparea" ] ; then
-                    echo "(${META} ${URL} ${BORDER} ${KEYS})"
-                    unset BORDER
+                    echo -e "(${META} ${URL} ${BORDER} ${KEYS})\n"
                     unset META
-                    unset URL
+                    unset XMP
                     unset KEYS
+                    unset BORDER
+                    unset URL
                 fi
             ;;
             \;*) #/ komentáře
@@ -2935,7 +2996,13 @@ stránka, tak máte dvě možnosti:
                                 unset) case "${LINE[0]}" in
                                         +([[:digit:]])) #/ vyskytuje se
                                             # echo "Ruším ${KEY} \"${VALUE}\"" >> /dev/stderr
-                                            setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
+                                            case "${KEY}" in
+                                                xmp) echo "XMP metadata lze odstranit, nebo upravit jedině přes akci edit" >> /dev/stderr
+                                                    return 1
+                                                ;;
+                                                *) setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
+                                                ;;
+                                            esac
                                         ;;
                                         *) #/ nevyskytuje se
                                         ;;
@@ -2948,8 +3015,14 @@ stránka, tak máte dvě možnosti:
                                             case "${KEY}" in
                                                 note) echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
                                                 ;;
-                                                *) echo "metadata" >> "${TEMPFILE}"
-                                                    echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                *) case "${KEY}" in
+                                                        xmp) echo "xmp" >> "${TEMPFILE}"
+                                                            echo -e "\t${VALUE}\n" >> "${TEMPFILE}"
+                                                        ;;
+                                                        *) echo "metadata" >> "${TEMPFILE}"
+                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                                                        ;;
+                                                    esac
                                                 ;;
                                             esac
                                         ;;
@@ -6232,7 +6305,6 @@ ATRIBUTY elementů:
   Více informací o každém z atributů a použití elemntů či metadat lze
   vypsat tak, že se bezprostředně za ně napíše volba -h.
 """
-#		help key
 #		help value
 #		help range
 		;;
@@ -6811,11 +6883,40 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
 
 [1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
 """
-		;;
-        *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
-            return 1
-        ;;
-	esac
+    ;;
+    xmp) echo """Nastavení XMP
+
+  Na rozdíl od EXIF tagů, které lze nastavovat postupně jako metadatové klíče,
+  jsou XMP atributy uloženy ve speciálním metadatovém klíči XMP, který musí
+  být v rámci stránky vždy jedinečný.
+
+  Následující ukázkový příklad demonstruje, jak vypadá obdobná informace
+  nastavená jako EXIF tag, i jako XMP atribut.
+
+  user@stroj:~$ djvutool soubor.djvu export ant 0
+  # 'shared_anno.iff'
+  metadata
+      Title \"Název dokumentu\"
+  xmp
+      <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">
+      <rdf:Description rdf:about=\"\">
+      <dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\">Název dokumentu
+      </dc:title>
+      </rdf:Description>
+      </rdf:RDF>
+
+  Zatím co EXIF tag, lze nastavit a kdykoliv upravovit přes akci set,
+  XMP lze pouze přes akci set nastavit. Pro další úpravy už je nutné 
+  použít akci edit. Při nastavení XMP přes akci set, musí tvořit celý
+  XMP kód jeden řetězec. Viz příklad:
+  
+  … set 0 key xmp '<rdf:RDF xmlns:rdf=…     …scription></rdf:RDF>'
+"""
+    ;;
+    *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
+        return 1
+    ;;
+    esac
 }
 
 # ### <span id="djvuview">djvuview()</span> ([top](#FUNCTIONS))
@@ -6880,7 +6981,10 @@ do
                 ;;
             esac
             return 0
-            ;;
+        ;;
+        exif|xmp) help ${1}
+            return 0
+        ;;
         help) echo "Otevřít ke čtení externí manuál"
             return 0
         ;;
