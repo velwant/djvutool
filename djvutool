@@ -2931,11 +2931,11 @@ stránka, tak máte dvě možnosti:
                             log info "From shared_ant –> $i"
                             $0 "${1}" export ant 0 > "${TEMPFILE}"
                             mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
-                            echo "${LINE[0]}" >> /dev/stderr
+                            log info "${KEY} \"${VALUE}\" –> ${LINE[0]}"
                             case "${ACTION}" in
                                 unset) case "${LINE[0]}" in
                                         +([[:digit:]])) #/ vyskytuje se
-                                            echo "Ruším \t${KEY}" >> /dev/stderr
+                                            # echo "Ruším ${KEY} \"${VALUE}\"" >> /dev/stderr
                                             setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
                                         ;;
                                         *) #/ nevyskytuje se
@@ -2957,6 +2957,8 @@ stránka, tak máte dvě možnosti:
                                     esac
                                 ;;
                             esac
+                            #/ Na konci musí být alespoň jedna prázdná linka 
+                            echo ""  >> "${TEMPFILE}"
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
                             case "${ACTION}" in
@@ -2981,6 +2983,7 @@ stránka, tak máte dvě možnosti:
                             $0 "${1}" export ant $i > "${TEMPFILE}"
                             echo "" >> "${TEMPFILE}"
                             mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
+                            log info "${KEY} \"${VALUE}\" –> ${LINE[0]}"
                             case "${ACTION}" in
                                 unset) case "${LINE[0]}" in
                                         +([[:digit:]])) #/ vyskytuje se
@@ -3042,6 +3045,8 @@ stránka, tak máte dvě možnosti:
                                     esac
                                 ;;
                             esac
+                            #/ Na konci musí být alespoň jedna prázdná linka 
+                            echo "" >> "${TEMPFILE}"
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
                     fi
