@@ -18,6 +18,15 @@ shopt -s extglob
 # Otestovat
 # - export ze single-page dokumentu
 #
+# ## Poznámky:
+#
+# ### Jak vypsat obsah řádku 3 ze souboru test.txt:
+#
+#   sed -n 3p test.txt
+#
+# ### Jak vypsat poslední hodnotu pole
+#
+#    echo ${pole[@]: -1}
 
 # ToDo
 # - dopsat manuál pro akci set, argumenty, xmp, atp.
@@ -576,7 +585,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
@@ -610,7 +619,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
@@ -647,7 +656,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
@@ -667,7 +676,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
@@ -687,7 +696,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) printf "(${META} ${URL} ${BORDER} ${KEYS})\n"
@@ -715,7 +724,7 @@ testsyntaxant() {
                         ;;
                         xmp) case "${XMP}" in
                             '') continue ;;
-                            *) printf "(${META} \"${XMP//\"/\\\"}\")\n" ;;
+                            *) printf "(${META} \"${XMP//\"/\\\\\"}\")\n" ;;
                             esac
                         ;;
                         maparea) echo "(${META} ${URL} ${BORDER} ${KEYS})"
@@ -822,7 +831,7 @@ testsyntaxant() {
                     unset BORDER
                     unset URL
                 elif [ "${META}" == "xmp" ] ; then
-                    echo -e "(${META} \"${XMP//\"/\\\"}\")\n"
+                    echo -e "(${META} \"${XMP//\"/\\\\\"}\")\n"
                     unset META
                     unset XMP
                     unset KEYS
@@ -950,10 +959,15 @@ formatdsed() {
 #                        ;;
                         *) if [ -n "${XMP}" ] ; then
                                 case "${line: -2}" in
-                                    \"\)) echo -e "${TAB}${line%>*}>"
+                                    \"\)) local LINE="${line%>*}>"
+                                        echo -e "${TAB}${LINE}" | sed 's/\x00//g'
                                         unset XMP
+                                        unset LINE
                                     ;;
-                                    *)  echo -e "${TAB}${line}"
+                                    *) local LINE="${line}"
+                                        # local LINE=$(echo "${line}" | decode)
+                                        echo -e "${TAB}${LINE}" | sed 's/\x00//g'
+                                        unset LINE
                                     ;;
                                 esac
                             else
@@ -2282,6 +2296,12 @@ isformat() {
         ant) #/ Volba pro DjVu
             #/ Poznámky
             ;;
+        note)  #/ Volba pro DjVu
+            #/ export skrytých poznámek
+            ;;
+        xmp)  #/ Volba pro DjVu
+            #/ export XMP kódu
+            ;;
         meta) #/ Volba pro DjVu
             ;;
         line|word|para) #/ Volby pro djvutxt
@@ -2571,7 +2591,7 @@ fromdjvu() {
 #/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
 #/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
-        djvu|ant|meta|mask|background|foreground|color|black|dsed-*|xml-*|\
+        djvu|ant|note|meta|mask|background|foreground|color|black|dsed-*|xmp|xml-*|\
         line|word|para)
             if [ -n "${RANGE}" ] ; then
                 local PAGES=($(range "${RANGE}"))
@@ -2606,12 +2626,23 @@ fromdjvu() {
                             *) case ${INTO} in
                                 line|word|para)
                                 ;;
-                                ant) printf "# 'shared_anno.iff'\n"
+                                ant)printf "# 'shared_anno.iff'\n"
                                     ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
                                 ;;
                                 meta) printf "# 'shared_anno.iff'\n"
                                     local META=$(${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta" | decode)
                                 echo -e "${META}"
+                                ;;
+                                note) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed | grep ^note | xargs -n1 | grep -v ^note
+                                ;;
+                                xmp) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed | while read line
+                                do
+                                    case "${line}" in
+                                        xmp) local PRINT="yes" ;;
+                                        \<*) echo "${line}" ;;
+                                        *) [ -n "${PRINT}" ] && break ;;
+                                    esac
+                                done
                                 ;;
                                 dsed-*) local EXPORT="output-ant"
                                     local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}.dsed")
@@ -2642,6 +2673,17 @@ fromdjvu() {
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
                                 local META=$(${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-meta" | decode)
                                 [ -n "${META}" ] && echo -e "${META}"
+                            ;;
+                            note) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed | grep ^note | xargs -n1 | grep -v ^note
+                            ;;
+                            xmp) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed | while read line
+                                do
+                                    case "${line}" in
+                                        xmp) local PRINT="yes" ;;
+                                        \<*) echo "${line}" ;;
+                                        *) [ -n "${PRINT}" ] && break ;;
+                                    esac
+                                done
                             ;;
                             djvu) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
                                 if [ -f "${TARGET}" ] ; then
@@ -2891,6 +2933,148 @@ object() {
     return 0
 }
 
+# ### <span id="replacekey">replacekey()</span> ([top](#FUNCTIONS))
+# Nahrazuje v dočasném souboru metadatové klíče
+replacekey() {
+    mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"" "${TEMPFILE}")
+    log info "${KEY} –> ${LINE[0]}"
+    case "${ACTION}" in
+        unset) case "${LINE[0]}" in
+            +([[:digit:]])) #/ Tady je třeba ověřit jestli metadatový blok má více než jeden řádek
+                # nejlépe ověřit řádek před a po…
+                # Jestli je o řádek dřív tag metadata…
+                local BEGIN=$((${LINE[0]} - 1))
+                local START="$(sed -n ${BEGIN}p ${TEMPFILE})" 
+                local END="$(sed -n $((${LINE[0]} + 1))p ${TEMPFILE})"
+                case "${START}" in
+                    metadata) # Odstraňuji dva řádky
+                        case "${END%%([[:blank:]])*}" in
+                            ''|metadata|xmp|note|align|background|zoom|mode)
+                                ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${BEGIN},${LINE[0]}d
+w
+q
+EOF
+                            ;;
+                            *)  # Odstraňuji jeden řádek
+                                setmeta "${TEMPFILE}" "${KEY} \"" 
+                            ;;
+                        esac
+                    ;;
+                    *) # Odstraňuji jeden řádek
+                        setmeta "${TEMPFILE}" "${KEY} \"" 
+                    ;;
+                esac
+            ;;
+        esac
+        ;;
+        set) case "${LINE[0]}" in
+                +([[:digit:]])) log info "Replace content key –> ${KEY}"
+                    setmeta "${TEMPFILE}" "${KEY} \"" "${KEY} \"${VALUE}\""
+                ;;
+                *) mapfile -t METADATA <<< $(sed  '/metadata/!d ; = '  ${TEMPFILE} | grep -v metadata)
+                    local BEGIN="${METADATA[@]: -1}"
+                    case "${BEGIN}" in
+                        +([[:digit:]])) log info "New metadata key –> ${KEY}"
+                            local KEYDATA="${KEY} \"${VALUE}\""
+                            ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${BEGIN}a
+${KEYDATA}
+.
+w
+q
+EOF
+                        ;;
+                        *) log info "Set new metadata block for key –> ${KEY}"
+                            echo "metadata" >> "${TEMPFILE}"
+                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                        ;;
+                    esac
+                ;;
+            esac
+        ;;
+    esac
+
+}
+
+# ### <span id="replacenote">replacenote()</span> ([top](#FUNCTIONS))
+# Nahrazuje a odstraňuje v dočasném souboru skryté poznámky
+replacenote() {
+    mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
+    log info "${KEY} \"${VALUE}\" –> ${LINE[0]}"
+    case "${ACTION}" in
+        unset) case "${LINE[0]}" in
+                +([[:digit:]])) log info "Remove note from ${LINE[0]}"
+                    setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
+                ;;
+                *) log warn "Note is not set"
+                    return 1
+                ;;
+        esac
+        ;;
+        set) case "${LINE[0]}" in
+                +([[:digit:]])) log info "This note exists"
+                ;;
+                *) log info "Set new note"
+                    echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
+                ;;
+        esac
+        ;;
+    esac
+}
+
+# ### <span id="replacexmp">replacexmp()</span> ([top](#FUNCTIONS))
+# Nahrazuje v dočasném souboru XMP kód
+replacexmp() {
+    mapfile -t ITEM <<< $(sed  '/xmp/,/^[abmnpz#]/!d ; = ; /^[abmnpz#]/q' "${TEMPFILE}" | grep ^[0-9])
+    local XMP=$(echo ${STRING#xmp+([[:blank:]])} | encode)
+    case "${ITEM[0]}" in
+        +([0-9])) case "$(sed -n ${ITEM[@]: -1}p ${TEMPFILE})" in
+            +(maparea|metadata|note|mode|zoom|background|align)*)
+                local BEGIN="${ITEM[0]}"
+                local END="${ITEM[@]: -2:1}"
+            ;;
+            *) local BEGIN="${ITEM[0]}"
+                local END="${ITEM[@]: -1}"
+            ;;
+        esac
+        ;;
+        *) log info "XMP unexist"
+        ;;
+    esac
+    case "${ACTION}" in
+        unset) # jestli xmp existuje - zrušit (stačí grep)
+            if [ -n "${BEGIN}" ] ; then
+                log info "Delete XMP code –> ${BEGIN},${END}d"
+                ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${BEGIN},${END}d
+w
+q
+EOF
+            fi
+        ;;
+        set) # Jestli xmp existuje - přepsat
+            if [ -n "${BEGIN}" ] ; then
+                log info "Change XMP code –> ${BEGIN},${END}c"
+                ed "${TEMPFILE}" 2>/dev/null <<-EOF
+${BEGIN},${END}c
+xmp
+${XMP//></>\\\n<}
+.
+w
+q
+EOF
+            else
+                # jestli neexistuje - vložit
+                log info "Add XMP code to end file"
+                echo "xmp" >> "${TEMPFILE}"
+                echo -e "${XMP//></>\\\n<}" >> "${TEMPFILE}"
+            fi
+        ;;
+    esac
+    return $?
+}
+
 # ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
@@ -2958,6 +3142,8 @@ stránka, tak máte dvě možnosti:
                     fi
                 ;;
             esac
+            anone "Uložit změny?"
+            [ $? -eq 1 ] && return 1
             outlinetodjvu "${FILE}" "${TEMPFILE}"
             if [ $? -eq 1 ] ; then
                 echo "Při importu záložek se vyskytla chyba" >> /dev/stderr
@@ -2971,78 +3157,23 @@ stránka, tak máte dvě možnosti:
             local STRING="${TEMPORAR#+([[:blank:]])}"
             local ELEMENT="${STRING%%+([[:blank:]])*}"
             case "${ELEMENT}" in
-                note|\
-                key)
-                    local TEMP=(${STRING//+([[:blank:]])/ })
-                    case "${TEMP[0]}" in
-                        note) local KEY="${TEMP[0]}"
-                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])}"
-                        ;;
-                        key) local KEY="${TEMP[1]}"
-                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])${TEMP[1]}+([[:blank:]])}"
-                        ;;
-                        *) #/ ještě nevím
-                            return 1
-                        ;;
-                    esac
-                    if [ "${RANGE}" == "0" ] ; then
+                xmp) if [ "${RANGE}" == "0" ] ; then
                         if [ "${TEST[0]}" -eq "0" ] ; then
                             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                             log info "From shared_ant –> $i"
                             $0 "${1}" export ant 0 > "${TEMPFILE}"
-                            mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
-                            log info "${KEY} \"${VALUE}\" –> ${LINE[0]}"
-                            case "${ACTION}" in
-                                unset) case "${LINE[0]}" in
-                                        +([[:digit:]])) #/ vyskytuje se
-                                            # echo "Ruším ${KEY} \"${VALUE}\"" >> /dev/stderr
-                                            case "${KEY}" in
-                                                xmp) echo "XMP metadata lze odstranit, nebo upravit jedině přes akci edit" >> /dev/stderr
-                                                    return 1
-                                                ;;
-                                                *) setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
-                                                ;;
-                                            esac
-                                        ;;
-                                        *) #/ nevyskytuje se
-                                        ;;
-                                    esac
-                                ;;
-                                set) case "${LINE[0]}" in
-                                        +([[:digit:]])) #/ vyskytuje se nedělám nic
-                                        ;;
-                                        *) #/ nevyskytuje se
-                                            case "${KEY}" in
-                                                note) echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
-                                                ;;
-                                                *) case "${KEY}" in
-                                                        xmp) echo "xmp" >> "${TEMPFILE}"
-                                                            echo -e "\t${VALUE}\n" >> "${TEMPFILE}"
-                                                        ;;
-                                                        *) echo "metadata" >> "${TEMPFILE}"
-                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
-                                                        ;;
-                                                    esac
-                                                ;;
-                                            esac
-                                        ;;
-                                    esac
-                                ;;
-                            esac
+                            replacexmp
                             #/ Na konci musí být alespoň jedna prázdná linka 
                             echo ""  >> "${TEMPFILE}"
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
                             case "${ACTION}" in
                                 set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
                                     ( $0 "${1}" export ant 0
-                                        case "${KEY}" in
-                                            note) echo -e "${KEY} \"${VALUE}\"\n"
-                                            ;;
-                                            *) echo "metadata" >> "${TEMPFILE}"
-                                                echo -e "\t${KEY} \"${VALUE}\"\n"
-                                            ;;
-                                        esac
+                                        echo "xmp"
+                                        echo -e "\t\"${VALUE}\"\n"
                                     ) | $0 "${1}" import ant
                                 ;;
                             esac
@@ -3053,75 +3184,108 @@ stránka, tak máte dvě možnosti:
                             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                             log info "From page –> $i"
                             $0 "${1}" export ant $i > "${TEMPFILE}"
-                            echo "" >> "${TEMPFILE}"
-                            mapfile -d\: -t -c1 LINE <<< $(grep -n "${KEY} \"${VALUE}\"" "${TEMPFILE}")
-                            log info "${KEY} \"${VALUE}\" –> ${LINE[0]}"
-                            case "${ACTION}" in
-                                unset) case "${LINE[0]}" in
-                                        +([[:digit:]])) #/ vyskytuje se
-                                            log info "Odstraňuji ${KEY} –> ${KEY} \"${VALUE}\""
-                                            setmeta "${TEMPFILE}" "${KEY} \"${VALUE}\""
-                                        ;;
-                                        *) #/ nevyskytuje se
-                                            case "${KEY}" in
-                                                note) #/ jiná poznámka, kterou ignoruji
-                                                    log warn "Poznámka odpovídající parametrům na stránce neexistuje –> ${KEY} \"${VALUE}\""
-                                                ;;
-                                                *) #/ zjistit jestli se vyskytuje klíč
-                                                    log info "Testuji zda-li se v souboru vyskytuje klíč ${KEY}"
-                                                    mapfile -d\: -t -c1 ITEMKEY <<< $(grep -n "${KEY}" "${TEMPFILE}")
-                                                    case "${ITEMKEY[0]}" in
-                                                        +([[:digit:]])) #/ vyskytuje se, je třeba odstranit, ovšem pozor!
-                                                            log info "Klíč se vyskytuje na řádku ${ITEMKEY[0]}"
-                                                            setmeta "${TEMPFILE}" "${KEY}"
-                                                            echo "${TEMPFILE}" >> /dev/stderr
-                                                        ;;
-                                                        *) #/ nevyskytuje se
-                                                            log warn "Neexistující klíč –> ${KEY}"
-#                                                            echo "metadata" >> "${TEMPFILE}"
-#                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
-                                                        ;;
-                                                    esac
-                                                ;;
-                                            esac
-                                        ;;
-                                    esac
-                                ;;
-                                set) case "${LINE[0]}" in
-                                        +([[:digit:]])) #/ vyskytuje se
-                                            log info "Na stránce $i řádek vyhovující parametrům již existuje ${LINE[0]} –> ${KEY} \"${VALUE}\""
-                                            cat "${TEMPFILE}" >> /dev/stderr
-                                        ;;
-                                        *) #/ nevyskytuje se
-                                            case "${KEY}" in
-                                                note) log info "Přidávám poznámku –> ${KEY} \"${VALUE}\""
-                                                    echo -e "${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
-                                                ;;
-                                                *) #/ zjistit jestli se vyskytuje klíč
-                                                    log info "Testuji zda-li se v souboru vyskytuje klíč ${KEY}"
-                                                    mapfile -d\: -t -c1 ITEMKEY <<< $(grep -n "${KEY}" "${TEMPFILE}")
-                                                    case "${ITEMKEY[0]}" in
-                                                        +([[:digit:]])) #/ vyskytuje se, nahradit
-                                                            log info "Aktualizuji klíč –> ${KEY} \"${VALUE}\""
-                                                            setmeta "${TEMPFILE}" "${KEY}" "${KEY} \"${VALUE}\""
-                                                        ;;
-                                                        *) #/ nevyskytuje se
-                                                            log info "Přidávám nový klíč –> ${KEY} \"${VALUE}\""
-                                                            echo "metadata" >> "${TEMPFILE}"
-                                                            echo -e "\t${KEY} \"${VALUE}\"\n" >> "${TEMPFILE}"
-                                                        ;;
-                                                    esac
-                                                ;;
-                                            esac
-                                        ;;
-                                    esac
-                                ;;
-                            esac
+                            replacexmp
                             #/ Na konci musí být alespoň jedna prázdná linka 
                             echo "" >> "${TEMPFILE}"
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
                     fi
+                    return $?
+                ;;
+                note|\
+                key)
+                    local TEMP=(${STRING//+([[:blank:]])/ })
+                    case "${TEMP[0]}" in
+                        note) local KEY="${TEMP[0]}"
+                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])}"
+                            #/ vždy na jednom řádku
+                            if [ "${RANGE}" == "0" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then
+                                    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                    log info "From shared_ant –> $i"
+                                    $0 "${1}" export ant 0 > "${TEMPFILE}"
+                                    replacenote
+                                    #/ Na konci musí být alespoň jedna prázdná linka 
+                                    echo ""  >> "${TEMPFILE}"
+                                    anone "Uložit změny?"
+                                    [ $? -eq 1 ] && return 1
+                                    cat "${TEMPFILE}" | $0 "${1}" import ant
+                                else
+                                    case "${ACTION}" in
+                                        set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                            ( $0 "${1}" export ant 0
+                                                echo -e "${KEY} \"${VALUE}\"\n"
+                                            ) | $0 "${1}" import ant
+                                        ;;
+                                    esac
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                    log info "From page –> $i"
+                                    $0 "${1}" export ant $i > "${TEMPFILE}"
+                                    echo "" >> "${TEMPFILE}"
+                                    replacenote
+                                    #/ Na konci musí být alespoň jedna prázdná linka 
+                                    echo "" >> "${TEMPFILE}"
+                                    anone "Uložit změny?"
+                                    [ $? -eq 1 ] && return 1
+                                    cat "${TEMPFILE}" | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        key) local KEY="${TEMP[1]}"
+                            [ "${KEY}" == "xmp" ] && echo "XMP kód se nenastavuje přes key, ale xmp" >> /dev/stderr && return 1
+                            [ "${KEY}" == "note" ] && echo "Pro skryté poznámky se nepoužívá key, ale note" >> /dev/stderr && return 1
+                            local VALUE="${STRING#${TEMP[0]}+([[:blank:]])${TEMP[1]}+([[:blank:]])}"
+                            if [ "${RANGE}" == "0" ] ; then
+                                if [ "${TEST[0]}" -eq "0" ] ; then
+                                    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                    log info "From shared_ant –> $i"
+                                    $0 "${1}" export ant 0 > "${TEMPFILE}"
+                                    replacekey
+                                    #/ Na konci musí být alespoň jedna prázdná linka 
+                                    echo ""  >> "${TEMPFILE}"
+                                    anone "Uložit změny?"
+                                    [ $? -eq 1 ] && return 1
+                                    cat "${TEMPFILE}" | $0 "${1}" import ant
+                                else
+                                    case "${ACTION}" in
+                                        set) ${DJVUSED} "${1}" -e 'create-shared-ant ; set-ant' -s
+                                            ( $0 "${1}" export ant 0
+                                                case "${KEY}" in
+                                                    note) echo -e "${KEY} \"${VALUE}\"\n"
+                                                    ;;
+                                                    *) echo "metadata" >> "${TEMPFILE}"
+                                                        echo -e "\t${KEY} \"${VALUE}\"\n"
+                                                    ;;
+                                                esac
+                                            ) | $0 "${1}" import ant
+                                        ;;
+                                    esac
+                                fi
+                            else
+                                local PAGES=($(range ${RANGE}))
+                                for i in ${PAGES[@]} ; do
+                                    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                                    log info "From page –> $i"
+                                    $0 "${1}" export ant $i > "${TEMPFILE}"
+                                    replacekey
+                                    #/ Na konci musí být alespoň jedna prázdná linka 
+                                    echo "" >> "${TEMPFILE}"
+                                    anone "Uložit změny?"
+                                    [ $? -eq 1 ] && return 1
+                                    cat "${TEMPFILE}" | $0 "${1}" import ant
+                                done
+                            fi
+                        ;;
+                        *) #/ ještě nevím
+                            return 1
+                        ;;
+                    esac
                     return $?
                 ;;
                 align|\
@@ -3196,6 +3360,8 @@ stránka, tak máte dvě možnosti:
                             log info "From shared_ant –> $i"
                             $0 "${1}" export ant 0 > "${TEMPFILE}"
                             [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
                             if [ -n "${VALUE}" ] ; then
@@ -3212,6 +3378,8 @@ stránka, tak máte dvě možnosti:
                             log info "From page –> $i"
                             $0 "${1}" export ant $i > "${TEMPFILE}"
                             [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
                     fi
@@ -3363,6 +3531,8 @@ EOF
                             case ${DEBUG} in
                                 -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
                             esac
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" ) | $0 "${1}" import ant
                         done
                     fi
@@ -6033,6 +6203,8 @@ AKCE které nevyžadují žádný soubor:
 
 FORMAT
       ant - poznámky
+     note - export skrytých poznámek
+      xmp - export xmp
       xml - na výstup bude vypsán XML obsah vybraného rozsahu stránek
      dsed - na výstup bude vypsán obsah vybraného rozsahu stránek v dsed formátu
   outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
@@ -6289,6 +6461,7 @@ METADATA:
    outline - položka aktivního obsahu DjVu dokumentu (záložka)
       mode - výchozí zobrazovací mód obrazové vrstvy
 background - barva pozadí okna prohlížeče DjVu souboru (djview)
+       xmp - nastavené XMP atributů
       zoom - výchozí velikost zobrazení stránky
 
 ELEMENTY:
@@ -6511,8 +6684,7 @@ NOTE
 
   A jeho vytažení:
 
-  djvutool a.djvu export ant 0 | grep ^note | sed 's/ /=/' |\\
-  { read a ; eval $a ; echo $note | tr '-' '\n' | base64 -d > kopie.zip ; }
+  djvutool a.djvu export note 0 | tr '-' '\n' | base64 -d > kopie.zip
 
 [3mPoznámka:[23m
   Na rozdíl od exif tagů, vkládaných přes metadatový klíč [1mkey[0m, může být
@@ -6661,6 +6833,26 @@ V případě prvků rect, oval, poly, line a arrow je tento parametr zbytečný,
 ATRIBUT [1m${1#set-}[0m
     (volitelný prvek)
 width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
+"""
+    ;;
+    set-xmp) echo """
+  METADATA [1m${1#set-}[0m
+
+  Přes metadatový element xmp lze nait metadatový klíč s XMP kódem, který
+  je pak interpretován podobně jako EXIF tagy.
+
+  … set 0 key xmp '<rdf:RDF xmlns:rdf=…     …scription></rdf:RDF>'
+
+[3mPoznámka:[23m
+  * I když je to technicky možné, na jedné stránce je akceptován vždy pouze
+    jeden XMP element. Při nastavení jiného kódu dojde k nahrazení toho 
+    stávajícího novým obsahem.  Pro dílčí úpravy je tedy vhodnější použít
+    akci edit.
+
+Pro více informací o XMP spusťte:
+
+  [1m${0##*/}[0m xmp
+
 """
     ;;
     set-zoom) echo """
@@ -6899,12 +7091,6 @@ Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky
       </rdf:Description>
       </rdf:RDF>
 
-  Zatím co EXIF tag, lze nastavit a kdykoliv upravovit přes akci set,
-  XMP lze pouze přes akci set nastavit. Pro další úpravy už je nutné 
-  použít akci edit. Při nastavení XMP přes akci set, musí tvořit celý
-  XMP kód jeden řetězec. Viz příklad:
-
-  … set 0 key xmp '<rdf:RDF xmlns:rdf=…     …scription></rdf:RDF>'
 """
     ;;
     *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
@@ -7417,6 +7603,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 text|\
                                 textclr|\
                                 width|\
+                                xmp|\
                                 xor|\
                                 zoom) help set-${PROPERTY}
                                 ;;
