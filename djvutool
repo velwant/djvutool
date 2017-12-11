@@ -68,7 +68,6 @@ ALG="${ALG=none}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
 IMGPAGE="${IMGPAGE=no}"
 ALGORITHM=( none abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
-TABS="8"
 
 trap '''CHYBA=$? ;
 case $CHYBA in
@@ -318,25 +317,6 @@ else
 fi
 
 #=== konec testu závislostí ===
-
-## Pomocné funkce...
-# ### <span id="xtabs">xtabs()</span> ([top](#FUNCTIONS))
-# Používá ji pouze funkce outlineset
-# $1 - count of tabs
-# return string of tabs
-xtabs() {
-    local TAB=$1
-    while [ ! $TAB -eq 0 ] ; do
-        printf '\t'
-        TAB=$(( $TAB - 1 ))
-    done 
-}
-
-function tabs {
-	# $1 - file with tabs
-	local TAB=$(printf '%.0s\ ' {0..${TABS}})
-	sed "s/\t/${TAB}/g" "${1}"
-}
 
 # ### <span id="log">log()</span> ([top](#FUNCTIONS))
 # Je-li použita volba `-d` nebo `--debug`, nastaví funkce [main](#main)
@@ -1688,142 +1668,6 @@ bookmarktooutline() {
             ;;
         esac
     done
-}
-
-function outlineunset {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-	local CHARSET="$(( $2 + 1 ))"
-	bookmarktooutline "${SOURCE}" >> "${TEMPFILE}"
-	if [ "${CHARSET//+([[:digit:]])}" == "" ] ; then
-		ed ${TEMPFILE} 2>/dev/null <<-EOF
-${CHARSET}d
-w
-q
-EOF
-		outlinetodsed "${TEMPFILE}" | encode > "${TEMPFILE/.outline/.temp}"
-		${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE/.outline/.temp}; save"
-	fi
-}
-
-# ### <span id="outlineset">outlineset()</span> ([top](#FUNCTIONS))
-# Funkce ukládá outline do souboru
-# $1 - DjVu soubor
-#
-# Používá funkce:
-# * xtabs
-# * bookmarktooutline
-# * outlinetodsed
-function outlineset {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-	local CHARSET="${2}"
-	bookmarktooutline "${SOURCE}" >> "${TEMPFILE}"
-	local ORDER="${CHARSET%% *}"
-	local BOOKMARKTARGET="${CHARSET##* }"
-	local TEMP="${CHARSET#${ORDER} *}"
-	local BOOKMARKITEM="${TEMP%* ${BOOKMARKTARGET}}"
-	case ${ORDER:$((${#ORDER}-1))} in
-		+) if [ -z ${ORDER%:+} ] ; then
-				local TEMP=$(tail -1 ${TEMPFILE})
-				local TABS="${TEMP%%\"*}"
-				local ITEM="$(xtabs $((${#TABS} + 1)))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-a
-${ITEM}
-.
-w
-q
-EOF
-			else
-				local TEMP=$(head -$((${ORDER%:+*}+1)) ${TEMPFILE} | tail -1)
-				local TABS="${TEMP%%\"*}"
-				local ITEM="$(xtabs $((${#TABS} + 1)))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-${ORDER%:+}a
-${ITEM}
-.
-w
-q
-EOF
-			fi
-			;;
-		-) if [ -z ${ORDER%:-*} ] ; then
-				local TEMP=$(tail -1 ${TEMPFILE})
-				local TABS="${TEMP%%\"*}"
-				local MINUS="${ORDER#:}"
-				if [ ${#TABS} -ge ${#MINUS} ] ; then
-					local ITEM="$(xtabs $((${#TABS} - ${#MINUS})))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				else
-					local ITEM="\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				fi
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-a
-${ITEM}
-.
-w
-q
-EOF
-			else
-				local TEMP=$(head -$((${ORDER%:-*}+1)) ${TEMPFILE} | tail -1)
-				local TABS="${TEMP%%\"*}"
-				local MINUS="${ORDER#*:}"
-				if [ ${#TABS} -ge ${#MINUS} ] ; then
-					local ITEM="$(xtabs $((${#TABS} - ${#MINUS})))\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				else
-					local ITEM="\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				fi
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-${ORDER%:-*}a
-${ITEM}
-.
-w
-q
-EOF
-			fi
-			;;
-		:) if [ -z ${ORDER%:} ] ; then
-				local TEMP=$(tail -1 ${TEMPFILE})
-				local TABS="${TEMP%%\"*}"
-				local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-a
-${ITEM}
-.
-w
-q
-EOF
-			else
-				local TEMP=$(head -$((${ORDER%:}+1)) ${TEMPFILE} | tail -1)
-				local TABS="${TEMP%%\"*}"
-				local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-${ORDER%:}a
-${ITEM}
-.
-w
-q
-EOF
-			fi
-			;;
-		[[:digit:]]) local TEMP=$(head -$((${ORDER}+1)) ${TEMPFILE} | tail -1)
-			local TABS="${TEMP%%\"*}"
-			local ITEM="$(xtabs ${#TABS})\"${BOOKMARKITEM}\" \"#${BOOKMARKTARGET}\""
-				ed ${TEMPFILE} 2>/dev/null <<-EOF
-${ORDER}a
-${ITEM}
-.
-w
-q
-EOF
-			;;
-		*) echo "outlineset: Sem bys nikdy neměl dojít" && exit 1
-			;;
-	esac
-	outlinetodsed "${TEMPFILE}" | encode > "${TEMPFILE/.outline/.temp}"
-	${DJVUSED}  "${SOURCE}" -e "set-outline ${TEMPFILE/.outline/.temp}; save"
 }
 
 # ### <span id="outlinetodjvu">outlinetodjvu()</span> ([top](#FUNCTIONS))
@@ -7655,10 +7499,6 @@ case ${FILETYPE} in
             back) #/ Přesouvám stránku dozadu
                 MOVE="back"
                 djvumove "${FILE}" "${CHARSTRING}"
-                return 0
-            ;;
-            rotate) #/ Otáčím stránku
-                djvurotate "${FILE}" "${CHARSTRING}"
                 return 0
             ;;
             export) #/ Exportuji stránku
