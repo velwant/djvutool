@@ -2784,6 +2784,93 @@ object() {
     return 0
 }
 
+# ### <span id="djvurename">djvurename()</span> ([top](#FUNCTIONS))
+# __$1__ je cesta k DjVu souboru ve kterém se přejmenovává stránka
+# __$2__ obsahuje parametry
+djvurename() {
+    local RANGE=$(isrange "${2}")
+    if [ ! -n "${RANGE}" ] ; then
+        # / může být seznam stránek ZA KTERÝM není nic
+        # oddělit PATTERN od seznamu
+        case "${2//+([[:blank:]])/}" in
+            '') # jenom příkaz
+                echo "Nebylo nic předáno ${2}" >> /dev/stderr
+                return 1
+                #local PAGES=($(range "0-${#LISTPAGES[@]}"))
+            ;;
+            *) # seznam stránek oddělených čárkou
+
+                mapfile -t ARRAY <<< $($0 "${1}" info list)
+                case "${ARRAY:0:1}" in
+                    0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                    *) LISTPAGES="0 none"
+                        mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                esac
+
+                local IFS_BAK=$IFS
+                local IFS=$','
+                local SEZNAM=($2)
+                local IFS=$IFS_BAK
+                for i in "${LISTPAGES[@]}" ; do
+                    if [[ "${SEZNAM[@]}" =~ "${i##+([[:digit:]])+([[:blank:]])}" ]] ; then
+                        echo "Stránka ${i}" >> /dev/stderr
+                        local TEMP="$TEMP${i%% *} "
+                    fi
+                    x=$((x + 1))
+                done
+                local PAGES=($TEMP)
+                local STRING="${2##*.djvu+([[:blank:]])}"
+            ;;
+        esac
+    else
+        local STRING="${2#*${RANGE}+([[:blank:]])}"
+        [ ! -n "${STRING}" ] && return 1
+        local PAGES=($(range "${RANGE}"))
+    fi
+    case "${STRING:1:1}" in
+        [a-Z])
+        ;;
+        *) echo "Neplatný PATTERN –> ${STRING}" >> /dev/stderr
+            return 1
+        ;;
+    esac
+    if [ "${PAGES[0]}" == "0" ] ; then
+        log warn "Sobor se sdílenými informacemi nelze přejmenovat"
+    else
+        case "${#PAGES[@]}" in
+            1) # jedna položka
+                local PATTERN="${STRING}.djvu"
+            ;;
+            *) local DIGIT="${PAGES[@]: -1}"
+                local PATTERN="${STRING}%${#DIGIT}d.djvu"
+            ;;
+        esac
+        local z i
+        for i in ${PAGES[@]} ; do
+            [ "$i" == "0" ] && log warn "Sobor se sdílenými informacemi nelze přejmenovat" && continue
+            ((++z))
+            local TARGET=$(printf "${PATTERN}" $z)
+            ## export stránky do dočasného pod názvem + pattern
+            $0 "${1}" export djvu $i "${TEMPDIR}/${TARGET}"
+            [ $? -eq 1 ] && echo "Při pokusu o export stránky $i se vyskytla chyba" && return 1
+            log info "Save page $i –> ${TARGET}"
+            anone "Opravdu chcete nahradit stránku $i za její přejmenovanou verzi?"
+            [ $? -eq 1 ] && return 1
+            $0 "${1}" delete $i
+            [ $? -eq 1 ] && echo "Při pokusu o odstranění stránky $i se vyskytla chyba" && return 1
+            log info "Remove page $i"
+            ## a její import pod novým názvem
+            $0  -f "${1}" import page $i "${TEMPDIR}/${TARGET}"
+            [ $? -eq 1 ] && echo "Při pokusu o odstranění stránky $i se vyskytla chyba" && return 1
+            log info "Page ${TARGET} –> $i"
+        done
+    fi
+
+    return $?
+}
+
 # ### <span id="replacekey">replacekey()</span> ([top](#FUNCTIONS))
 # Nahrazuje v dočasném souboru metadatové klíče
 replacekey() {
@@ -6269,6 +6356,22 @@ SUBKEY
   stejně jako v případě DjVu svazku s jednou stránkou.
 """
     ;;
+    keywords-rename) echo """
+  AKCE [1mrename[0m
+
+  Přejmenování stránek v DjVu souboru.
+
+  [1m${0##*/}[0m [option] <DjVu> rename [RANGE] PATTERN
+
+Příklad:
+
+  [1m${0##*/}[0m [option] <DjVu> rename 1,3-8 Stránka o něčem novém
+
+  Výsledkem akce bude, že stránky vymezené rozsahem budou přejmenovány, a
+  v případě že jich bude více také přečíslovány dle uvedeného vzoru PATTERN
+"""
+    help range
+    ;;
     keywords-rotate) echo """
   AKCE [1mrotate[0m
 
@@ -6295,7 +6398,7 @@ Pozor! Je-li uvedeno pouze jedno číslo, je aplikováno zároveň jako nastaven
 """
     help range
     ;;
-		keywords-set) echo """
+    keywords-set) echo """
   AKCE [1mset[0m
 
   Akce je určena pro nastavení metadat a dalších elementů v DjVu souboru
@@ -7624,7 +7727,38 @@ case ${FILETYPE} in
                         fi
                         return 0
                     ;;
-                    page*) echo "Importuji do svazku DjVu stránku"
+                    page*)
+                        #/ Importovat lze jednu stránku i soubor
+                        #/ Importuje se na určitou pozici
+                        local TEMP="${CHARSTRING#page+([[:blank:]])}"
+                        local RANGE=$(isrange "${TEMP}")
+                        case "${RANGE}" in
+                            +([[:digit:]]))
+                                local DJVUFILE=$(${REALPATH} -m -P "${TEMP#${RANGE}+([[:blank:]])}")
+                            ;;
+                            *) if [ -n "${RANGE}" ] ; then
+                                    echo "Při importu nelze použít rozsah." >> /dev/stderr
+                                    return 1
+                                else
+                                    local DJVUFILE=$(${REALPATH} -m -P "${TEMP}")
+                                fi
+                            ;;
+                        esac
+                        if [ -f "${DJVUFILE}" ] ; then
+                            if [ -n "${RANGE}" ] ; then
+                                anone "Opravdu vložit soubor ${DJVUFILE} na pozici ${RANGE}?"
+                                [ $? -eq 1 ] && return 1
+                                ${DJVM} -i "${FILE}" "${DJVUFILE}" "${RANGE}"
+                            else
+                                anone "Opravdu připojit soubor ${DJVUFILE}?"
+                                [ $? -eq 1 ] && return 1
+                                ${DJVM} -i "${FILE}" "${DJVUFILE}"
+                            fi
+                        else
+                            echo "Neplatná cesta k souboru –> ${DJVUFILE}" >> /dev/stderr
+                            return 1
+                        fi
+                        return $?
                     ;;
                     *) help keyword-${CHARSTRING%% *}
                     #djvuimport "${FILE}" "${CHARSTRING}"
@@ -7633,18 +7767,22 @@ case ${FILETYPE} in
                 return 33
             ;;
             info) djvuinfo "${FILE}" "${CHARSTRING}"
-                return 0
+                return $?
             ;;
-            rename) log info "main() Rename pages in ${FILE} by TEMPLATE –> ${CHARSTRING}"
-                #/ TODO!
-                return 1
+            rename) #/ Přejmenovávám stránky
+                djvurename "${FILE}" "${CHARSTRING}"
+                return $?
+            ;;
+            rotate) #/ Otáčím stránku
+                djvurotate "${FILE}" "${CHARSTRING}"
+                return $?
             ;;
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
-                return 0
+                return $?
             ;;
             view) log info "View –> ${FILE}"
                 (${DJVIEW} "${FILE}" &)
-                return 0
+                return $?
             ;;
         esac
     ;;
