@@ -2488,6 +2488,8 @@ fromdjvu() {
                                     esac
                                 done
                                 ;;
+                                djvu) log info "Pořadové číslo 0 má vždy soubor sdílených poznámek, který nelze vyexportovat jako DjVu stránku"
+                                ;;
                                 dsed-*) local EXPORT="output-ant"
                                     local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}.dsed")
                                     if [ -f "${TARGET}" ] ; then
@@ -2529,13 +2531,18 @@ fromdjvu() {
                                     esac
                                 done
                             ;;
-                            djvu) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
+                            djvu)
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TARGETSAMPLE}")
+                                else
+                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
+                                fi
                                 if [ -f "${TARGET}" ] ; then
-                                    anone "Soubor ${TEMPORAR} již existuje. Mám ho přepsat?"
-                                    [ $? -eq 1 ]&& return 1
+                                    anone "Soubor ${TARGET} již existuje. Mám ho přepsat?"
+                                    [ $? -eq 1 ]&& continue
                                 fi
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; save-page-with '${TARGET}'"
-                                echo "Exportuji stránku Zapisuji do souboru ${TARGET}" >> /dev/stderr
+                                echo "Exportuji stránku ${PAGEORDER} do souboru ${TARGET}" >> /dev/stderr
                             ;;
                             mask|background|foreground|color|black)
                                 local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.png}")
