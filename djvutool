@@ -220,6 +220,7 @@ ACTIONS=(
     insert
     set
     unset
+    sign
     view
     )
 
@@ -2140,7 +2141,6 @@ djvurename() {
             log info "Page ${TARGET} –> $i"
         done
     fi
-
     return $?
 }
 
@@ -3593,7 +3593,7 @@ infoimg() {
                 #   všechny formáty a v má hlavičce P7. Je schopen zachytit
                 #   barvy stejně jako CMYK
                 #
-                # Rozdíly jsou především v popdpoře bitové hloubky barev:
+                # Rozdíly jsou především v podpoře bitové hloubky barev:
                 # 48-bitů podporuje pouze PPM (rgb48be)
                 # 32-bitů podporuje plain PNM a plain PAM - binární verze nikoliv!!!
                 # 24-bitová podopora je u všech formátů
@@ -4025,42 +4025,6 @@ infoitem() {
     ${EXIFTOOL} -s3 -FileType -ImageSize -Compression -AnimationFrames -FrameCount -
 }
 
-# ### <span id="infoitem">infoitem()</span> ([top](#FUNCTIONS))
-# Na vstupu je soubor $1, a případně identifikátor stránky $2
-rotateinfo() {
-    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .bin)
-    case ${2} in
-        +([[:digit:]])) #/ pořadí stránky
-            ${DJVUEXTRACT} "${1}" -page=${2} INFO=${TEMPFILE} 2>/dev/null
-        ;;
-        '') #/ globální
-            ${DJVUEXTRACT} "${1}" INFO=${TEMPFILE} 2>/dev/null
-        ;;
-        *) #/ jméno stránky
-            ${DJVUEXTRACT} "${1}" -page="${2}" INFO=${TEMPFILE} 2>/dev/null
-        ;;
-    esac
-    [ $? -eq 1 ] && return 1
-    local ROTATION=$(dd if=${TEMPFILE} bs=1 skip=9 2>/dev/null | od -A none -b)
-    case ${ROTATION} in
-        001) # 0°
-            echo "0"
-        ;;
-        005) # 270°
-            echo "3"
-        ;;
-        002) # 180°
-            echo "2"
-        ;;
-        006) # 90°
-            echo "1"
-        ;;
-        *) return 1
-        ;;
-    esac
-    return 0
-}
-
 # ### <span id="convertovergimp">convertovergimp()</span> ([top](#FUNCTIONS))
 # Bitmapový editor gimp lze rovněž využívat ke konverzi bitmapových souborů
 #
@@ -4289,42 +4253,66 @@ range() {
     esac
 }
 
-function changemeta {
-	# Funkce která modifikuje soubor pro vložení meta atributů
-	# AUTHOR
-	# TITLE
-	# SUBJECT
-	# NOTE
-	# ANNOTATION
-	# URL
-	# CREATOR
-	[ $(grep -c '^CreationDate' ${1}) -eq 0 ] && printf "CreationDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> ${1}
-	if [ $(grep -c '^Producer' ${1}) -eq 1 ] ; then
-		sed --in-place '/^Producer/,/$/d' ${1}
-		printf 'Producer "djvutool 0.1 alpha (http://www.thewoodcraft.org)"\n' >> ${1}
-	elif  [ $(grep -c '^Producer' ${1}) -eq 0 ] ; then
-		printf 'Producer "djvutool 0.1 alpha (http://www.thewoodcraft.org)"\n' >> ${1}
-	fi
-	if [ $(grep -c '^ModDate' ${1}) -eq 1 ] ; then
-		sed --in-place '/^ModDate/,/$/d' ${1}
-		printf "ModDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> ${1}
-	elif  [ "$(grep -c ^ModDate $1)" == "0" ] ; then
-		printf "ModDate \"%s\"\n" "$(date -u +%FT%T%:z)" >> ${1}
-	fi
-	printf '##' >> ${1}
-	printf '## Toto jsou nejčastěji používané atributy. Budete-li je chtít použít,' >> ${1}
-	printf '## stačí zrušit znak # na začátku řádky a doplnit do uvozovek obsah\n' >> ${1}
-	printf '## Pokud budete mít nastavenou odpovídající proměnnou, tak se některé doplní.\n' >> ${1}
-	[ $(grep -c '^Title' ${1}) -eq 0 ] && printf '#Title "%s"\t# - název zpracovávaného dokumentu\n' "${TITLE}" >> ${1}
-	[ $(grep -c '^Author' ${1}) -eq 0 ] && printf '#Author "%s"\t# - jméno autora původního dokumentu, je-li znám\n' "${AUTHOR-unknown}" >> ${1}
-	[ $(grep -c '^Subject' ${1}) -eq 0 ] && printf '#Subject "%s"\t# - stručné info o čem to je\n' "${SUBJECT}" >> ${1}
-	[ $(grep -c '^Keywords' ${1}) -eq 0 ] && printf '#Keywords " "\t# - klíčová slova, která se vztahují k dokumentu, oddělená čárkou\n' >> ${1}
-	[ $(grep -c '^note' ${1}) -eq 0 ] && printf '#note "%s"\t# - poznámka ke stránce\n' "${NOTE}" >> ${1}
-	[ $(grep -c '^annote' ${1}) -eq 0 ] && printf '#annote "%s"\t# - stručná anotace obsahu\n' "${ANNOTATION}" >> ${1}
-	[ $(grep -c '^url' ${1}) -eq 0 ] && printf '#url "%s"\t# - URL vašeho webu\n' "${URL}" >> ${1}
-	[ $(grep -c '^Trapped' ${1}) -eq 0 ] && printf '#Trapped "FALSE"\t# - indikační klíč, který oznamuje zda-li je úprava stránky tímto dokončena (TRUE), nebo ne (FALSE)\n' >> ${1}
-	[ $(grep -c '^Creator' ${1}) -eq 0 ] && printf '#Creator "%s"\t# - uvádí se jméno autora, nebo název aplikace ve které vytvořil původní dokument.\n' "${CREATOR}" >> ${1}
-	return 0
+# ###  <span id="signature">signature()</span> ([top](#FUNCTIONS))
+# Funkce nastaví do stránky tyto meta atributy
+# Producer
+# ModDate
+# HostComputer
+signature() {
+    local RANGE=$(isrange "${2}")
+    if [ ! -n "${RANGE}" ] ; then
+        # / může být seznam stránek ZA KTERÝM není nic
+        # oddělit PATTERN od seznamu
+        case "${2//+([[:blank:]])/}" in
+            '') # jenom příkaz
+                echo "Nebylo nic předáno ${2}" >> /dev/stderr
+                return 1
+                #local PAGES=($(range "0-${#LISTPAGES[@]}"))
+            ;;
+            *) # seznam stránek oddělených čárkou
+
+                mapfile -t ARRAY <<< $($0 "${1}" info list)
+                case "${ARRAY:0:1}" in
+                    0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                    *) LISTPAGES="0 none"
+                        mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                esac
+
+                local IFS_BAK=$IFS
+                local IFS=$','
+                local SEZNAM=($2)
+                local IFS=$IFS_BAK
+                for i in "${LISTPAGES[@]}" ; do
+                    if [[ "${SEZNAM[@]}" =~ "${i##+([[:digit:]])+([[:blank:]])}" ]] ; then
+                        echo "Stránka ${i}" >> /dev/stderr
+                        local TEMP="$TEMP${i%% *} "
+                    fi
+                    x=$((x + 1))
+                done
+                local PAGES=($TEMP)
+                local STRING="${2##*.djvu+([[:blank:]])}"
+            ;;
+        esac
+    else
+        local STRING="${2#*${RANGE}+([[:blank:]])}"
+        [ ! -n "${STRING}" ] && return 1
+        local PAGES=($(range "${RANGE}"))
+    fi
+    case "${STRING:0:1}" in
+        [a-Z])
+        ;;
+        *) echo "Neplatný PATTERN –> ${STRING}" >> /dev/stderr
+            return 1
+        ;;
+    esac
+    for i in ${PAGES[@]} ; do
+        $0 "${1}" set "${i}" key Producer "${STRING}, djvutool 0.1 alpha [http://www.thewoodcraft.org/djvutool]"
+        $0 "${1}" set "${1}" key ModDate "$(date -u +%FT%T%:z)"
+        $0 "${1}" set "${1}" key HostComputer "$(hostname)"
+    done
+    return $?
 }
 
 # ### <span id="setmeta">setmeta()</span> ([top](#FUNCTIONS))
@@ -4426,8 +4414,6 @@ djvuinfo() {
             esac
         ;;
         exif) ${EXIFTOOL} "${1}"
-        ;;
-        meta) $0 "${1}" export meta | awk -F'#' '{print $4,$3}' | grep -v ^\ 
         ;;
         dsed*) log dsed "djvuinfo() –> ${2#dsed+([[:blank:]])}"
             ${DJVUSED} "${1}" -e "${2#dsed+([[:blank:]])}"
@@ -4687,6 +4673,15 @@ Přehled nejpoužívanějších EXIF tagů:
    [3mModifyDate[23m - Čas zpracování do DjVu
  [3mMetadataDate[23m - Čas, kdy byla naposled aktualizována metadata
                               na stránce
+    DocumentName
+ImageDescription
+        Software
+        DateTime
+          Artist
+       Copyright
+    ImageHistory
+       MakerNote
+     UserComment
 """
     ;;
 		existed) echo """
@@ -4809,13 +4804,15 @@ AKCE
 AKCE specifické pro práci s DjVu soubory:
       edit - editace textové vrstvy DjVu souboru
     delete - odstranění stránky z DjVu svazku
-? fore, back - přesuny a import stránek v rámci DjVu svazku
-     rotate - změna rotace stránky v DjVu souboru
+fore, back - přesuny a import stránek v rámci DjVu svazku
+    rotate - změna rotace stránky v DjVu souboru
     import - import do textové vrstvy DjVu svazku (obsah, metadata, text)
+?      ocr - aplikace OCR
 ? indirect,bundle - mění typ DjVu svazku
-?    rename - přejmenování stránek v DjVu svazku dle vzorku
+    rename - přejmenování stránek v DjVu svazku dle vzorku
        set - jednorázové nastavení meta atributu
-?    unset - zrušení meta atributu
+     unset - zrušení meta atributu
+?     sign - vložení informace o poslední změně stránky
 
 AKCE které nevyžadují žádný soubor:
     coords - přepočítává koordináty .dsed souborů
@@ -4925,7 +4922,7 @@ FORMAT
       xml - na výstup bude vypsán XML obsah vybraného rozsahu stránek
      dsed - na výstup bude vypsán obsah vybraného rozsahu stránek v dsed formátu
   outline - na výstup bude vypsán obsah DjVu svazku ve formátu pro import
-     meta - na výstup budou vypsány meta atributy svazku ve formátu pro import
+     meta - meta atributy stránek, jejich rozměry a info o rotaci
 
      color - plnobarevná stránka
      black - černobílá kresba
@@ -5115,15 +5112,6 @@ SUBKEY
 1     w03.djvu
 2     Příliš žluťoučký kůň.djvu
 3     w02.djvu
-"""
-    ;;
-    info-meta) echo """
-  ACTION [1minfo[0m –> meta
-
-  [1m${0##*/}[0m [volby] <DjVu soubor> info meta
-
-  Vrací informace o velikosti stránek DjVu souboru, podle pořadí, včetně
-  informace o jejich případné rotaci.
 """
     ;;
     info-pages) echo """
@@ -6332,16 +6320,13 @@ case ${FILETYPE} in
                     deletepage "${FILE}" "${i}"
                     [ $? -eq 1 ] && echo "Page isn't in ${FILE} –> $i" >> /dev/stderr && return 1
                 done
-                return 0
             ;;
             fore|back) #/ Přesouvám
                 djvumove "${FILE}" "${CHARSTRING}"
-                return 0
             ;;
             export) #/ Exportuji stránku
                 log info "main() export from page ${CHARSTRING}"
                 fromdjvu "${FILE}" "${CHARSTRING}"
-                return 0
             ;;
             import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
                 # Před editací meta informací, je doporučeno zkontrolovat a případně 
@@ -6490,25 +6475,23 @@ case ${FILETYPE} in
                     *) help keyword-${CHARSTRING%% *}
                     ;;
                 esac
-                return 33
             ;;
             info) djvuinfo "${FILE}" "${CHARSTRING}"
-                return $?
             ;;
             rename) #/ Přejmenovávám stránky
                 djvurename "${FILE}" "${CHARSTRING}"
-                return $?
             ;;
             rotate) #/ Otáčím stránku
                 djvurotate "${FILE}" "${CHARSTRING}"
-                return $?
             ;;
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
-                return $?
+            ;;
+            sign) signature "${CHARSTRING}"
             ;;
             view) viewdjvu
             ;;
         esac
+        return $?
     ;;
     *) log info "Input bitmap file (or archive) ${FILE} in format –> ${FILETYPE}"
         case ${ACTION} in
