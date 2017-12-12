@@ -831,10 +831,10 @@ testsyntaxdsed() {
             set-txt) local TXT="yes"
             ;;
             \.) if [ -n "${ANT}" ] ; then
-                    cat ${ANTFILE} | formatdsed
+                    cat ${ANTFILE} | dsed2ant
                     unset ANT
                 elif [ -n "${TXT}" ] ; then
-                    cat ${TXTFILE} | formatdsed
+                    cat ${TXTFILE} | dsed2ant
                     unset TXT
                 fi
             ;;
@@ -851,7 +851,7 @@ testsyntaxdsed() {
     done < $1
 }
 
-# ###  <span id="formatdsed">formatdsed()</span> ([top](#FUNCTIONS))
+# ###  <span id="dsed2ant">dsed2ant()</span> ([top](#FUNCTIONS))
 # Tato funkce se stará o zpracování streamu v .dsed formátu do formátu .ant
 # Je opakem funkce testsyntaxant(). Vstup vypadá takto:
 #
@@ -872,7 +872,7 @@ testsyntaxdsed() {
 #    background #000000
 #    zoom d50
 #
-formatdsed() {
+dsed2ant() {
     sed 's/\t/\n/g ; s/(/\n(/g ; s/("/\n\t"/g ; ' | grep -v ^$ | \
     sed '/^(m[ea][tp]a[dr][ae][ta]/! s/^(/\t(/ ; /^\t($/d ; s/) ) )/) )/ ; s/\\/\\\\0/g ; s/</\n</g' | \
     while read line ; do
@@ -1598,15 +1598,15 @@ fromdjvu() {
                                 line|word|para)
                                 ;;
                                 ant)printf "# 'shared_anno.iff'\n"
-                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed
+                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | dsed2ant
                                 ;;
                                 meta) printf "# 'shared_anno.iff'\n"
                                     local META=$(${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta" | decode)
                                 echo -e "${META}"
                                 ;;
-                                note) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed | grep ^note | xargs -n1 | grep -v ^note
+                                note) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | dsed2ant | grep ^note | xargs -n1 | grep -v ^note
                                 ;;
-                                xmp) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | formatdsed | while read line
+                                xmp) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | dsed2ant | while read line
                                 do
                                     case "${line}" in
                                         xmp) local PRINT="yes" ;;
@@ -1640,16 +1640,16 @@ fromdjvu() {
                                 ${DJVUTXT} -page="${PAGEORDER}" -detail="${INTO}" "${FILE}" 
                                 ;;
                             ant) printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
-                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed
+                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | dsed2ant
                             ;;
                             meta) printf "# '${PAGENAME}' # page ${PAGEORDER} "
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
                                 local META=$(${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-meta" | decode)
                                 [ -n "${META}" ] && echo -e "${META}"
                             ;;
-                            note) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed | grep ^note | xargs -n1 | grep -v ^note
+                            note) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | dsed2ant | grep ^note | xargs -n1 | grep -v ^note
                             ;;
-                            xmp) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | formatdsed | while read line
+                            xmp) ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | dsed2ant | while read line
                                 do
                                     case "${line}" in
                                         xmp) local PRINT="yes" ;;
