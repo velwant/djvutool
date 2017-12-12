@@ -492,9 +492,9 @@ function escape_path {
   -e 's/\ /\\\ /g'
 }
 
-# ###  <span id="testsyntaxant">testsyntaxant()</span> ([top](#FUNCTIONS))
+# ###  <span id="ant2dsed">ant2dsed()</span> ([top](#FUNCTIONS))
 # Tato funkce se stará o zpracování .ant formátu do formátu .dsed
-# Je opakem funkce formatsed
+# Je opakem funkce dsed2ant
 #
 #    # 'shared_anno.iff' ; remove-ant
 #    set-ant
@@ -513,7 +513,7 @@ function escape_path {
 #    (background #000000 ) (zoom d50 ) 
 #    .
 #
-testsyntaxant() {
+ant2dsed() {
     local OK="OK –> ${line}"
     local ERR="ERR –> Chybí typ datového bloku"
     local INVALID="INVALID –> Neplatný typ datového bloku"
@@ -812,48 +812,9 @@ testsyntaxant() {
     printf "\n.\n"
 }
 
-# ### <span id="testsyntaxdsed">testsyntaxdsed()</span> ([top](#FUNCTIONS))
-# Funkce pro zpracování výstupu příkazu output-ant
-testsyntaxdsed() {
-    local ANTFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-    local TXTFILE=$(tempfile -d ${TEMPDIR} -s .txt)
-    while read -r line ; do
-        case "${line}" in
-            select\;*) # Následuje výstup příkazu output-ant
-                local ALL="yes"
-            ;;
-            select+([[:blank:]])\"*) # Následuje zpracování stránky
-                local PAGE="# ${line#select+([[:blank:]])}"
-                echo "${PAGE}"
-            ;;
-            set-ant) local ANT="yes"
-            ;;
-            set-txt) local TXT="yes"
-            ;;
-            \.) if [ -n "${ANT}" ] ; then
-                    cat ${ANTFILE} | dsed2ant
-                    unset ANT
-                elif [ -n "${TXT}" ] ; then
-                    cat ${TXTFILE} | dsed2ant
-                    unset TXT
-                fi
-            ;;
-            \#+([[:blank:]])+(-)) # echo "Konec stránky" >> /dev/stderr
-                unset PAGE
-            ;;
-            *) if [ -n "${ANT}" ] ; then
-                    echo "${line}" >> ${ANTFILE}
-                elif [ -n "${TXT}" ] ; then
-                    echo "${line}" >> ${TXTFILE}
-                fi
-            ;;
-        esac
-    done < $1
-}
-
 # ###  <span id="dsed2ant">dsed2ant()</span> ([top](#FUNCTIONS))
 # Tato funkce se stará o zpracování streamu v .dsed formátu do formátu .ant
-# Je opakem funkce testsyntaxant(). Vstup vypadá takto:
+# Je opakem funkce ant2dsed(). Vstup vypadá takto:
 #
 #    # ------------------------- 
 #    select "shared_anno.iff"
@@ -6436,7 +6397,7 @@ case ${FILETYPE} in
                             ;;
                         esac
                         local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
-                        testsyntaxant "${TEMPFILE}" > "${DSEDFILE}"
+                        ant2dsed "${TEMPFILE}" > "${DSEDFILE}"
                         if [ $? -eq 1 ] ; then
                             echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
                             exit 33
