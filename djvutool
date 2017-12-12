@@ -451,10 +451,11 @@ Pro debug lze použít pouze čísla od 1 do 9. Nastavení lze provést těmito 
 """
 }
 
+# OBSOLETE
+# Pomocná funkce, která odfiltruje při použití funkce pushd výstup
 function pushd {
     command pushd "$@" > /dev/null
 }
-
 function popd {
     command popd "$@" > /dev/null
 }
@@ -484,44 +485,11 @@ anone() {
     fi
 }
 
-function potvrdit {
-    read -r -p "${1:-Opravdu chcete akci provést? [y/N]} " response
-    case $response in
-        [yY][eE][sS]|[yY]) 
-            true
-            ;;
-        [aA][nN][oO]|[aA]) 
-            true
-            ;;
-        *)
-            false
-            ;;
-    esac
-}
-
-function printtext {
-	echo "${#1}" >> /dev/stderr
-	echo -e "${@}"
-}
-
 function escape_path {
 # Zatím nepoužitá
 	echo "escape_path $*" >> /dev/stderr
 	echo "$*" | sed \
   -e 's/\ /\\\ /g'
-}
-
-function extractmaparea {
-	if [ $1 == "(maparea" ] ; then
-		if [ $2 == "(url" ] ; then
-			echo "URL ($3 $4"
-			shift && shift && shift && shift
-		else
-			echo "NOTE $2"
-			shift && shift
-		fi
-		echo -e $@ | sed 's/ (/\n(/g' | sed 's/^/\t/' | sed 's/))/)/'
-	fi
 }
 
 # ###  <span id="testsyntaxant">testsyntaxant()</span> ([top](#FUNCTIONS))
@@ -985,560 +953,21 @@ formatdsed() {
     done  | sed 's/) )/)/ ; /^$/d '
 }
 
-# ### <span id="printmeta">printmeta()</span> ([top](#FUNCTIONS))
-# Odstraňuje z DjVu Bundle svazku stránky
-#
-# $1 - svazek
-# $2 - identifikátor, klíčové slovo 'all' nebo atribut
-printmeta() {
-    log goto "printmeta() ${1} –> ${2}"
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	case "${2}" in
-		all) log info "printmeta() All meta attributes for %s\n" "${FILE}"
-			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
-			if [ -n "${META}" ] ; then
-				echo "#"
-				echo -e "${META}" | tr '\000' '\\'
-				echo -e "\n."
-			fi
-			for i in $(seq $(lastpage ${SOURCE})) ; do
-				local PAGENAME=$(identifypage name "${SOURCE}" "${i}")
-				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
-				if [ -n "${META}" ] ; then
-					echo "#$i '${PAGENAME}'"
-					echo -e "${META}" | tr '\000' '\\'
-					echo -e "\n."
-				fi
-			done
-		;;
-		global) printf "printmeta: Global meta attributes from %s\n" "${FILE}" >> ${LOG}
-			local META=$(${DJVUSED} "${SOURCE}" -e "select; print-meta" | sed 's/\\/\\0/g')
-			if [ ! -z "${META}" ] ; then
-				echo "#"
-				echo -e "${META}" | tr '\000' '\\'
-				echo -e "\n."
-			fi
-		;;
-		+([[:digit:]])|*.djvu) printf "printmeta: Meta attributes for page %s from %s\n" "${2}" "${FILE}" >> ${LOG}
-			local PAGENAME=$(identifypage name "${SOURCE}" "${2}")
-			if [ ! -z "${PAGENAME}" ] ; then
-				local IDPAGE=$(identifypage order "${SOURCE}" "${PAGENAME}")
-				local META=$(${DJVUSED} "${SOURCE}" -e "select '${PAGENAME}'; print-meta" | sed 's/\\/\\0/g')
-				if [ ! -z "${META}" ] ; then
-					echo "#${IDPAGE} '${PAGENAME}'"
-					echo -e "${META}" | tr '\000' '\\'
-					echo -e "\n."
-				fi
-			fi
-		;;
-		*) printmeta "${SOURCE}" all
-		;;
-	esac
-}
-
 # ### <span id="printoutline">printoutline()</span> ([top](#FUNCTIONS))
 # V původní podobě byl výsledek zapsán do souboru s příponou .outline
-# V tomto příoa
+# Využívá se při akcích export a edit
+# $1 - DjVu file
+# $2 - cíl
 printoutline() {
     log goto "printoutline() $1 –> $2"
-	# $1 - DjVu file
-	# $2 - cíl
     bookmarktooutline "${1}"
     return 0
     # bookmarktooutline "${1}" | awk '{print i++ "\t|" $0}'
 }
 
-function djvuimport {
-	# Import nevkládá nové stránky, ale importuje soubory textové vrstvy
-	# $1 - DjVu file
-	# $2 - soubor identifikátor + cílový adresář
-	#echo "1- ${1}" >> /dev/stderr
-	#echo "2- ${2}" >> /dev/stderr
-	#echo "3- ${3}" >> /dev/stderr
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	echo "djvuimport: SOURCE ${SOURCE}" >> /dev/stderr
-	local FILE="${SOURCE##*/}"
-	if [ -z "${2}" ] ; then
-		local FROM=$(${REALPATH} -m -P "$(pwd)")
-		echo "djvuimport: FROM ${FROM}" >> /dev/stderr
-	else
-		local FROM=$(${REALPATH} -m -P "${2}")
-		echo "djvuimport: FROM ${FROM}" >> /dev/stderr
-	fi
-
-	if [ -d "${FROM}" ] ; then
-		local LIST=$(djvuinfo "${SOURCE}" list)
-		local IFS_BAK=$IFS
-		local IFS=$'\n'
-		for i in  ${LIST} ; do
-
-			local PAGENAME="${i##*:}"
-			log info "djvuimport() Hledám soubory pro import dat do stránky ${PAGENAME} v souboru ${FILE}"
-			if [ -f "${FROM}/${PAGENAME/.djvu/.dsed}" ] ; then
-				importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}/${PAGENAME/.djvu/.dsed}"
-			fi
-			if [ -f "${FROM}/${PAGENAME/.djvu/.xml}" ] ; then
-				importxmlpage "${SOURCE}" "${FROM}/${PAGENAME/.djvu/.xml}"
-			fi
-			if [ -f "${FROM}/${PAGENAME/.djvu/.meta}" ] ; then
-				importmetapage "${SOURCE}" "${PAGENAME}" "${FROM}/${PAGENAME/.djvu/.meta}"
-			fi
-
-		done
-		local IFS=$IFS_BAK
-		log info "djvuimport() Importuji meta atributy a obsah pro celý soubor ${FILE}"
-		# Import obsahu souboru..
-		if [ -f "${FROM}/${FILE/.djvu/.meta}" ] ; then
-			importmetaall "${SOURCE}" "${FROM}/${FILE/.djvu/.meta}"
-		fi
-		if [ -f "${FROM}/${FILE/.djvu/.outline}" ] ; then
-			importoutline "${SOURCE}" "${FROM}/${FILE/.djvu/.outline}"
-		fi
-	elif [ -f "${FROM}" ] ; then
-		case "$(head -c 1 ${FROM})" in
-			\<) echo "import: import XML file" >> /dev/stderr
-				XML="yes"
-				importxmlpage "${SOURCE}" "${FROM}"
-				return 0
-			;;
-			s) echo "import: import file in dsed format" >> /dev/stderr
-				DSED="yes"
-				importdsedall "${SOURCE}" "${FROM}"
-				return 0
-			;;
-			\") echo "import: import outline file" >> /dev/stderr
-				local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-				outlinetodsed "${FROM}" | encode > "${TEMPFILE}"
-				importoutline "${SOURCE}" "${TEMPFILE}"
-				return 0
-			;;
-			\() echo "import: import outline in dsed format" >> /dev/stderr
-				"${SOURCE}" 
-				importoutline "${SOURCE}" "${FROM}"
-				return 0
-			;;
-			\#) echo "import: import meta atribute file" >> /dev/stderr
-				META="yes"
-				importmeta "${SOURCE}" "${FROM}"
-				return 0
-			;;
-			[[:alpha:]]) echo "import: meta TODO atribute file for one page - not implemented" >> /dev/stderr
-				echo "může jít i o seznam stránek k importu do souboru.." >> /dev/stderr
-				local FROMFILE="${FROM##*/}"
-				#echo  "${FILE%.*} ${FROMFILE%.*}" >> /dev/stderr
-				log info "djvuimport() Importuji data do stránky ${FROMFILE}"
-				local LIST=$(djvuinfo "${SOURCE}" list)
-				local IFS_BAK=$IFS
-				local IFS=$'\n'
-				for i in  ${LIST} ; do
-					local PAGENAME="${i##*:}"
-					if [ "${PAGENAME%.*}" == "${FROMFILE%.*}" ] ; then
-						echo "Importuji data ze souboru ${FROM} do stránky ${PAGENAME} v souboru ${FILE}" >> /dev/stderr
-						case "${FROMFILE}" in
-							*.dsed) DSED="yes"
-								importdsedpage "${SOURCE}" "${PAGENAME}" "${FROM}"
-							;;
-							*.meta) META="yes"
-								importmeta "${SOURCE}" "${PAGENAME}" "${FROM}"
-							;;
-							*.xml) XML="yes"
-								importxmlpage "${SOURCE}" "${FROM}"
-							;;
-							*) echo "import: Při importu textových dat do stránky jsou akceptovány pouze soubory s příponou .dsed, .xml a .meta" >> /dev/stderr
-							;;
-						esac
-					fi
-				done
-				local IFS=$IFS_BAK
-				return 0
-			;;
-			*) echo "import: FAIL - unknown file" >> /dev/stderr
-				exit 1
-			;;
-		esac
-	else
-		echo "import: Parametrem akce import může být buď adresář se soubory, nebo soubor s daty k importu" >> /dev/stderr
-		exit 1
-	fi
-}
-
-function djvuexport {
-	# $1 - DjVu file
-	# $2 - identifikátor + cílový adresář
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-
-	# Parsing $2
-	local CHARSTRING="$2"
-	if [ "${CHARSTRING}" == "" ] ; then
-		help keywords-export
-		exit 0
-	fi
-
-#	echo "${PAGE} ${DSED} ${XML} ${IMG} ${META} ${FORCE} option" >> /dev/stderr
-	export EXPORTVALUE=0
-	[ "${PAGE}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 1 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
-	[ "${IMG}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 2 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
-	[ "${XML}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 4 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
-	[ "${META}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 8 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
-	[ "${DSED}" != "no" ] && export EXPORTVALUE=$(( $EXPORTVALUE + 16 )) && echo "actual $EXPORTVALUE" >> /dev/stderr
-#	if [ "${PAGE}" == "no" ] && [ "${DSED}" == "no" ] && [ "${XML}" == "no" ] && [ "${IMG}" == "no" ] && [ "${META}" == "no" ] ; then
-
-	if  [ "${FORCE}" == "skip" ] ; then
-		# Interaktivní mód
-		printf "export: For export from DjVu bundle we must use any option\n" >> /dev/stderr
-		# Co mám vyexportovat ze svazku?
-		# 1) pouze stránky ve formátu DjVu
-		# 2) pouze náhledy stránek ve formátu PNG
-		# 3) 0+P
-		# 4) pouze xml soubory textové vrstvy
-		# 5) X+P
-		# 6) X+O
-		# 7) X+O+P
-		# 8) pouze metainformace
-		# 9) M+P
-		# 10) M+O
-		# 11) M+O+P
-		# 12) M+X
-		# 13) M+X+P
-		# 14) M+X+O
-		# 15) M+X+O+P
-		# 16) pouze dsed soubory
-		# 17) D+P
-		# 18) D+O
-		# 19) D+O+P
-		# 20) D+X
-		# 21) D+X+P
-		# 22) D+X+O
-		# 23) D+X+O+P
-		# 24) D+M
-		# 25) D+M+P
-		# 26) D+M+O
-		# 27) D+M+O+P
-		# 28) D+M+X
-		# 29) D+M+X+P
-		# 30) D+M+X+O
-		# 31) D+M+X+O+P
-		printf "Export of DjVu pages from bundle?\n" >> /dev/stderr
-		potvrdit && export EXPORTVALUE=$(( $EXPORTVALUE + 1 ))
-		printf "Export pages as PNG too?\n" >> /dev/stderr
-		potvrdit && export EXPORTVALUE=$(( $EXPORTVALUE + 2 ))
-		printf "Export text layer as XML file?\n" >> /dev/stderr
-		potvrdit && export EXPORTVALUE=$(( $EXPORTVALUE + 4 ))
-		printf "Export meta and outline from bundle?\n" >> /dev/stderr
-		potvrdit && export EXPORTVALUE=$(( $EXPORTVALUE + 8 ))
-		printf "Export text from bundle in DSED format?\n" >> /dev/stderr
-		potvrdit && export EXPORTVALUE=$(( $EXPORTVALUE + 16 ))
-#		echo "Budu zpracovávat $EXPORTVALUE"
-	fi
-
-	if [ $EXPORTVALUE == 0 ] ; then
-		printf "export: Options are necessary for specify of content for export from DjVu bundle.\n" >> /dev/stderr
-		return 1
-	fi
-
-	local CHARCOUNT=$((${#CHARSTRING} + 1))
-	local CHARPOS=0
-	local STRPOS=0
-	while [ "${CHARCOUNT}" -gt "0" ] ; do
-		case "${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}" in
-			*.[dD][jJ][vV][uU]) local PAGENAME="${CHARSTRING:0:$((${CHARPOS} - ${STRPOS}))}"
-				local STRPOS="${CHARPOS}"
-				local CHARSTRING="${CHARSTRING#${PAGENAME}}"
-				local CHARCOUNT=$((${#CHARSTRING} + 1))
-			;;
-		esac
-		local CHARPOS=$((CHARPOS + 1))
-		local CHARCOUNT=$((CHARCOUNT - 1))
-	done
-
-	if [  -z "${CHARSTRING}" ] ; then
-		if [ -z "${PAGENAME}" ] ; then
-			log info "djvuexport() Export all pages from ${FILE} into aktual directory - do set TARGETDIR"
-			local TARGETDIR=$(targetdir $(pwd))
-			exportdjvuall "${SOURCE}" "${TARGETDIR}"
-			return 0
-		else
-			log info "djvuexport() Export page identificated by ${PAGENAME} from ${FILE} into aktual directory - do set TARGETDIR"
-			local IDPAGE=$(identifypage order "${SOURCE}" "${PAGENAME}")
-			if [ -z "${IDPAGE}" ] ; then
-				case "${PAGENAME%%\ *}" in
-					meta) printmeta "${SOURCE}" "${PAGENAME#* }"
-						return 0
-					;;
-					*) echo "export: In ${FILE} is not any page identificated by ${PAGENAME}"  >> /dev/stderr &&  exit 1
-					;;
-				esac
-			else
-				local NAMEPAGE=$(identifypage name "${SOURCE}" "${PAGENAME}")
-				local TARGETDIR=$(targetdir $(pwd))
-			fi
-		fi
-	else
-		if [ -z "${PAGENAME}" ] ; then
-			local TEMP=${CHARSTRING##+([[:blank:]])}
-			local IDPAGE=${TEMP%%+([[:blank:]])*}
-			local CHARSTRING=${TEMP#${IDPAGE}}
-			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
-			# Tady může být nějaký jiný parametr, než pořadové číslo, a také TARGETDIR může být prázdný.
-			case "${IDPAGE}" in
-				all) if [ -z "${TARGETDIR}" ] ; then
-						log info "djvuexport() Export all pages from ${FILE} into actual directory - do set TARGETDIR"
-						local TARGETDIR=$(targetdir $(pwd))
-						exportdjvuall "${SOURCE}" "${TARGETDIR}"
-						return 0
-					else
-						log info "djvuexport() Export all pages from ${FILE} into ${TARGETDIR}"
-						local TARGETDIR=$(targetdir "${TARGETDIR}")
-						exportdjvuall "${SOURCE}" "${TARGETDIR}"
-						return 0
-					fi
-				;;
-				meta) printmeta "${SOURCE}" "${TARGETDIR}"
-					return 0
-				;;
-				outline) bookmarktooutline "${SOURCE}"
-					return 0
-				;;
-				*) log info "djvuexport() Export page identificated by order -${IDPAGE}- from ${FILE} into -${TARGETDIR}-"
-					local NAMEPAGE=$(identifypage name "${SOURCE}" "${IDPAGE}")
-					if [ -z "${NAMEPAGE}" ] ; then
-						# djvutool bundle.djvu export
-						if [ -e "${IDPAGE}" ] ; then
-							if [ -d "${IDPAGE}" ] ; then
-								djvuexport "${SOURCE}" "all ${IDPAGE}"
-							else
-								echo "export: In ${FILE} is not any page on position ${IDPAGE}"  >> /dev/stderr &&  exit 1
-							fi
-						else
-							djvuexport "${SOURCE}" "all ${IDPAGE}"
-						fi
-					else
-						local TARGETDIR=$(targetdir "${TARGETDIR}")
-					fi
-				;;
-			esac
-		else
-			local NAMEPAGE=${PAGENAME##+([[:blank:]])}
-			local TARGETDIR=${CHARSTRING##+([[:blank:]])}
-			log info "djvuexport() Export page identificated by name -${NAMEPAGE}- from ${FILE} into -${TARGETDIR}-"
-			local IDPAGE=$(identifypage order "${SOURCE}" "${NAMEPAGE}")
-			[ -z "${IDPAGE}" ] && echo "export: In ${FILE} is not any page with name ${NAMEPAGE}" >> /dev/stderr &&  exit 1
-			local TARGETDIR=$(targetdir "${TARGETDIR}")
-		fi
-	fi
-
-#	echo "export: SOURCE ${SOURCE}">> /dev/stderr
-#	echo "export: FILE ${FILE}">> /dev/stderr
-#	echo "export: IDPAGE ${ODPAGE}">> /dev/stderr
-#	echo "export: NAMEPAGE ${NAMEPAGE}">> /dev/stderr
-#	echo "export: TARGETDIR ${TARGETDIR}">> /dev/stderr
-#	echo "export: FORCE ${FORCE}">> /dev/stderr
-
-	exportdjvupage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
-	exportdsedpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
-	#echo "export: For export text content from DjVu page in dsed format we must use option -d" >> /dev/stderr
-	exportxmlpage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
-	#echo "export: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
-	exportpage2img "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
-	#echo "export: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
-	exportmetapage "${SOURCE}" "${NAMEPAGE}" "${TARGETDIR}"
-	# echo "export: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
-}
-
-function exportdjvuall {
-	# $1 - DjVu file - full path
-	# $2 - targetdir - full path
-	echo "$EXPORTVALUE" >> /dev/stderr
-	local EXPORTDJVU="1|3|5|9|11|13|15|17|19|21|23|25|27|29|31"
-	local EXPORTIMG="2|3|6|7|10|11|14|15|18|19|22|23|26|27|30|31"
-	local EXPORTXML="4|5|6|7|12|13|14|15|20|21|22|23|28|29|30|31"
-	local EXPORTMETA="8|9|10|11|12|13|14|15|24|25|26|27|28|29|30|31"
-	local EXPORTDSED="16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31"
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	[ "${PAGE}" != "no" ] || echo "exportdjvuall: For export pages in DjVu format we must use option -p" >> /dev/stderr
-	[ "${DSED}" != "no" ] || echo "exportdjvuall: For export hidden text layer of pages from DjVu bundle in dsed format we must use option -d" >> /dev/stderr
-	[ "${XML}" != "no" ] || echo "exportdjvuall: For export hidden text layer of pages from DjVu bundle in XML format we must use option -x" >> /dev/stderr
-	[ "${IMG}" != "no" ] || echo "exportdjvuall: For export image of page from DjVu bundle we must use option -i" >> /dev/stderr
-	[ "${META}" != "no" ] || echo "exportdjvuall: For export meta attributes from pages DjVu bundle in we must use option -m" >> /dev/stderr
-	local PAGES=$(lastpage "${SOURCE}")
-	local NUMPAGE=1
-	while [ ${PAGES} -gt "0" ] ; do
-		local NAMEPAGE=$(identifypage name "${SOURCE}" "${NUMPAGE}")
-		log info "exportdjvuall() Exportuji stránku ${NAMEPAGE}"
-
-		[[ $EXPORTDJVU =~ $EXPORTVALUE ]] && exportdjvupage "${1}" "${NAMEPAGE}" "${2}"
-		[[ $EXPORTIMG =~ $EXPORTVALUE ]] && exportpage2img "${1}" "${NAMEPAGE}" "${2}"
-		[[ $EXPORTXML =~ $EXPORTVALUE ]] && exportxmlpage "${1}" "${NAMEPAGE}" "${2}"
-		[[ $EXPORTMETA =~ $EXPORTVALUE ]] && exportmetapage "${1}" "${NAMEPAGE}" "${2}"
-		[[ $EXPORTDSED =~ $EXPORTVALUE ]] && exportdsedpage "${1}" "${NAMEPAGE}" "${2}"
-
-		local NUMPAGE=$((NUMPAGE + 1))
-		local PAGES=$((PAGES - 1))
-	done
-	[[ $EXPORTXML =~ $EXPORTVALUE ]] && exportxmlbundle "${1}" "${2}"
-	[[ $EXPORTMETA =~ $EXPORTVALUE ]] && exportmetabundle "${1}" "${2}"
-	[[ $EXPORTMETA =~ $EXPORTVALUE ]] && bookmarktooutline "${1}" > "${2}/${FILE/.djvu/.outline}"
-	[[ $EXPORTDSED =~ $EXPORTVALUE ]] && exportdsedbundle "${1}" "${2}"
-}
-
-function exportdsedbundle {
-	# $1 - DjVu file - full path
-	# $2 - targetdir - full path
-	local FILE="${1##*/}"
-	pushd "${2}"
-	case "${DSED}" in
-		yes|all) local EXPORT="output-all"
-		;;
-		txt) local EXPORT="output-txt"
-		;;
-		ant) local EXPORT="output-ant"
-		;;
-		no) return 0
-		;;
-	esac
-	if [ "${DSED}" != "no" ] ; then
-		local TARGET="${FILE/.djvu/.dsed}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUSED} "${1}" -e "${EXPORT}" > "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportdsedbundle() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "exportdsedbundle: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUSED} "${1}" -e "${EXPORT}" > "${TARGET}"
-			fi
-		else
-			${DJVUSED} "${1}" -e "${EXPORT}" > "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-function exportxmlbundle {
-	# $1 - DjVu file - full path
-	# $2 - targetdir - full path
-	local FILE="${1##*/}"
-	pushd "${2}"
-	case "${XML}" in
-		yes|all) local EXPORT="--with-text --with-anno"
-		;;
-		txt) local EXPORT="--with-text --without-anno"
-		;;
-		ant) local EXPORT="--without-text --with-anno"
-		;;
-		no) return 0
-		;;
-	esac
-	if [ "${XML}" != "no" ] ; then
-		local TARGET="${FILE/.djvu/.xml}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUTOXML} "${1}" "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportxmlbundle() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "exportxmlbundle: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUTOXML} "${1}" "${TARGET}"
-			fi
-		else
-			${DJVUTOXML} "${1}" "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-#/ OBSOLETE
-#/ nahrazeno funkcí fromdjvu
-function exportpage2img {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - targetdir - full path
-	pushd "${3}"
-	case "${IMG}" in
-		yes) local EXPORT="-mode=color"
-		;;
-		color|black|foreground|background|mask) local EXPORT="-mode=${IMG}"
-		;;
-		no) return 0
-		;;
-	esac
-	echo "$EXPORT" >> /dev/stderr
-	echo "$PNMTOPNG" >> /dev/stderr
-	if [ "${IMG}" != "no" ] ; then
-		local PAGE=$(identifypage order "${1}" "${2}")
-		local TARGET="${2/.djvu/.png}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportpage2img() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "exportpage2img: Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
-			fi
-		else
-			echo "${DDJVU} -format=pnm ${EXPORT} -page=${PAGE%%(*} ${1} | ${PNMTOPNG} > ${TARGET}"
-			${DDJVU} -format=pnm "${EXPORT}" -page="${PAGE%%(*}" "${1}" | ${PNMTOPNG} > "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-function exportxmlpage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - targetdir - full path
-	pushd "${3}"
-	case "${XML}" in
-		yes|all) local EXPORT="--with-text --with-anno"
-		;;
-		txt) local EXPORT="--with-text --without-anno"
-		;;
-		ant) local EXPORT="--without-text --with-anno"
-		;;
-		no) return 0
-		;;
-	esac
-	if [ "${XML}" != "no" ] ; then
-		local PAGE=$(identifypage order "${1}" "${2}")
-		local TARGET="${2/.djvu/.xml}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${1}" "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportxmlpage() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${1}" "${TARGET}"
-			fi
-		else
-			${DJVUTOXML} --page "${PAGE}" ${EXPORT} "${1}" "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-function importmetapage {
-	# $1 - soubor se stránkou
-	# $2 - identifikátor stránky
-	# $3 - soubor s meta atributy
-	echo "importmetapage: Importuji meta atributy do jedné stránky" >> /dev/stderr
-	${DJVUSED} "${1}" -e "select '${2}'; set-meta ${3}; save"
-}
-
-function importmetaall {
-	# $1 - soubor se stránkou
-	# $2 - soubor s meta atributy
-	echo "importmetaall: Importuji meta atributy pro celý svazek" >> /dev/stderr
-	${DJVUSED} "${1}" -e "select; set-meta ${2}; save"
-}
-
 # ### <span id="writefile">writefile()</span> ([top](#FUNCTIONS))
 # Funkce průběžně konvertuje stream unicode znaků do jejich číselné podoby
-# Velmi důležitá funkce!!!
+# Velmi důležitá funkce!!! Využívá se při akcích outline, import a edit.
 writefile() {
     if [ -t 0 ]; then
         log info "writefile() Empty stdin"
@@ -1726,109 +1155,7 @@ outlinetodsed() {
     return 0
 }
 
-
-function importdsedall {
-	case "${DSED}" in
-		# Vytvořit dočasný soubor s následující hlavičkou...
-		# -e "select '${2}'; remove-ant; remove-txt"
-		# -------------------------
-		# time awk '/^set-ant$/{flag=1;next} ; /^.$/{flag=0}; flag' vysledek.dsed 
-		all|yes) # nejprve ant, pak text..
-		${DJVUSED} "${1}" -f "${2}" -s
-		;;
-		no)
-		;;
-	esac
-}
-
-function importdsedpage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - source DSED file - full path
-	case "${DSED}" in
-		# Vytvořit dočasný soubor s následující hlavičkou...
-		# -e "select '${2}'; remove-ant; remove-txt"
-		# -------------------------
-		# time awk '/^set-ant$/{flag=1;next} ; /^.$/{flag=0}; flag' vysledek.dsed 
-		all|yes) awk '/^set-ant$/{flag=1;next} ; /^.$/{flag=0}; flag' "${3}" > ${TEMPDIR}/${2}.ant
-			${DJVUSED} "${1}" -e "select '${2}'; set-ant ${TEMPDIR}/${2}.ant ; save"
-			awk '/^set-txt$/{flag=1;next} ; /^.$/{flag=0}; flag' "${3}" > ${TEMPDIR}/${2}.txt
-			${DJVUSED} "${1}" -e "select '${2}'; set-txt ${TEMPDIR}/${2}.txt ; save"
-		;;
-		ant) awk '/^set-ant$/{flag=1;next} ; /^.$/{flag=0}; flag' "${3}" > ${TEMPDIR}/${2}.ant
-			${DJVUSED} "${1}" -e "select '${2}'; set-ant ${TEMPDIR}/${2}.ant ; save"
-		;;
-		txt) awk '/^set-txt$/{flag=1;next} ; /^.$/{flag=0}; flag' "${3}" > ${TEMPDIR}/${2}.txt
-			${DJVUSED} "${1}" -e "select '${2}'; set-txt ${TEMPDIR}/${2}.txt ; save"
-		;;
-		no) echo "K importu textových dat ze souboru ${3} se přistoupí pouze bude-li uvedena volba -d" >> /dev/stderr
-		;;
-	esac
-}
-
-function importmeta {
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
-	local FROM=$(${REALPATH} -m -P "${2}")
-	local FROMFILE="${FROM##*/}"
-	grep '^#' "${FROM}" | while read line ; do
-		echo "$line" >> /dev/stderr
-		local NAMEPAGE=( $line )
-		case "${#NAMEPAGE[@]}" in
-			2) local PAGENAME=$(identifypage name "${SOURCE}" "${NAMEPAGE[1]//\'/}")
-				if [ -z "${PAGENAME}" ] ; then
-					echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[1]} not valid" >> /dev/stderr
-				else
-					awk "/.\ '${PAGENAME}'$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
-					${DJVUSED} "${1}" -e "select ${PAGENAME}; set-meta ${TEMPFILE}" -s
-				fi
-			;;
-			1) if [ "${NAMEPAGE[0]}" == "#" ] ; then
-					awk "/^#$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
-					${DJVUSED} "${1}" -e "select ; set-meta ${TEMPFILE}" -s
-				else
-					local PAGENAME=$(identifypage name "${SOURCE}" "${NAMEPAGE[0]:1}")
-					if [ -z "${PAGENAME}" ] ; then
-						echo "importmeta: FAIL - for ${FILE} is identificator ${NAMEPAGE[0]:1} not valid" >> /dev/stderr
-					else
-						awk "/^#${NAMEPAGE[0]:1}$/{flag=1;next} ; /^.$/{flag=0}; flag" "${FROM}" > ${TEMPFILE}
-						${DJVUSED} "${1}" -e "select ${PAGENAME}; set-meta ${TEMPFILE}" -s
-					fi
-				fi
-			;;
-		esac
-	done
-}
-
-function importmeta1 {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - source DSED file - full path
-	if [ -f "${2}" ] ; then
-		if [ "${3}" ] ; then
-			local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .meta)
-			# Zpracování gobálních metadat
-			awk '/^# select '${i}'$/{flag=1;next} ; /^.$/{flag=0}; flag' "${2}" > ${TEMPFILE}
-			${DJVUSED} "${1}" -e "select ${3}; set-meta ${TEMPFILE}" -s
-		else
-			for i in $(seq $(lastpage ${1})) ; do
-				awk '/^# select '${i}'$/{flag=1;next} ; /^.$/{flag=0}; flag' "${2}" > ${TEMPFILE}
-				if [ "${TEMPFILE}" ] ; then
-					${DJVUSED} "${1}" -e "select ${i}; set-meta ${TEMPFILE}" -s
-				fi
-			done
-		fi
-	else
-		importmeta "${1}" "${3}" 
-	fi
-}
-
-function importoutline {
-	# Import outline in dsed format
-	${DJVUSED}  "${1}" -e "set-outline ${2}" -s
-}
-
+#/ OBSOLETE
 function importxmlpage {
 	# $1 - DjVu file - full path
 	# $2 - source XML file - full path
@@ -1839,114 +1166,6 @@ function importxmlpage {
 		*) ${DJVUXMLPARSER} -o "${1}" "${2}"
 		;;
 	esac
-}
-
-# TODO - meta - Nepoužitá funkce
-function exportmetabundle {
-	# $1 - DjVu file - full path
-	# $2 - targetdir - full path
-	local FILE="${1##*/}"
-	pushd "${2}"
-	if [ "${META}" != "no" ] ; then
-		local TARGET="${FILE/.djvu/.meta}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUSED} "${1}" -e "print-meta" > "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportmetabundle() Soubor ${TARGET} již v adresáři ${2} existuje."
-			else
-				echo "Soubor ${TARGET} již v adresáři ${2} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUSED} "${1}" -e "print-meta" > "${TARGET}"
-			fi
-		else
-			${DJVUSED} "${1}" -e "print-meta" > "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-# OBSOLETE
-# TODO - meta - Nepoužitá funkce
-function exportmetapage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - targetdir - full path
-	pushd "${3}"
-	if [ "${META}" != "no" ] ; then
-		local TARGET="${2/.djvu/.meta}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUSED} "${1}" -e "select '${2}'; print-meta" > "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportmetapage() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUSED} "${1}" -e "select '${2}'; print-meta" > "${TARGET}"
-			fi
-		else
-			${DJVUSED} "${1}" -e "select '${2}'; print-meta" > "${TARGET}"
-		fi
-	fi
-	popd
-}
-
-function exportdsedpage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - targetdir - full path into dir for file
-	pushd "${3}"
-	case "${DSED}" in
-		yes|all) local EXPORT="output-all"
-		;;
-		txt) local EXPORT="output-txt"
-		;;
-		ant) local EXPORT="output-ant"
-		;;
-		no) return 0
-		;;
-	esac
-	if [ "${DSED}" != "no" ] ; then
-		local TARGET="${2/.djvu/.dsed}"
-		if [ -f "${TARGET}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUSED} "${1}" -e "select '${2}'; ${EXPORT}" > "${TARGET}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportdsedpage() Soubor ${TARGET} již v adresáři ${3} existuje."
-			else
-				echo "Soubor ${TARGET} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUSED} "${1}" -e "select '${2}'; ${EXPORT}" > "${TARGET}" 2>${LOG}
-			fi
-		else
-#			echo "select '${2}'; ${EXPORT} > ${TARGET}" >> /dev/stderr
-#			echo $(pwd) >> /dev/stderr
-			${DJVUSED} "${1}" -e "select '${2}'; ${EXPORT}" > "${TARGET}" 2>${LOG}
-			return $?
-		fi
-	fi
-	popd
-}
-
-function exportdjvupage {
-	# $1 - DjVu file - full path
-	# $2 - identificator - page name
-	# $3 - targetdir - full path
-	log info "exportdjvupage() -${1}- -${2}- ${3}"
-	pushd "${3}"
-	if [ "${PAGE}" == "yes" ] ; then
-		if [ -f "${2}" ] ; then
-			if [ "${FORCE}" == "yes" ] ; then
-				${DJVUSED} -e "select '${2}'; save-page-with '${2}'" "${1}"
-			elif [ "${FORCE}" == "skip" ] ; then
-				log warn "exportdjvupage() Soubor ${2} již v adresáři ${3} existuje."
-			else
-				echo "Soubor ${2} již v adresáři ${3} existuje.." >> /dev/stderr
-				potvrdit && ${DJVUSED} -e "select '${2}'; save-page-with '${2}'" "${1}"
-			fi
-		else
-			${DJVUSED} -e "select '${2}'; save-page-with '${2}'" "${1}"
-		fi
-	fi
-	popd
 }
 
 function getocr {
@@ -1977,28 +1196,6 @@ mimefile() {
     return 0
 }
 
-function targetdir {
-	# Function return path into existing directory
-	# $1 - path
-	if [ -z "${1}" ] ; then
-		log err "targetdir() NOT PATH"
-		exit 1
-	else
-		local TARGETDIR=$(${REALPATH} -m -P "${1}")
-		if [ -d "${TARGETDIR}" ] ; then
-			echo -n "${TARGETDIR}"
-		else
-			mkdir -p "${TARGETDIR}"
-			if [ $? -gt "0" ] ; then
-				log err "targetdir() Could not create target directory ${TARGETDIR}"
-				exit 1
-			else
-				echo -n "${TARGETDIR}"
-			fi
-		fi
-	fi
-}
-
 # ### <span id="isbundle">isbundle()</span> ([top](#FUNCTIONS))
 # Function for test type file. For DjVu bundle (0), single (1), or another (1)
 # $1 - file path
@@ -2012,76 +1209,6 @@ isbundle() {
     fi
     log info "${1} –> DjVu bundle file"
     return 0
-}
-
-function comparedjvu {
-	#  Function do test two DjVu files and return (0) if is not any page in conflict or (1)
-	# $1 - Djvu full path
-	# $2 - Djvu full path
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	local FROMPATH=$(${REALPATH} -m -P "${2}")
-	local FROM="${FROMPATH##*/}"
-	if isbundle ${SOURCE} ; then
-		${DJVM} -l "${SOURCE}" | grep PAGE\ # | awk '{print $4}' | while read x ; do
-		if isbundle ${FROMPATH} ; then
-			${DJVM} -l "${FROMPATH}" | grep PAGE\ # | awk '{print $4}' | while read y ; do
-				if [ "${x}" == "${y}" ] ; then
-					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
-					break
-				fi
-			done
-		else
-			${DJVUSED} "${FROMPATH}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $2}' | while read y ; do
-				if [ "${x}" == "${y}" ] ; then
-					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
-					break
-				fi
-			done
-		fi
-		done
-	else
-		${DJVUSED} "${SOURCE}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $2}' | while read x ; do
-		if isbundle ${FROMPATH} ; then
-			${DJVM} -l "${FROMPATH}" | grep PAGE\ # | awk '{print $4}' | while read y ; do
-				if [ "${x}" == "${y}" ] ; then
-					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
-					break
-				fi
-			done
-		else
-			${DJVUSED} "${FROMPATH}" -e dump | grep FORM:DJVU | awk -F'[{}]' '{print $2}' | while read y ; do
-				if [ "${x}" == "${y}" ] ; then
-					echo "comparedjvu: WARNING Page with name ${x} from file ${FILE} is in ${FROM} too." >> /dev/stderr
-					break
-				fi
-			done
-		fi
-		done
-	fi
-	potvrdit && return 0 || return 1
-}
-
-function splitxcf {
-	# vrátí seznam
-#	echo ${RANGE[@]} >> /dev/stderr
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-	pushd ${TEMPDIR}
-		i=0
-		${XCFINFO} ${SOURCE} | grep -v Version | cut -d ' ' -f5- | while read line
-		do i=$((i+1))
-			if [ -z ${RANGE} ] ; then
-				${XCF2PNM} ${SOURCE} -o "${line%.pnm}.pnm" "$line"
-			else
-				for x in ${RANGE[@]}
-					do if [ "$x" -eq "$i" ] ; then
-						${XCF2PNM} ${SOURCE} -o "${line%.pnm}.pnm" "$line"
-					fi
-				done
-			fi
-		done
-	popd
 }
 
 # ### <span id="istarget">istarget()</span> ([top](#FUNCTIONS))
@@ -4337,8 +3464,16 @@ exportimg() {
     return $?
 }
 
+# ### <span id="viewdjvu">viewdjvu()</span> ([top](#FUNCTIONS))
+# Funkce se volá při akci view, když si chci prohlédnout DjVu soubor
+viewdjvu() {
+     log info "View –> ${FILE}"
+    (${DJVIEW} "${FILE}" &)
+}
+
 # ### <span id="viewimg">viewimg()</span> ([top](#FUNCTIONS))
-#
+# Funkce se volá při akci view, když si chceš prohlédnout bitmapový 
+# obrázek
 viewimg() {
     log info "viewimg() open –> ${FILE}"
     case ${FILETYPE} in
@@ -5167,29 +4302,6 @@ Každá jiná hodnota parametru je ignorována."""
             return 1
         ;;
     esac
-}
-
-function xdjvumove1 {
-	# $1 - DjVu file
-	# $2 - Parametry
-	#	zdroj : identifikátor pozice
-	local SOURCE=$(${REALPATH} -m -P "${1}")
-	local FILE="${SOURCE##*/}"
-
-
-# 1, je-li ANAME, stejné jako BNAME, přesun A o jednu pozici vřed či vzad..
-#
-# 2, je-li FROM stejné jako BNAME, vyhodit dotaz: 
-#		Nahradit? nebo akci přerušit?
-# Pro MOVE=fore...
-# 3f, je-li pozice A o 1 větší než B - skončit 
-# 4f, je-li pozice A = 1 skončit 
-# 
-# Pro MOVE=back...
-# 3b, je-li pozice A o 1 menší než B - skončit
-# 4b, le-li pozice A = lastpage skončit
-#
-# Má se přesouvat kupředu
 }
 
 # ### <span id="range">range()</span> ([top](#FUNCTIONS))
@@ -6751,28 +5863,6 @@ djvuview() {
     done
 }
 
-# TODO - insert
-function todjvuclassic {
-    RANDOMKEY=$[ 8000 + $[ RANDOM % 1000 ]]
-    TEMP_DIR="${TEMPDIR}/$WINDOWID$BASHPID$RANDOMKEY"
-    mkdir $TEMP_DIR
-    TEMP_IMG="$TEMP_DIR/temp.ppm"
-    TEMP_MASK="$TEMP_DIR/mask.pbm"
-    DJVU_MASK="$TEMP_DIR/mask.djvu"
-
-    case ${1##*.} in
-        tiff|tif) KONVERT="${TIFFTOPNM}";;
-        png) KONVERT="${PNGTOPNM}";;
-        jpg) KONVERT="${JPEGTOPNM}" ;;
-    esac
-
-    $KONVERT $1 | tee $TEMP_IMG | ${PPMTOPGM} | ${PGMTOPBM} -threshold -value 0.${3-5} | ${PNMTOPLAINPNM} > $TEMP_MASK;
-    ${CJB2} -lossy -clean $TEMP_MASK $DJVU_MASK;
-    ${DJVUMAKE} ${1/.png/.djvu} Sjbz=$DJVU_MASK PPM=$TEMP_IMG;
-    getocr ${1/.png/.djvu}
-    rm -rf $TEMP_DIR
-}
-
 # Zpracování parametrů předaných při startu skriptu
 main() {
 case $# in
@@ -7437,7 +6527,6 @@ case ${FILETYPE} in
                         return $?
                     ;;
                     *) help keyword-${CHARSTRING%% *}
-                    #djvuimport "${FILE}" "${CHARSTRING}"
                     ;;
                 esac
                 return 33
@@ -7456,9 +6545,7 @@ case ${FILETYPE} in
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
                 return $?
             ;;
-            view) log info "View –> ${FILE}"
-                (${DJVIEW} "${FILE}" &)
-                return $?
+            view) viewdjvu
             ;;
         esac
     ;;
