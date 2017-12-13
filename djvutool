@@ -122,6 +122,8 @@ if ! command -v ed >/dev/null 2>&1 ; then
     echo "Musí být nainstalován editor ed" >> /dev/stderr
     exit 1
 fi
+XMLLINT=$(command -v xmllint)
+[ ! ${XMLLINT} ] && echo "Nebude fungovat import XML souborů" >> /dev/stderr
 FEH=$(command -v feh)
 [ ! ${FEH} ] && exit 18
 GEEQIE=$(command -v geeqie)
@@ -927,6 +929,110 @@ writefile() {
     fi
 }
 
+xmlimport() {
+    [ ! -n "${XMLLINT}" ] && return 1
+    log goto "$1 –> $2"
+    local RANGE=$(isrange "${2}")
+    if [ ! -n "${RANGE}" ] ; then
+        # / může být seznam stránek ZA KTERÝM není nic
+        # oddělit PATTERN od seznamu
+        case "${2//+([[:blank:]])/}" in
+            '') # jenom příkaz
+                echo "Nebylo nic předáno ${2}" >> /dev/stderr
+                return 1
+                #local PAGES=($(range "0-${#LISTPAGES[@]}"))
+            ;;
+            *) # seznam stránek oddělených čárkou
+
+                mapfile -t ARRAY <<< $($0 "${1}" info list)
+                case "${ARRAY:0:1}" in
+                    0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                    *) LISTPAGES="0 none"
+                        mapfile -O 1 -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
+                    ;;
+                esac
+
+                local IFS_BAK=$IFS
+                local IFS=$','
+                local SEZNAM=($2)
+                local IFS=$IFS_BAK
+                for i in "${LISTPAGES[@]}" ; do
+                    if [[ "${SEZNAM[@]}" =~ "${i##+([[:digit:]])+([[:blank:]])}" ]] ; then
+                        echo "Stránka ${i}" >> /dev/stderr
+                        local TEMP="$TEMP${i%% *} "
+                    fi
+                    x=$((x + 1))
+                done
+                local PAGES=($TEMP)
+                local STRING="${2##*.djvu+([[:blank:]])}"
+            ;;
+        esac
+    else
+        local STRING="${2#*${RANGE}+([[:blank:]])}"
+        [ ! -n "${STRING}" ] && return 1
+        local PAGES=($(range "${RANGE}"))
+    fi
+
+    local XMLFILE=$(${REALPATH} -m -P "${STRING}")
+    if [ -f "${XMLFILE}" ] ; then
+        local XML=$(grep -b DjVuXML "${XMLFILE}" 2>/dev/null)
+        [ ! -n "${XML}" ] && echo "Vstupní soubor není DjVuXML –> ${XML}" >> /dev/stderr && return 1
+    else
+        echo "Nebyl předán žádný DjVuXML soubor" >> /dev/stderr
+    fi
+
+    SUMPAGE=$(grep \<OBJECT "${XMLFILE}" | wc -l)
+    local CONTENTFILE=$(tempfile -d ${TEMPDIR} -s .content)
+    $0 "${1}" info list > "${CONTENTFILE}"
+    [ -z ${SUMPAGE} ] && echo "Soubor ${XMLFILE} neobsahuje žádné stránky" >> /dev/stderr && return 1
+    for i in $(range "1-${SUMPAGE}") ; do
+        local OBJECTNAME=$(xmllint --xpath 'string (//OBJECT['$i']/@usemap)' "${XMLFILE}")
+        local PAGENAME=$(grep "${OBJECTNAME}" ${CONTENTFILE})
+        if [[ "${PAGES[@]}" =~ "${PAGENAME%%+([[:blank:]])*}" ]] ; then
+            echo "Stránka ${PAGENAME} má objekt" >> /dev/stderr
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .xml)
+            ${XMLLINT} --xpath '//OBJECT['$i']' "${XMLFILE}" > "${TEMPFILE}"
+            case ${DEBUG} in
+                -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
+            esac
+            local H=$(${XMLLINT} --xpath 'string(//@height)' "${TEMPFILE}")
+            local W=$(${XMLLINT} --xpath 'string(//@width)' "${TEMPFILE}")
+            local DPI=$(${XMLLINT} --xpath 'string(//@value[1])' "${TEMPFILE}")
+            log info "${OBJECTNAME} ${H} ${W} ${DPI}"
+            ${DJVUMAKE} "${TEMPDIR}/temp.djvu" INFO=${W},${H},${DPI} 2>/dev/null
+            local NEXTFILE=$(tempfile -d ${TEMPDIR} -s .xml)
+            local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+            (
+echo '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE DjVuXML PUBLIC "-//W3C//DTD DjVuXML 1.1//EN" "pubtext/DjVuXML-s.dtd">
+<DjVuXML>
+<HEAD>file://localhost/home/want/a.djvu</HEAD>
+<BODY>
+<OBJECT data="file:///temp.djvu" type="image/x.djvu" height="'''${H}'''" width="'''${W}'''" usemap="temp.djvu" >
+<PARAM name="DPI" value="'''${DPI}'''" />
+<PARAM name="GAMMA" value="2.200000" />
+<PARAM name="PAGE" value="temp.djvu" />
+<PARAM name="background" value="#FF0000" />'''
+            ${XMLLINT} --xpath '//HIDDENTEXT' "${TEMPFILE}"
+echo '''</OBJECT>
+<MAP name="temp.djvu" >
+</MAP>
+</BODY>
+</DjVuXML>
+'''
+            ) > ${NEXTFILE}
+            ${DJVUXMLPARSER} -o "${TEMPDIR}/temp.djvu" ${NEXTFILE}
+            echo "select '${OBJECTNAME}' ; remove-txt" > ${DSEDFILE}
+            ${DJVUSED} "${TEMPDIR}/temp.djvu" -e 'select 1; output-txt' >> ${DSEDFILE}
+            anone "Objekt ${OBJECTNAME} ze souboru ${XMLFILE} nahradí v souboru ${1} text strany č. $i, chcete pokračovat?" >> /dev/stderr
+            [ $? -eq 1 ] && continue
+            ${DJVUSED} "${1}" -f ${DSEDFILE} -s
+        fi
+    done
+    return 0
+}
+
 # ### <span id="decode">decode()</span> ([top](#FUNCTIONS))
 # Funkce průběžně konvertuje číselnou podobu unicode znaků ve streamu  do UTF-8
 # Velmi důležitá funkce!!!
@@ -1259,7 +1365,7 @@ isformat() {
             ;;
         xcf|gimp)
             ;;
-        xml-*) #/ Volba pro DjVu
+        xml) #/ Volba pro DjVu
             #/ export XML vrstvy
             #/ xml-ant
             #/ xml-all
@@ -1511,7 +1617,7 @@ fromdjvu() {
 #/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
 #/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
-        djvu|ant|note|meta|mask|background|foreground|color|black|dsed-*|xmp|xml-*|\
+        djvu|ant|note|meta|mask|background|foreground|color|black|dsed-*|xmp|xml|\
         line|word|para)
             if [ -n "${RANGE}" ] ; then
                 local PAGES=($(range "${RANGE}"))
@@ -1577,13 +1683,28 @@ fromdjvu() {
                                     [ $? -eq 1 ] && return 1
                                     echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                                 ;;
+                                xml) if [ ! -n "${TARGETSAMPLE}" ] ; then
+                                        local TARGETSAMPLE="${1##*/}"
+                                    fi
+                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TARGETSAMPLE/.djvu/.xml}")
+                                    if [ -f "${TARGET}" ] ; then
+                                        anone "XML soubor ${TARGET} již existuje a může obsahovat změny. Mám ho přepsat?" >> /dev/stderr
+                                        [ $? -eq 1 ]&& return 1
+                                    fi
+                                    touch "${TARGET}"
+                                    ${DJVUTOXML} --with-text --without-anno "${1}" "${TARGET}"
+                                    [ $? -eq 1 ] && return 1
+                                    echo "XML soubor ${TARGET} do kterého byl exportován XML obsah všech stránek byl zapsán" >> /dev/stderr
+                                    return 0
+                                ;;
                             esac
                             ;;
                         esac
                     ;;
                     '') echo ""
                     ;;
-                    *) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                    *) log info "Jdu exportovat xml"
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
                             line|word|para)  printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
                                 ${DJVUTXT} -page="${PAGEORDER}" -detail="${INTO}" "${FILE}" 
@@ -1652,22 +1773,12 @@ fromdjvu() {
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
-                            xml-*) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.xml}")
-                                case ${INTO} in
-                                    xml-all) local EXPORT="--with-text --with-anno"
-                                    ;;
-                                    xml-txt) local EXPORT="--with-text --without-anno"
-                                    ;;
-                                    xml-ant) local EXPORT="--without-text --with-anno"
-                                    ;;
-                                    *) return 1
-                                    ;;
-                                esac
+                            xml)local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.xml}")
                                 if [ -f "${TARGET}" ] ; then
-                                    anone "Soubor ${PAGENAME/.djvu/.xml} již existuje a může obsahovat změny. Mám ho přepsat?"
+                                    anone "XML soubor ${PAGENAME} již existuje a může obsahovat změny. Mám ho přepsat?" >> /dev/stderr
                                     [ $? -eq 1 ]&& return 1
                                 fi
-                                ${DJVUTOXML} --page "${PAGEORDER}" ${EXPORT} "${1}" "${TARGET}"
+                                ${DJVUTOXML} --page "${PAGEORDER}" --with-text --without-anno "${1}" "${TARGET}"
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
@@ -4949,16 +5060,37 @@ SEE ALSO
 """
     help range
     ;;
-    export-outline) echo """
-Nápověda pro export obsahu
+    export-note)
+    help metadata-note
+    echo """
+ Jak a proč exportovat note
+    """
+    ;;
+    export-outline)
+        help metadata-outline
+        echo """
+  [1m${0##*/}[0m <DjVu soubor> export outline
+
+  Vyexportuje záložky ve formátu .outline. Pro export záložek ve formátu
+  .dsed, lze využít akci info
 """
     ;;
     export-dsed-*) echo """
 Nápověda pro export metainformacé
 """
     ;;
-    export-xml-*) echo """
-Nápověda pro export metainformacé
+    export-page) echo """
+  AKCE [1mexport[0m –> meta
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> export page RANGE [PATTERN]
+
+  Exportuje stránku z DjVu souboru, pterý pojmenuje dle předaného vzoru
+  PATTERN. Pokud žádný předaný není, uloží exportovanou stránku pod jejím
+  původním jménem.
+"""
+    ;;
+    export-xml) echo """
+Nápověda pro export XML textu – doplnit
 """
     ;;
     export-color|\
@@ -4977,31 +5109,58 @@ Nápověda pro export textové vrstvy
     ;;
     export-grep|export-pages|export-exif) help keywords-export
     ;;
-		keywords-import) echo """
-   ACTION: [1mimport[0m
-  [4mImport obsahu textové vrstvy[24m do DjVu souboru
+    keywords-import) echo """
+   AKCE: [1mimport[0m
 
-  [1m${0##*/}[0m [volby] <svazek> import [<file>|<dir>]
+  Zajišťuje import změn do textové vrstvy stránek DjVu souboru
 
-         file - soubor s obsahem skryté textové vrstvy
-         dir  - adresář se soubory s obsahem skryté textové vrstvy
+  [1m${0##*/}[0m [volby] <DjVu svazek> import FORMAT RANGE …
 
-[3mPoznámky:[23m
-  * Parametrem akce [2mimport[22m může být buď adresář se soubory, nebo soubor s
-    daty k importu
-  * Název souboru musí odpovídat názvu svazku (pro gobální metadata), nebo
-    názvu stránky, kterou obsahuje, s tím rozdílem, že jeho přípona odpovídá
-    typu dat které obsahuje:
-          [3m.meta[23m - meta atributy
-           [3m.xml[23m - skrytý text obsahu
-          [3m.dsed[23m - poznámky, meta atributy a skrytý text obsahu
-       [3m.outline[23m - obsah svazku; Pozor! Obsah je součást celého svazku, nemá
-                  tedy smysl ho vkládat do single-page DjVu dokumentu.
-    K formátu těchto souborů více viz manuál
-  * Není-li uveden žádný adresář, ani soubor, tak se předpokládá že se budou
-    zpracovávat soubory z aktuálního adresáře
+FORMAT
+  outline - import obsahu ze souboru formátu [3m.outline[23m
+      ant - import meta informací ze souboru formátu [3m.ant[23m (tagy a poznámky)
+      xml - import obsahu textové vrstvy z DjVuXML (formát [3m.xml[23m)
+     page - import Djvu stránek (konverzi bitmapových souborů dělá akce [2mexport[22m
+     dsed - import souborů v .dsed formátu (aktuálně řeší akce info)
 """
-		;;
+    ;;
+    import-ant)
+    help edit-ant
+        ;;
+    import-note)
+        help metadata-note
+        echo """
+  Poznámky lze vládat buď přes akci set, nebo během editace metadatové vrstvy"""
+        help edit-ant
+        ;;
+    import-outline)
+        help metadata-outline
+        echo """
+  Jednotlivé položky obsahu lze vládat buď přes akci set, nebo během editace obsahu"""
+        help edit-outline
+        ;;
+    import-page) echo """
+  AKCE [1mimport[0m –> page
+
+  [1m${0##*/}[0m [volby] <DjVu svazek> import page [ORDER] <DjVu soubor>
+
+  Importuje DjVu soubor na pozici určenou parametrem ORDER. Pokud není
+  uveden, bude soubor připojen na konec svazku.
+"""
+        ;;
+    import-xml) echo """
+  AKCE [1mimport[0m –> xml
+
+  [1m${0##*/}[0m [volby] <DjVu svazek> import xml RANGE <DjVuXML soubor>
+
+  Importuje do DjVu souboru obsah ze souboru DjVuXML. Pokud obsahuje více
+  stránek, může být určeno ze kterých se má obsah naimportovat uvedením RANGE.
+
+Příklad:
+
+    djvutoolsvazek.djvu import xml -h 1,8,12 svazek.xml
+    """
+    ;;
     keywords-info) echo """
   ACTION [1minfo[0m
 
@@ -5521,12 +5680,9 @@ ATRIBUT [1m${1#set-}[0m
 width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
 """
     ;;
-    set-xmp) echo """
-  METADATA [1m${1#set-}[0m
-
-  Přes metadatový element xmp lze nait metadatový klíč s XMP kódem, který
-  je pak interpretován podobně jako EXIF tagy.
-
+    set-xmp)
+        help metadata-xmp
+        echo """
   … set 0 key xmp '<rdf:RDF xmlns:rdf=…     …scription></rdf:RDF>'
 
 [3mPoznámka:[23m
@@ -6115,7 +6271,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
                 djvu) case "${CHARSTRING%%+([[:blank:]])*}" in
-                        ant|dsed|meta) help "${ACTION}-${CHARSTRING%%+([[:blank:]])*}"
+                        ant|dsed|meta|note|outline|page|xml|xmp) help "${ACTION}-${CHARSTRING%%+([[:blank:]])*}"
                         ;;
                         exif|grep|list|pages) help "info-${CHARSTRING%%+([[:blank:]])*}"
                         ;;
@@ -6133,8 +6289,6 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 lineclr|\
                                 mode|\
                                 none|\
-                                note|\
-                                outline|\
                                 oval|\
                                 poly|\
                                 pushpin|\
@@ -6143,7 +6297,6 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 text|\
                                 textclr|\
                                 width|\
-                                xmp|\
                                 xor|\
                                 zoom) help set-${PROPERTY}
                                 ;;
@@ -6334,6 +6487,8 @@ case ${FILETYPE} in
                             return 1
                         fi
                         return $?
+                    ;;
+                    xml*) xmlimport "${FILE}" "${CHARSTRING#xml+([[:blank:]])}"
                     ;;
                     *) help keyword-${CHARSTRING%% *}
                     ;;
