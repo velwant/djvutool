@@ -56,17 +56,13 @@ XML="${XML=no}"
 DPI="${DPI=300}"
 DSED="${DSED=no}"
 PAGE="${PAGE=no}"
-META="${META=no}"
-IMG="${IMG=no}"
 INDIRECT="${INDIRECT=no}"
 FORCE="${FORCE=skip}"
-RENAME="no"
 EXTENSION=".djvu"
 THUMBNAIL="${THUMBNAIL=no}"
 INSERTTEXT="${INSERTTEXT=no}"
 ALG="${ALG=none}"
 EXTRACTPAGE="${EXTRACTPAGE=no}"
-IMGPAGE="${IMGPAGE=no}"
 ALGORITHM=( none abutaleb bernsen brink djvu niblack otsu sauvola shading-subtraction tsai white-rohrer )
 
 trap '''CHYBA=$? ;
@@ -171,8 +167,6 @@ IDENTIFY=$(command -v identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
 CONVERT=$(command -v convert)
 [ ! -x "${CONVERT}" ] && echo exit 24
-IMGVIEW=$(command -v display)
-[ ! -x "${IMGVIEW}" ] && echo exit 24
 XCFINFO=$(command -v xcfinfo)
 [ ! -x "${XCFINFO}" ] && echo exit 26
 XCF2PNM=$(command -v xcf2pnm)
@@ -484,13 +478,6 @@ anone() {
         log warn "anone() Not value"
         return 1
     fi
-}
-
-function escape_path {
-# Zatím nepoužitá
-	echo "escape_path $*" >> /dev/stderr
-	echo "$*" | sed \
-  -e 's/\ /\\\ /g'
 }
 
 # ###  <span id="ant2dsed">ant2dsed()</span> ([top](#FUNCTIONS))
@@ -4740,29 +4727,7 @@ ImageDescription
     nastavením proměnné FORCE v uživatelském konfiguračním souboru.
 """
 		;;
-		image) echo """volba [1m-i[0m ([1m--img[0m)
 
-  [4mExtrakce obrazové vrstvy[24m DjVu stránky do bitmapového souboru
-
-  [1m${0##*/}[0m ... {-i|--img} [yes|no|<layer>] ...
-
-  Je-li parametrem volby [3myes[23m, tak se bude při akci [2mexport[22m generovat z DjVu
-  stránky plnobarevný bitmapový obrázek ve formátu PNG.
-  V ostatních případech bude ve formátu PNM.
-
-      [1m${0##*/}[0m --img background svazek.djvu export stranka.djvu
- 
-Použitelné parametry:
-                 color - plnobarevná stránka
-                 black - černobílá kresba
-            foreground - vrstva popředí
-            background - vrstva pozadí
-                  mask - maska
-  Je-li místo [3m'yes'[23m uvedeno [3m'background'[23m, bude při exportu stránky
-  strana.djvu uložen obrázek pozadí pod jménem strana.background.pnm
-  Výchozí nastavení lze implicitně změnit nastavením proměnné IMGPAGE
-"""
-		;;
 		indirect) echo"""
 [1mVolba[0m
          --indirect Volba, kterou lze změnit výchozí typ vícestránkového 
@@ -5648,29 +5613,10 @@ xx  -b|--bundle    Setting type of DjVu bundle
        --lossless
        --level
     -h|--help      Main options for help about option, or action
-    -i|--image     Export .png image of page for use with DjVuWebEd
-??  -m|--meta      Export meta attributes from DjVu file
     -o|--ocr       Application OCR
-    -p|--page      Export single DjVu page from bundle
-    -r|--rename    Pattern for action rename 
 xx  -t|--thumb     Creating thumbnails in DjVu bundle
-    -v|--verbose   
-    -x|--xml       Export hiddent text layer (XML) for use with DjVuWebEd"""
-		;;
-		page) echo """volba [1m-p[0m ([1m--page[0m)
-
-  Extrakce DjVu stránky ze svazku při akci [2mexport[22m
-
-  [1m${0##*/}[0m ... {-p|--page} [yes|no] ...
-  
-[4mPoznámka:[24m
-  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
-    předpokládá - yes.
-  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
-    PAGE do souboru v adresáři ${HOME}/.config/${NAME}/
-  * Exportované stránky se ukládají pod svým původním názvem.
-"""
-		;;
+    -v|--verbose"""
+    ;;
     range) echo """RANGE
     Stránky lze identifikovat buď jménem nebo aktuální pozicí v rámci DjVu
     souboru. Pokud chceme identifikovat více stránek najednou, lze použít
@@ -5688,29 +5634,6 @@ xx  -t|--thumb     Creating thumbnails in DjVu bundle
   * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
 """
         ;;
-		rename) echo """ volba [1m-r[0m, [1m--rename[0m
- Nastavení vzorku, podle jakého se mají pojmenovat, nebo přejmenovat DjVu soubory v DjVu svazku.
-
-Lze využít parametr %01d pro nastavení počtu znaků v číslování stránky, při konverzi vícestránkových bitmapových souborů (tiff, png, xcf)
-
-[4mPopis:[24m
-  Pomocí [2mvzoru[22m lze upravit názvy zkonvertovaných DjVu souborů
-  před jejich sestavením do DjVu svazku. [2mVzor[22m může být tvořen:
-    1, Pouze jednou, nebo více nulami - 000
-    2, Nebo řetězcem, následovaným nulami - soubor_00
-
-[3mPoznámka:[23m
-  Je-li uvedena pouze jedna nula, budou stránky očíslovány [4mnumericky[24m,
-  t.j. od čísla 1 dále. Je-li nul více, pak bude číslo interpretováno
-  jako [4mřetězec[24m. tedy 001 a dále. Pokud by číslování stránek přesáhlo
-  nastavený počet čísel, bude upraven dle maximálního čísla.
-
-[3mUkázkové vzory : a výsledný efekt..[23m
-   soubor-0000 : soubor-0001.djvu .. soubor-0123.djvu
-   soubor_0    : soubor_1.djvu    .. soubor_123.djvu
-   soubor000   : soubor0001.djvu  .. soubor1234.djvu
-"""
-			;;
 		suffix) echo """
 [1mParametr[0m
          -e|--ext  <[2msuffix[22m>  Přípona souborů, ze kterých se má sestavit 
@@ -5937,35 +5860,6 @@ do
             esac
             log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
             ;;
-        -i|--image) # Volba pro akci export
-            case "${2}" in
-                -h*|--help*) help image && exit 0
-                    ;;
-                yes|no|color|black|foreground|background|mask)
-                    IMG="${2}"
-                    log info "main)) Aplikuji pro IMG parametr - ${IMG}"
-                    shift && shift
-                    ;;
-                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro IMG parametr - yes"
-                    IMG="yes"
-                    shift
-                    ;;
-            esac
-            ;;
-        -m|--meta) # Volba pro akci export
-            case "${2}" in
-                -h*|--help*) help meta && exit 0
-                    ;;
-                yes|no) META="${2}"
-                    log info "main() Aplikuji pro META parametr - ${META}"
-                    shift && shift
-                    ;;
-                *) META="yes"
-                    log warn "main() Nebyl uveden žádný parametr, aplikuji pro META parametr - yes"
-                    shift
-                    ;;
-            esac
-            ;;
         -o|--ocr) # Volba pro akci insert
             case "${2}" in
                 -h*|--help*) help ocr
@@ -6053,35 +5947,6 @@ do
                 ;;
             esac
             ;;
-        -p|--page) # Volba pro akci export
-            case "${2}" in
-                -h*|--help*) help page && exit 0
-                    ;;
-                yes|no) PAGE="${2}"
-                    log info "main() Aplikuji pro PAGE parametr - ${PAGE}"
-                    shift && shift
-                    ;;
-                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro PAGE parametr - yes"
-                    PAGE="yes"
-                    shift
-                    ;;
-            esac
-            ;;
-        -r|--rename) # Nastavení vzoru pro pojmenování stránek při akcích rename, fore a back
-            case "${2}" in
-                -h*|--help*) help rename && exit 0
-                ;;
-                *) if [ "${2##+([[:alnum:]%_-])}" == "" ] ; then
-                    RENAME="${2}"
-                    log info "main() Aplikuji pro RENAME parametr - ${RENAME}"
-                    shift && shift
-                else
-                    echo "main() FAIL - pattern '${VALUE}' for rename is is not acceptable." >> /dev/stderr
-                    exit 1
-                fi
-            ;;
-            esac
-        ;;
         -t|--thumb) # Volba pro akci insert
             case "${2}" in
                 -h*|--help*) help thumb && exit 0
@@ -6391,9 +6256,6 @@ case ${FILETYPE} in
                         ${DJVUSED} "${FILE}" -f "${DSEDFILE}" -s
                         return $?
                     ;;
-                    meta*) echo "import from meta file to ${FILE}"
-                        echo nil
-                        ;;
                     outline*) echo "Importuji záložky"
                         echo "Přijato k importu ${CHARSTRING}"
                         #/ Může být předaný i soubor
