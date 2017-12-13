@@ -54,7 +54,6 @@ DEBUG="-d0"
 LOG="${LOG=/dev/null}"
 XML="${XML=no}"
 DPI="${DPI=300}"
-DSED="${DSED=no}"
 PAGE="${PAGE=no}"
 INDIRECT="${INDIRECT=no}"
 FORCE="${FORCE=skip}"
@@ -1025,11 +1024,28 @@ echo '''</OBJECT>
             ${DJVUXMLPARSER} -o "${TEMPDIR}/temp.djvu" ${NEXTFILE}
             echo "select '${OBJECTNAME}' ; remove-txt" > ${DSEDFILE}
             ${DJVUSED} "${TEMPDIR}/temp.djvu" -e 'select 1; output-txt' >> ${DSEDFILE}
-            anone "Objekt ${OBJECTNAME} ze souboru ${XMLFILE} nahradí v souboru ${1} text strany č. $i, chcete pokračovat?" >> /dev/stderr
-            [ $? -eq 1 ] && continue
-            ${DJVUSED} "${1}" -f ${DSEDFILE} -s
+            if [ -n "${DIFF}" ] ; then
+                echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
+                echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
+                anone "Chcete si prohlédnout změny?" >> /dev/stderr
+                if [ ! $? -eq 1 ] ; then
+                    ${DJVUTOXML} --page $i "${1}" | ${XMLLINT} --xpath '//HIDDENTEXT' - | perl -C -MHTML::Entities -pe 'decode_entities($_);' &>>  "${TEMPDIR}/orig.xml"
+                    ${XMLLINT} --xpath '//HIDDENTEXT' "${TEMPFILE}" | perl -C -MHTML::Entities -pe 'decode_entities($_);' >> "${TEMPDIR}/new.xml"
+                    vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/orig.xml" "${TEMPDIR}/new.xml"
+                fi
+            fi
+            anone "Objekt ${OBJECTNAME} ze souboru ${XMLFILE} nahradí v souboru ${1} text strany č. $i, ignorovat změny?" >> /dev/stderr
+            if [ $? -eq 1 ] ; then
+                ${DJVUSED} "${1}" -f ${DSEDFILE} -s
+                echo -n "Vyčkejte než bude dokončeno ověření zbylých stránek DjVuXML souboru :" >> /dev/stderr
+            else
+                continue
+            fi
+        else
+            echo -ne "\r$i" >> /dev/stderr
         fi
     done
+    echo -e "\rHotovo!" >> /dev/stderr
     return 0
 }
 
@@ -4408,9 +4424,9 @@ signature() {
         ;;
     esac
     for i in ${PAGES[@]} ; do
-        $0 "${1}" set "${i}" key Producer "${STRING}, djvutool 0.1 alpha [http://www.thewoodcraft.org/djvutool]"
-        $0 "${1}" set "${1}" key ModDate "$(date -u +%FT%T%:z)"
-        $0 "${1}" set "${1}" key HostComputer "$(hostname)"
+        $0 -f "${1}" set "${i}" key Producer "${STRING}, djvutool 0.1 alpha [http://www.thewoodcraft.org/djvutool]"
+        $0 -f "${1}" set "${i}" key ModDate "$(date -u +%FT%T%:z)"
+        $0 -f "${1}" set "${i}" key HostComputer "$(hostname)"
     done
     return $?
 }
@@ -5973,16 +5989,13 @@ do
                     ;;
             esac
             ;;
-        -d|--dsed) # Volba pro akci export
+        -d|--diff) # Volba pro akci import
+            DIFF="yes"
+            [ ! ${DIFF} ] && exit 18
             case ${2} in
-                -h*|--help*) help dsed && exit 0
+                -h*|--help*) help diff && exit 0
                     ;;
-                yes|no|txt|ant|all) DSED=${2}
-                    log info "main() Aplikuji pro DSED parametr - ${DSED}"
-                    shift && shift
-                    ;;
-                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro DSED parametr - yes"
-                    DSED="yes"
+                *) DSED="yes"
                     shift
                     ;;
             esac
@@ -6395,41 +6408,50 @@ case ${FILETYPE} in
                         else
                             writefile "${TEMPFILE}"
                             if [ $? -eq 1 ] ; then
-                                printf '; Pravidla pro obsah souboru .ant :\n' >> "${TEMPFILE}"
-                                printf '; * Globální meta informace se píší jako součást stránky "shared_anno.iff" \n' >> "${TEMPFILE}"
-                                printf '; * Stránka může být identifikována buď pořadovým číslem, nebo jménem\n' >> "${TEMPFILE}"
-                                printf '; * Blok meta informací vždy začíná řádkem uvozeným znakem # za kterým následuje identifikátor stránky (číslo, nebo jméno)\n' >> "${TEMPFILE}"
-                                printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
-                                printf '; * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
-                                printf '; * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
-                                printf '; * Soubor nesmí končit prázdným řádkem!\n' >> "${TEMPFILE}"
-                                printf '; * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
-                                printf ';\n' >> "${TEMPFILE}"
-                                printf ';Author "Aleš Novák"\n' >> "${TEMPFILE}"
-                                printf ';\n' >> "${TEMPFILE}"
-                                printf ';; Aktivní link bez bubliny"\n' >> "${TEMPFILE}"
-                                printf ';maparea "https://www.thewoodcraft.org/" ""\n' >> "${TEMPFILE}"
-                                printf ';rect 225 0 804 61\n' >> "${TEMPFILE}"
-                                printf ';xor\n' >> "${TEMPFILE}"
-                                printf ';\n' >> "${TEMPFILE}"
-                                printf ';; Aktivní link s bublinou"\n' >> "${TEMPFILE}"
-                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
-                                printf ';        (rect 225 0 804 61 )\n' >> "${TEMPFILE}"
-                                printf ';        (xor )\n' >> "${TEMPFILE}"
-                                printf ';; Aktivní link s bublinou u textu přes dva řádky"\n' >> "${TEMPFILE}"
-                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
-                                printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
-                                $0 "${FILE}" export ${CHARSTRING} >> "${TEMPFILE}"
-                                echo "" >> "${TEMPFILE}"
+                                (
+                                printf '; Pravidla pro obsah souboru .ant :\n'
+                                printf '; * Globální meta informace se píší jako součást stránky "shared_anno.iff" \n'
+                                printf '; * Stránka může být identifikována buď pořadovým číslem, nebo jménem\n'
+                                printf '; * Blok meta informací vždy začíná řádkem uvozeným znakem # za kterým následuje identifikátor stránky (číslo, nebo jméno)\n'
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
+                                printf '; * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
+                                printf '; * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
+                                printf '; * Soubor nesmí končit prázdným řádkem!\n'
+                                printf '; * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
+                                printf ';\n'
+                                printf ';Author "Aleš Novák"\n'
+                                printf ';\n'
+                                printf ';; Aktivní link bez bubliny"\n'
+                                printf ';maparea "https://www.thewoodcraft.org/" ""\n'
+                                printf ';rect 225 0 804 61\n'
+                                printf ';xor\n'
+                                printf ';\n'
+                                printf ';; Aktivní link s bublinou"\n'
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                printf ';        (rect 225 0 804 61 )\n'
+                                printf ';        (xor )\n'
+                                printf ';; Aktivní link s bublinou u textu přes dva řádky"\n'
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                $0 "${FILE}" export ${CHARSTRING}
+                                echo "" ) | tee "${TEMPDIR}/ant.orig" >> "${TEMPFILE}"
                             fi
                         fi
                         case ${ACTION} in
                             edit)
                                 editor "${TEMPFILE}"
-                                anone "Uložit změny?"
-                                [ $? -eq 1 ] && return 1
                             ;;
                         esac
+                        if [ -n "${DIFF}" ] ; then
+                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
+                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
+                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
+                            if [ ! $? -eq 1 ] ; then
+                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/ant.orig" "${TEMPFILE}"
+                            fi
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
+                        fi
                         local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
                         ant2dsed "${TEMPFILE}" > "${DSEDFILE}"
                         if [ $? -eq 1 ] ; then
@@ -6453,20 +6475,21 @@ case ${FILETYPE} in
                             writefile "${TEMPFILE}"
                             if [ $? -eq 1 ] ; then
                                 log info "main() Na stdin nebylo nic, přidám záhlaví a vytáhnu stávající záložky"
-                                printf '; Pravidla pro obsah souboru .outline :\n' >> "${TEMPFILE}"
-                                printf '; * Text záložky i její cíl musí být v uvozovkách\n' >> "${TEMPFILE}"
-                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n' >> "${TEMPFILE}"
-                                printf ';  * Identifikátor vždy začíná znakem #\n' >> "${TEMPFILE}"
-                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n' >> "${TEMPFILE}"
-                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n' >> "${TEMPFILE}"
-                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n' >> "${TEMPFILE}"
-                                printf ';  * Soubor nesmí končit prázným řádkem!\n' >> "${TEMPFILE}"
-                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n' >> "${TEMPFILE}"
-                                printf ';\n' >> "${TEMPFILE}"
-                                printf ';"Link první úrovně" "#1"\n' >> "${TEMPFILE}"
-                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n' >> "${TEMPFILE}"
-                                $0 "${FILE}" info list | sed 's/^/; /' >> "${TEMPFILE}"
-                                $0 "${FILE}" export outline >> "${TEMPFILE}"
+                                (
+                                printf '; Pravidla pro obsah souboru .outline :\n'
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
+                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n'
+                                printf ';  * Identifikátor vždy začíná znakem #\n'
+                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n'
+                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
+                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
+                                printf ';  * Soubor nesmí končit prázným řádkem!\n'
+                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
+                                printf ';\n'
+                                printf ';"Link první úrovně" "#1"\n'
+                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n'
+                                $0 "${FILE}" info list | sed 's/^/; /'
+                                $0 "${FILE}" export outline ) | tee "${TEMPDIR}/outline.orig" >> "${TEMPFILE}"
                             fi
                         fi
 #                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
@@ -6474,8 +6497,14 @@ case ${FILETYPE} in
                             edit) editor "${TEMPFILE}"
                             ;;
                         esac
-#                        lig info "main() Importuji soubor .outline ${TEMPFILE} do ${FILE}"
-#                        local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+                        if [ -n "${DIFF}" ] ; then
+                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
+                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
+                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
+                            if [ ! $? -eq 1 ] ; then
+                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/outline.orig" "${TEMPFILE}"
+                            fi
+                        fi
                         outlinetodjvu "${FILE}" "${TEMPFILE}"
                         if [ $? -eq 1 ] ; then
                             echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
@@ -6534,7 +6563,7 @@ case ${FILETYPE} in
             ;;
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
             ;;
-            sign) signature "${CHARSTRING}"
+            sign) signature "${FILE}" "${CHARSTRING}"
             ;;
             view) viewdjvu
             ;;
