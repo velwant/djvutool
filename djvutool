@@ -6326,7 +6326,7 @@ case ${FILETYPE} in
             ;;
             export) #/ Exportuji stránku
                 log info "main() export from page ${CHARSTRING}"
-                fromdjvu "${FILE}" "${CHARSTRING}"
+                fromdjvu "${FILE}" "${CHARSTRING}" | xxd -p | paste -s -d'-' | sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' | tr '-' '\n' |  xxd -r -p
             ;;
             import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
                 # Před editací meta informací, je doporučeno zkontrolovat a případně 
@@ -6372,6 +6372,7 @@ case ${FILETYPE} in
                                 printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
                                 printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n' >> "${TEMPFILE}"
                                 $0 "${FILE}" export ${CHARSTRING} >> "${TEMPFILE}"
+                                echo "" >> "${TEMPFILE}"
                             fi
                         fi
                         case ${ACTION} in
