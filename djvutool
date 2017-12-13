@@ -471,7 +471,7 @@ anone() {
                 case $yn in
                     [AaYy]*) break;;
                     [Nn]*) return 1;;
-                    *) echo "Napište ANO či NE:";;
+                    *) echo "Napište ANO či NE:" >> /dev/stderr ;;
                 esac
             done
         fi
@@ -1645,6 +1645,7 @@ fromdjvu() {
             for i in ${PAGES[@]} ; do
                 local PAGENAME="${LISTPAGES[$i]##+([[:digit:]])+([[:blank:]])}"
                 local PAGEORDER="${LISTPAGES[$i]%% *}"
+#/                echo "PAGEORDER ${#PAGEORDER[@]} ${PAGEORDER[@]}" >> /dev/stderr
                 case "${PAGEORDER}" in
                     0) case "${PAGENAME}" in
                             none)
@@ -1799,6 +1800,7 @@ fromdjvu() {
         *) echo "Nedělám nic ${INTO}" >> /dev/stderr
             ;;
     esac
+    return $?
 }
 
 # ### Původní zpracování - očekává parametry ze startu message
@@ -4958,21 +4960,29 @@ PAGE
   kdežto její jméno stránky je vždy v rámci DjVu svazku jedinečné.
 """
     ;;
-		keywords-edit) echo """
+    keywords-edit) echo """
   ACTION [1medit[0m
 
-  Editace textový informací DjVu svazku - meta informace, bookmarks,outline
+  Editace textové vrstvy DjVu svazku - meta tagy, bookmarks, outline,…
 
+  [1m${0##*/}[0m [volby] <DjVu svazek> edit FORMAT [RANGE]
+
+FORMAT
+      ant - poznámky a další metadatové elementy
+  outline - obsah DjVu svazku
+"""
+    help range
+    ;;
+    edit-ant) echo """
+  [1m${0##*/}[0m <DjVu> edit ant [<num>|<name>|<RANGE>]
+    """
+    ;;
+    edit-outline)
+        help metadata-outline
+        echo """
   [1m${0##*/}[0m <DjVu> edit outline
 
-  [1m${0##*/}[0m <DjVu> edit ant [<num>|<name>|<RANGE>]
-
          outline - výpis aktuálního obsahu DjVu svazku ve formátu .outline
-         meta  - vygenerování šablony pro .outline formát s adresováním
-                 stránek podle jejich názvů
-
-         num  - pořadové číslo stránky v DjVu svazku
-         name - jméno stránky v DjVu svazku
 
 [3mPoznámka:[23m
   Vygenerovanou šablonu .outline formátu lze upravit editací v libovolném
@@ -4983,8 +4993,7 @@ PAGE
   Upravený obsah lze do DjVu svazku naimportovat ze souboru přes akci [2mimport[22m,
 [1mPozor:[0m Soubor ve formátu .outline musí mít (až na příponu) stejné jméno,
   jako má DjVu svazek do kterého se má vložit, jinak se nenaimportuje!
-"""
-    help range
+    """
     ;;
     keywords-export) echo """
   ACTION: [1mexport[0m
@@ -5411,13 +5420,9 @@ Ovšem v případě prvku, co má být ihned viditelný se takové chování neh
 prvek viditelný stále
 """
     ;;
-    set-key) echo """
-  METADATA [1m${1#set-}[0m
-
-  Přes metadatový element key se nastavují metadatové klíče, které mohou
-  být interpretovány jako EXIF tagy. Do DjVu souboru lze vložit rovněž
-  XMP kód, ovšem pouze přes akci edit.
-
+    set-key)
+    help metadata-key
+    echo """
 Nastavení, resp. přenastavení klíče:
 
   [1m${0##*/}[0m <DjVu> set RANGE key KEY VALUE
@@ -5478,15 +5483,9 @@ METADATA [1m${1#set-}[0m
 Nastavení metadatového klíče
 """
     ;;
-    set-mode) echo """
-  METADATA [1m${1#set-}[0m
-
- Meta atribut mode umožňuje změnit výchozí zobrazení stránky. Dá se nastavit
- jak globálně pro všechny stránky najednou, tak pro konkrétní stránky.
- Hodí se obzvlástě v situaci, kdy jsou v rámci jednoho DjVu svazku
- zkombinovány stránky zpracované různým způsobe - černobílé i barevné.
- Uživatel si pak nemusí při prohlížení přepínat mód zobrazení manuálně.
-
+    set-mode)
+        help metadata-mode
+        echo """
  Použít lze buď akci set:
 
   [1m${0##*/}[0m <DjVu svazek> set [RANGE] mode MODE
@@ -5510,13 +5509,9 @@ Do bloku příslušné stránky přidejte následující řádek
     …
 """
     ;;
-    set-note) echo """
-  METADATA [1m${1#set-}[0m
-
-  Nastavuje skrytou poznámku, kterou nezobrazuje a nezpracovává žádný prohlížeč
-  DjVu souborů. Lze ji využít pro uložení informací o průběhu zpracování
-  dokumentu, digitálních podpisů obrazových vrstev & etc.
-
+    set-note)
+        help metadata-note
+        echo """
    … set 0 note NOTE
 
 NOTE
@@ -5548,13 +5543,9 @@ none - vypne zobrazování okraje plochy
 Anuluje nastavení hodnoty border i boorder_avis
 """
     ;;
-    set-outline) echo """
-  METADATA [1m${1#set-}[0m
-
- Záložky (outline), patří mezi metadata. V prohlížeči DjVu souborů se zobrazují
- jako rozbalovací víceúrovňové menu odkazů na interní stránky resp. externí linky.
- Jednotlivou záložku lze nastavit prostřednictvím akce set:
-
+    set-outline)
+        help metadata-outline
+        echo """
   [1m${0##*/}[0m [volby] <DjVu svazek> set outline {TARGET} {DESC}
 
     TARGET - Cíl záložky. Externí link (řetězec začínající http://…), pořadí (číslo),
@@ -5577,8 +5568,7 @@ Příklady:
    lze záložku zanořit odsazení celého obsahu řádku tabulátorem:
                    1 úroveň = 1 tabulátor = 8 mezer
  * Záložky lze naimportovat buď ze souboru ve formátu [3m.outline[23m přes akci [2mimport[22m,
-  nebo přes [1mdjvused[0m (formát  [3m.dsed[23m)
-"""
+  nebo přes [1mdjvused[0m (formát  [3m.dsed[23m)"""
     ;;
     set-oval) echo """
 ELEMENT [1m${1#set-}[0m
@@ -5694,7 +5684,6 @@ width - Nastavení šířky čáry (šipky). Celé číslo od 1 do 999
 Pro více informací o XMP spusťte:
 
   [1m${0##*/}[0m xmp
-
 """
     ;;
     set-zoom) echo """
@@ -5758,7 +5747,48 @@ Příklad:
 		;;
 		ocr) echo "Nápověda k OCR - ToDo"
 		;;
-		options) echo """Options:
+    metadata-key) echo """
+  METADATA [1m${1#*-}[0m
+
+  Přes metadatový element key se nastavují metadatové klíče, které mohou
+  být interpretovány jako EXIF tagy. Tu obsahují informace o souboru,
+  podobně jako XMP kód, pro který však existuje samostatný metadatový
+  element xmp."""
+    ;;
+    metadata-mode) echo """
+  METADATA [1m${1#*-}[0m
+
+  Metadatový element mode umožňuje změnit výchozí zobrazení DkVu stránky
+  v prohlížeči. Může se nastavit buď globálně, pro všechny stránky najednou,
+  ale i pro každou stránku extra. To se může hodit obzvlástě v situaci,
+  kdy jsou v rámci jednoho DjVu svazku zkombinovány stránky zpracované
+  různým způsobem - černobílé bez pozadí, nebo barevné bez černobílé masky.
+  Uživatel si pak nemusí při prohlížení přepínat mód zobrazení manuálně."""
+    ;;
+    metadata-note) echo """
+  METADATA [1m${1#*-}[0m
+
+  Metadatový element note obsahuje skrytou poznámku, kterou nezobrazuje,
+  ani nezpracovává žádný prohlížeč DjVu souborů. Lze ji využít pro uložení
+  informací o průběhu zpracování dokumentu, pro digitální podpisy obrazových
+  vrstev & etc."""
+    ;;
+    metadata-outline) echo """
+  METADATA [1m${1#*-}[0m
+
+  Záložky (outline), patří mezi metadata. V prohlížeči DjVu souborů se
+  zobrazují jako rozbalovací víceúrovňové menu odkazů na interní stránky
+  resp. externí linky. Jednotlivé záložky lze nastavit prostřednictvím
+  akce set. Jejich obsah a úroveň zanoření lze dodatečně upravit při akci
+  edit."""
+    ;;
+    metadata-xmp) echo """
+  METADATA [1m${1#*-}[0m
+
+  Metadatový element xmp obsahuje XMP kód, který se pak interpretuje
+  podobně jako EXIF tagy."""
+    ;;
+    options) echo """Options:
     -a|--algorithm Algorithm for separating mask of image (fore or back)
 xx  -b|--bundle    Setting type of DjVu bundle
     -d|--dsed      Export hiddent text layer in native code for DjVused
