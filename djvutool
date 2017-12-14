@@ -4497,12 +4497,12 @@ range() {
     esac
 }
 
-# ###  <span id="signature">signature()</span> ([top](#FUNCTIONS))
+# ###  <span id="djvusign">djvusign()</span> ([top](#FUNCTIONS))
 # Funkce nastaví do stránky tyto meta atributy
 # Producer
 # ModDate
 # HostComputer
-signature() {
+djvusign() {
     local RANGE=$(isrange "${2}")
     if [ ! -n "${RANGE}" ] ; then
         # / může být seznam stránek ZA KTERÝM není nic
@@ -6438,7 +6438,7 @@ case ${FILETYPE} in
             ;;
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
             ;;
-            sign) signature "${FILE}" "${CHARSTRING}"
+            sign) djvusign "${FILE}" "${CHARSTRING}"
             ;;
             view) viewdjvu
             ;;
