@@ -447,15 +447,6 @@ Pro debug lze použít pouze čísla od 1 do 9. Nastavení lze provést těmito 
 """
 }
 
-# OBSOLETE
-# Pomocná funkce, která odfiltruje při použití funkce pushd výstup
-function pushd {
-    command pushd "$@" > /dev/null
-}
-function popd {
-    command popd "$@" > /dev/null
-}
-
 # ### <span id="anone">anone()</span> ([top](#FUNCTIONS))
 # Ověřovací funkce.
 # V případě, že se lze pokračovat v realizaci akce vrací __0__,
@@ -928,6 +919,9 @@ writefile() {
     fi
 }
 
+# ### <span id="xmlimport">xmlimport()</span> ([top](#FUNCTIONS))
+# Funkce zajišťuje import obsahu skryté textové vrstvy DjVu souborů z
+# DjVuXML formátu
 xmlimport() {
     [ ! -n "${XMLLINT}" ] && return 1
     log goto "$1 –> $2"
@@ -1224,19 +1218,6 @@ outlinetodsed() {
     local ZAV=$(seq  -f "%1.0f" -s '' ${TEST})
     echo "${ZAV//[[:digit:]]/)}"
     return 0
-}
-
-#/ OBSOLETE
-function importxmlpage {
-	# $1 - DjVu file - full path
-	# $2 - source XML file - full path
-	# INFO: XML file has name of target page in self.
-	case "${XML}" in
-		no) echo "K importu textových dat ze souboru ${2} se přistoupí pouze bude-li uvedena volba -x" >> /dev/stderr
-		;;
-		*) ${DJVUXMLPARSER} -o "${1}" "${2}"
-		;;
-	esac
 }
 
 function getocr {
@@ -3933,40 +3914,6 @@ infoimg() {
     return $?
 }
 
-# ### <span id="jp2to">jp2to()</span> ([top](#FUNCTIONS))
-# Konvertuje obrázky z formátu JPEG-2000 do bitmapových formátů:
-# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
-# Využívá se při tom nástroj libopenjp2-tools
-# Při konverzi do PNG je vyžadována knihovna libpng a při konverzi do
-# formátu TIFF zase knihovna libtiff.
-#
-# Srovnání: Cca 4,1M jp2 ve stupních šedi, mizerné kvality má po konverzi
-# do DjVu při použití výchozího algoritmu (`djvu`) 1,1M. O něco lepší výsledek
-# jak z hlediska vizuálního, tak velikosti souboru nabídnul algoritmus
-# `otsu` – 0.7MB
-# Stejný soubor nekomprimovaný zabral 33M a v PNG 21M
-jp2to() {
-    log goto "jp2to() $1 –> $2"
-    ${PAMTO} -i "${1}" -o "${2}"
-    return $?
-}
-
-# ### <span id="jp2in">jp2in()</span> ([top](#FUNCTIONS))
-# Konvertuje obrázky do formátu JPEG-2000
-# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
-# Využívá se při tom nástroj libopenjp2-tools.
-# Při konverzi z PNG je vyžadována knihovna libpng a při konverzi z
-# formátu TIFF zase knihovna libtiff.
-#
-# Konverze již zpracovaného obrázku už není tak dobrá jako z originálu 8-/
-jp2in() {
-    log goto "jp2in() $1 –> $2"
-    
-    ${JP2IN} -i "${1}" -o "${2}"
-    return $?
-}
-
-
 # ### <span id="listpdf">listpdf()</span> ([top](#FUNCTIONS))
 # Funkce vrací seznam stránek v PDF souboru.
 #
@@ -4062,13 +4009,6 @@ listpng() {
     local TEMPORARY="${1##*/}"
     mkdir ${TEMPORARY}
     # ${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
-}
-
-# ### <span id="listdjvu">listdjvu()</span> ([top](#FUNCTIONS))
-# Vrací seznam stránek v DjVu souboru
-listdjvu() {
-    #${ZIP} l -so "${1}" | awk '{print $6}' | grep '/' | sort -t _
-    echo nil
 }
 
 # ### <span id="listzip">listzip()</span> ([top](#FUNCTIONS))
@@ -4193,20 +4133,6 @@ identifypage() {
             return 1
         ;;
     esac
-    return 0
-}
-
-# ### <span id="lastpage">lastpage()</span> ([top](#FUNCTIONS))
-# Function return count of all pages in DjVu bundle
-# $1 DjVu file
-lastpage() {
-    log goto "lastpage() –> ${1}"
-    local SOURCE=$(${REALPATH} -m -P "${1}")
-    local FILE="${SOURCE##*/}"
-    [ "$(mimefile ${SOURCE})" == "djvu" ] || return 1
-    local OUTPUT=$(${DJVUSED} "${SOURCE}" -e n)
-    log info "lastpage() Count of all pages in ${FILE} –> ${OUTPUT}"
-    echo -n "${OUTPUT}"
     return 0
 }
 
@@ -5919,22 +5845,6 @@ xx  -t|--thumb     Creating thumbnails in DjVu bundle
         return 1
     ;;
     esac
-}
-
-# ### <span id="djvuview">djvuview()</span> ([top](#FUNCTIONS))
-# Funkce na základě předaného jména (parametr __$1__) a zvolených
-# enkodovacích algoritmů otevře prohlížeč DjVu souborů, aby bylo možné
-# provést vizuální srovnání kvality zkonvertovaných souborů
-djvuview() {
-    log goto "djvuview() Open –> $@"
-    while [ $# -gt 0 ] ; do
-        local TYPE=$(mimefile "${1}")
-        case "${TYPE}" in
-            djvu) (${DJVIEW} "${1}" &) ;;
-            *) echo "File ${1} is not DjVu file" >> /dev/stderr ;;
-        esac
-        shift
-    done
 }
 
 # Zpracování parametrů předaných při startu skriptu
