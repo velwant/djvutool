@@ -9,6 +9,8 @@
 shopt -s extglob
 
 # Changelog
+# * implementováno OCR do akce 'set'
+# * implementovaná akce 'sign'
 # * implementována akce 'rename'
 # * akce 'info' - umožňuje získávat různé užitečné informace
 # * akce 'export' funguje zároveň jako konverzní nástroj
@@ -16,6 +18,7 @@ shopt -s extglob
 # * akce 'delete' odstraňuje stránky
 # * akce 'edit', 'export', 'import'
 # * akce 'fore' a 'back' pro přesun stránek v DjVu souboru
+
 
 # Otestovat
 # - export ze single-page dokumentu
@@ -31,24 +34,21 @@ shopt -s extglob
 #    echo ${pole[@]: -1}
 
 # ToDo
-# Změna bundle na unbundle a naopak
-#
-# - implementováno generování náhledů do exportu
-#
-# OCR
-# - ošetřena situace, kdy není nainstalován ocrodjvu
-# - upraveny funkce pro export náhledů a souborů textové vrstvy
+# * Konverze z bundle na unbundle a naopak
+# * ? implementace generování náhledů
+# * implementovat kontrolu obrazové vrstvy při importu, aby nedocházelo
+#   k nekontrolovatelnému vkládání již existujících stránek
+# - přidat kontrolu do akce insert na duplicitní soubory při vkládání
+#   vícestránkových DjVu souborů. to ovšem bude vyžadovat samostatnou
+#   funkci...
 #
 # Dílčí úpravy stránek DjVu svazku - velmi nízká priorita
 # - Odstranění vrstvy ze stránky
 # - Odstranění sdíleného chunku
-# Doplnit nové funkce do wiki souboru
-# implementovat kontrolu při importu, aby nedocházelo k nekontrolovatelnému vkládání již existujících stránek
-# - přidat kontrolu do akce insert na duplicitní soubory při vkládání
-#   vícestránkových DjVu souborů. to ovšem bude vyžadovat samostatnou
-#   funkci...
+# - Exporty náhledů a souborů textové vrstvy
 NAME="djvutool"
 [ -d "${HOME}/.config/${NAME}" ] &&	. ${HOME}/.config/${NAME}/* &>>/dev/null
+VERSION="0.7"
 
 DEBUG="-d0"
 LOG="${LOG=/dev/null}"
@@ -419,32 +419,8 @@ log() {
 }
 # <span id="help_debug" /> ([top](#FUNCTIONS))
 help_debug() {
-    echo """Chybné nastavení pro debug –> $1
-
-Pro debug lze použít pouze čísla od 1 do 9. Nastavení lze provést těmito způsoby:
-
-    … -d2 …
-    … -d 2 …
-    … -d=2 …
-    … --debug 2 …
-    … --debug=2 …
-
-  0 Je výchozí stav, při kterém se logovací zprávy nevypisují nikam.
-  1 Vypisuje pouze chybové (ERR) zprávy pouze na standardní chybový
-    výstup.
-  2 Zapisuje pouze do logu a pouze chybové (ERR) zprávy.
-  3 Vypisuje chybové (ERR) zprávy na standardní výstup a zároveň je
-    zapisuje do logu.
-  4 Vypisuje chybové (ERR) a varovné (WARN) zprávy pouze na standardní
-    chybový výstup.
-  5 Zapisuje chybové (ERR) a varovné (WARN) zprávy pouze do logu.
-  6 Zapisuje chybové (ERR) a varovné (WARN) zprávy na standardní výstup
-    a zároveň je zapisuje do logu.
-  7 Vypisuje všechny zprávy pouze na standardní chybový výstup.
-  8 Zapisuje všechny zprávy pouze do logu.
-  9 Vypisuje všechny zprávy na standardní výstup a zároveň je zapisuje
-    do logu.
-"""
+    echo """Chybné nastavení pro debug –> $1"""
+    help verbose
 }
 
 # ### <span id="anone">anone()</span> ([top](#FUNCTIONS))
@@ -1325,6 +1301,9 @@ isformat() {
         xmp)  #/ Volba pro DjVu
             #/ export XMP kódu
             ;;
+        ocr) #/ Volba pro DjVu
+            #/ aplikace OCR
+            ;;
         meta) #/ Volba pro DjVu
             ;;
         line|word|para) #/ Volby pro djvutxt
@@ -1356,7 +1335,7 @@ isformat() {
             ;;
         jpg|jpeg|jp2)
             ;;
-        pnm|pam)
+        pnm|pam|pbm)
             ;;
         mask|black|background|foreground|color) #/ Typ exportované obrazové vrstvy
             ;;
@@ -2502,6 +2481,7 @@ stránka, tak máte dvě možnosti:
                     fi
                     return $?
                 ;;
+                ocr|\
                 note|\
                 key)
                     local TEMP=(${STRING//+([[:blank:]])/ })
@@ -2544,6 +2524,41 @@ stránka, tak máte dvě možnosti:
                                     cat "${TEMPFILE}" | $0 "${1}" import ant
                                 done
                             fi
+                        ;;
+                        ocr) case "${ACTION}" in
+                                set) echo "Aplikuji OCR na DjVu soubor #${STRING}#" >> /dev/stderr
+                                    local VALUE="${STRING#ocr}"
+                                    case "${VALUE##+([[:blank:]])}" in
+                                        help) ${OCRODJVU} -h
+                                        ;;
+                                        '') if [ "${RANGE}" == "${RANGE//0/}" ] ; then
+                                            log info "Aplikuji OCR u souboru ${1} na rozsah ${RANGE}"
+                                            ${OCRODJVU} --in-place --pages "${RANGE}" "${1}"
+                                        else
+                                            log info "Aplikuji OCR na všechny stránky souboru ${1}"
+                                            ${OCRODJVU} --in-place "${1}"
+                                        fi
+                                        ;;
+                                        *) if [ "${RANGE}" == "${RANGE//0/}" ] ; then
+                                            log info "Aplikuji OCR u souboru ${1} na rozsah ${RANGE} –> ${VALUE}"
+                                            ${OCRODJVU} ${VALUE} --pages "${RANGE}" "${1}"
+                                        else
+                                            log info "Aplikuji OCR na všechny stránky souboru ${1} –> ${VALUE}"
+                                            ${OCRODJVU} ${VALUE} "${1}"
+                                        fi
+                                        ;;
+                                    esac
+                                ;;
+                                unset)
+                                    local PAGES=($(range ${RANGE}))
+                                    for i in ${PAGES[@]} ; do
+                                        [ "$i" == "0" ] && continue
+                                        anone "Opravdu chcete odstranit textovou vrstvu ze stránky č.$i v souboru ${1}?"
+                                        [ $? -eq 1 ] && continue
+                                        ${DJVUSED} "${1}" -e "select $i ; remove-txt" -s
+                                    done
+                                ;;
+                            esac
                         ;;
                         key) local KEY="${TEMP[1]}"
                             [ "${KEY}" == "xmp" ] && echo "XMP kód se nenastavuje přes key, ale xmp" >> /dev/stderr && return 1
@@ -3148,6 +3163,34 @@ fromcontainer() {
                                 mv -i "${TEMPFILE}.png" "${TARGET}"
                                 [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
                             ;;
+                            mask|pbm)
+                                if [ -n "${TARGETSAMPLE}" ] ; then
+                                    # jedu podle vzorku
+                                    local TEMPORAR=$(printf "${TARGETSAMPLE}%d" $i)
+                                    local TARGET="${TARGETDIR}/${TEMPORAR// /0}.${INTO}"
+                                else
+                                    local TARGET="${TARGETDIR}/${PAGE}.${INTO}"
+                                fi
+                                local TEMPFILE=$(tempfile)
+                                if [ -n "${SCALE}" ] ; then
+                                    local FORSCALE=$(tempfile)
+                                    $(itempng "${FILE}" "${PAGE}" > "${FORSCALE}")
+                                    pamscale ${SCALE} ${FORSCALE} | ${PPMTOPGM} | ${PGMTOPBM} | ${PNMTOPLAINPNM} > ${TEMPFILE}
+                                    rm ${FORSCALE}
+                                else
+                                    $(itempng "${FILE}" "${PAGE}" | ${PPMTOPGM} | ${PGMTOPBM} | ${PNMTOPLAINPNM}> "${TEMPFILE}")
+                                fi
+                                case "${INTO}" in
+                                    mask|pbm)
+                                        log info "Move ${TEMPFILE} –> ${TARGET}" >> /dev/stderr
+                                            mv -i "${TEMPFILE}" "${TARGET}"
+                                        ;;
+                                    *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
+                                            return 1
+                                    ;;
+                                esac
+                                [ -f "${TEMPFILE}" ] && rm "${TEMPFILE}"
+                            ;;
                                 pnm|pam)
                                     if [ -n "${TARGETSAMPLE}" ] ; then
                                         # jedu podle vzorku
@@ -3167,6 +3210,7 @@ fromcontainer() {
                                     fi
                                     case "${INTO}" in
                                         pnm|pam)
+                                            log info "Move ${TEMPFILE} –> ${TARGET}" >> /dev/stderr
                                             mv -i "${TEMPFILE}" "${TARGET}"
                                         ;;
                                         *) echo "Unsupported format –> ${INTO}" >> /dev/stderr
@@ -4001,6 +4045,7 @@ itemxcf() {
 itempng() {
     log goto "itempng() From $1 flush –> $2"
     # ${XCF2PNM} "${1}" "${2}"
+    ${PNGTOPNM} "${1}"
 }
 
 # ### <span id="listpng">listpng()</span> ([top](#FUNCTIONS))
@@ -4307,8 +4352,8 @@ signature() {
         # oddělit PATTERN od seznamu
         case "${2//+([[:blank:]])/}" in
             '') # jenom příkaz
-                echo "Nebylo nic předáno ${2}" >> /dev/stderr
-                return 1
+                echo "Nebyl předán RANGE, zapíšu info mezi sdílené poznámky" >> /dev/stderr
+                local PAGES=("0")
                 #local PAGES=($(range "0-${#LISTPAGES[@]}"))
             ;;
             *) # seznam stránek oddělených čárkou
@@ -4345,12 +4390,16 @@ signature() {
     case "${STRING:0:1}" in
         [a-Z])
         ;;
-        *) echo "Neplatný PATTERN –> ${STRING}" >> /dev/stderr
-            return 1
+        *) if [ -f "${HOME}/.config/${NAME}/default.conf" ] ; then
+                local STRING="$(grep '^CREATOR' "${HOME}/.config/${NAME}/default.conf" | cut -d\= -f2)"
+            else
+                echo "Není uveden CREATOR ve výchozím souboru, použiji tedy aktuálního uživatele" >> /dev/stderr
+                local STRING="${USER}"
+            fi
         ;;
     esac
     for i in ${PAGES[@]} ; do
-        $0 -f "${1}" set "${i}" key Producer "${STRING}, djvutool 0.1 alpha [http://www.thewoodcraft.org/djvutool]"
+        $0 -f "${1}" set "${i}" key Producer "${STRING}, ${NAME} ${VERSION}"
         $0 -f "${1}" set "${i}" key ModDate "$(date -u +%FT%T%:z)"
         $0 -f "${1}" set "${i}" key HostComputer "$(hostname)"
     done
@@ -4799,46 +4848,51 @@ ImageDescription
   bundled, kdy je vše zabaleno v jednom souboru
 """
 		;;
-        '') help keywords && help options
-        ;;
-        keywords) echo """
+    '') echo """
  DJVUTOOL - nástroj pro práci s obrázky a DjVu soubory
 
-       [1m${0##*/}[0m [volby] {AKCE} [SOUBOR] …
+       [1m${0##*/}[0m [volby] [2m[-h][22m AKCE [2m[-h][22m SOUBOR …
   resp.
-       [1m${0##*/}[0m [volby] [SOUBOR] {AKCE} …
+       [1m${0##*/}[0m [volby] [2m[-h][22m SOUBOR {AKCE} [2m[-h][22m …
 
-Pro podrobnější informace o volbě, akci či atributu, můžete vždy použít volbu [2m-h[22m
-Viz příklad, demonstrující výpis nápovědy k volbě -v (verbose):
-
-   [1m${0##*/}[0m -v -h
-
-AKCE
-    export - export a konverze bitmapových souborů, jejich vrstev či stránek
-             do jiných formátů, včetně DjVu. V případě DjVu souborů lze
-             vyexportovat buď obrazovou vrstvu, ve formě bitmapového obrázku,
-             nebo obsah textové, či metadatové vrstvy.
-      info - zjištuje informace o souboru či stránce
-      view - zobrazuje obrazový soubor či některou z jeho stránek.
+Pro podrobnější informace o volbě, akci či atributu, můžete vždy použít volbu [2m-h[22m"""
+    help options
+    help keywords
+    ;;
+    keywords) echo """
+AKCE:
+    export - exportem se řeší u bitmapových souborů, konverze jejich vrstev
+             či stránek do jiných formátů, včetně DjVu. V případě DjVu souborů
+             lze vyexportovat buď celou obrazovou vrstvu, nebo její část ve
+             formě bitmapového obrázku, či obsah textové, či metadatové vrstvy.
+      info - zjištuje informace o souboru či stránce.
+      view - zobrazuje obrazový soubor, resp. vybranou stránku.
+       ocr - aplikace OCR na obrazovou vrstvu. U DjVu souborů se OCR aplikuje
+             přes akci set a výsledek se ukládá – není-li určeno jinak,
+             rovnou do souboru
 
 AKCE specifické pro práci s DjVu soubory:
       edit - editace textové vrstvy DjVu souboru
     delete - odstranění stránky z DjVu svazku
 fore, back - přesuny a import stránek v rámci DjVu svazku
     rotate - změna rotace stránky v DjVu souboru
-    import - import do textové vrstvy DjVu svazku (obsah, metadata, text)
-?      ocr - aplikace OCR
-? indirect,bundle - mění typ DjVu svazku
+    import - import do DjVu svazku souborů typu
+             [3m.djvu[23m    - import DjVu stránky či celého svazku
+             [3m.ant[23m     - metadata
+             [3m.outline[23m - obsah
+             [3m.xml[23m     - textová vrstva
+             [3m.dsed[23m    - obsah, metadata i text
+? indirect,bundle - změna typu DjVu svazku
     rename - přejmenování stránek v DjVu svazku dle vzorku
-       set - jednorázové nastavení meta atributu
-     unset - zrušení meta atributu
-?     sign - vložení informace o poslední změně stránky
+       set - nastavení meta atributu, položky v obsahu, resp. aplikace OCR
+             na vybrané stránky DjVu souboru
+     unset - zrušení meta atributu či textového obsahu DjVu stránky
+      sign - vložení metadat s informacemi o poslední změně stránky
 
 AKCE které nevyžadují žádný soubor:
-    coords - přepočítává koordináty .dsed souborů
-      help - vypisuje nápovědu
+    coords - přepočítává koordináty [3m.dsed[23m souborů
 """
-		;;
+    ;;
     keywords-delete) echo """
   ACTION: [1mdelete[0m
 
@@ -5240,16 +5294,46 @@ Pozor! Je-li uvedeno pouze jedno číslo, je aplikováno zároveň jako nastaven
 """
     help range
     ;;
+    keywords-unset) echo """
+  AKCE [1munset[0m
+
+  Jde o akci s reverzní funkcí vůči akci [2mset[22m, umožňující zrušení nastavených
+  metadat a elementů DjVu souboru z příkazové řádky. Alternativní možností k této
+  akci, je přímá editace obsahu, resp. metadatové vrstvy při akci [2medit[22m.
+
+OCR
+     [1m${0##*/}[0m [volby] <DjVu svazek> unset RANGE ocr
+
+METADATA
+     [1m${0##*/}[0m [volby] <DjVu svazek> unset [RANGE] key KEY
+
+     [1m${0##*/}[0m [volby] <DjVu svazek> unset [RANGE] note DESC
+
+ELEMENTY:
+     [1m${0##*/}[0m [volby] <DjVu svazek> unset [RANGE] ELEMENT …
+
+[3mPoznámka:[23m
+  * Obsah (outline) přes unset zrušit nelze
+  * Skrytou poznámku (note) lze zrušit pouze tehdy, když při akci unset odpovídá
+    i její obsah DESC
+  * Elementy lze rušit buď na základě předaných koordinátů (upřednostněná varianta),
+    nebo na základě shody textového obsahu elementu, ovšem v případě elementů se
+    shodným popisem by mohlo dojít k nechtěnému odstranění jiného elementu.
+"""
+    ;;
     keywords-set) echo """
   AKCE [1mset[0m
 
-  Akce je určena pro nastavení metadat a dalších elementů v DjVu souboru
-  z příkazové řádky. Přes [2mset[22m lze také dodatečně vlastnosti ELEMENTU
-  a jeho ATRIBUTY změnit, ale odstranit se dá pouze při akci [2medit[22m!
+  Akce je určena k nastavení metadat a dalších prvků DjVu souboru z příkazové
+  řádky. Přes [2mset[22m lze také dodatečně měnit vlastnosti ELEMENTU a jeho ATRIBUTY.
+  METADATA a ELEMENTY lze odstranit při akci [2munset[22m nebo [2medit[22m.
 
-  [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {METADATA} …
+     [1m${0##*/}[0m [volby] <DjVu svazek> set RANGE ocr [-h] …
 
-  [1m${0##*/}[0m [volby] <DjVu svazek> set [RANGE] {ELEMENT} … [: ATRIBUTY ]
+OCR:
+       ocr -  Rozpoznávání textu přes externí aplikaci [1mocrodjvu[0m
+
+    [1m${0##*/}[0m [volby] <DjVu svazek> set RANGE METADATA [-h] …
 
 METADATA:       
        key - metadatový klíč (vypisuje se přes exiftools)
@@ -5259,6 +5343,8 @@ METADATA:
 background - barva pozadí okna prohlížeče DjVu souboru (djview)
        xmp - nastavené XMP atributů
       zoom - výchozí velikost zobrazení stránky
+
+    [1m${0##*/}[0m [volby] <DjVu svazek> set RANGE ELEMENT [-h] … [: ATRIBUTY [-h]]
 
 ELEMENTY:
   Jsou prvky, jimiž lze uživatelsky doplnit informační hodnotu původního
@@ -5285,8 +5371,8 @@ ATRIBUTY elementů:
     border_avis         shadow_*
 
 [3mPoznámka:[23m
-  Více informací o každém z atributů a použití elemntů či metadat lze
-  vypsat tak, že se bezprostředně za ně napíše volba -h.
+  Více informací lze vypsat tak, že se bezprostředně za klíčovým slovem napíše
+  volba -h.
 """
     ;;
     set-arrow) echo """
@@ -5483,6 +5569,24 @@ ATRIBUT [1m${1#set-}[0m
 none - vypne zobrazování okraje plochy
 
 Anuluje nastavení hodnoty border i boorder_avis
+"""
+    ;;
+    set-ocr) echo """
+OCR
+
+  K rozpoznávání textu se využívá aplikace [1mocrodjvu[0m, které se předávají
+  případné další parametry jimiž lze ovlivnit použitý engine a jazyk slovníku.
+  Jaké to jsou, lze zjistit, když se přidá jako parametr řetězec help
+
+     [1m${0##*/}[0m [volby] <DjVu svazek> set RANGE ocr help
+
+  Aplikace OCR na stránky určené rozsahem RANGE a uložení výsledku do souboru text.dsed
+  ve formátu [2m.dsed[23m, který lze naimportovat prostřednictvím aplikace [1mdjvused[0m:
+
+    [1m${0##*/}[0m [volby] soubor.djvu set 1,5-8 ocr --save-script text.dsed
+
+  
+
 """
     ;;
     set-outline)
@@ -5687,8 +5791,6 @@ Příklad:
         --lossy        100 - ignorují se plochy
 """
 		;;
-		ocr) echo "Nápověda k OCR - ToDo"
-		;;
     metadata-key) echo """
   METADATA [1m${1#*-}[0m
 
@@ -5730,20 +5832,19 @@ Příklad:
   Metadatový element xmp obsahuje XMP kód, který se pak interpretuje
   podobně jako EXIF tagy."""
     ;;
-    options) echo """Options:
-    -a|--algorithm Algorithm for separating mask of image (fore or back)
-xx  -b|--bundle    Setting type of DjVu bundle
-    -d|--dsed      Export hiddent text layer in native code for DjVused
-       --dpi       DPI input image for import (actions fore or back)
-    -f|--force     Force action
-       --clean     Params for convert image to DjVu with separate layers
+    options) echo """
+Volby:
+    -a|--algorithm Nastavení algoritmu pro vytvoření masky při konverzi do DjVu
+    -d|--diff       Zobrazování rozdílů v souborech co mění textovou vrstvu před
+                   realizací importu
+       --dpi       Nastavení jiné než výchozí hodnoty DPI (300) obrázku při exportu 
+    -f|--force     Vynucení akce obchází veškeré potvrzovací dialogy
+       --clean     Nastavení úrovně ztrát u masky při exportu do formátu DjVu
        --lossy
        --lossless
        --level
     -h|--help      Main options for help about option, or action
-    -o|--ocr       Application OCR
-xx  -t|--thumb     Creating thumbnails in DjVu bundle
-    -v|--verbose"""
+    -v|--verbose   Nastavení logovací úrovně"""
     ;;
     range) echo """RANGE
     Stránky lze identifikovat buď jménem nebo aktuální pozicí v rámci DjVu
@@ -5761,61 +5862,39 @@ xx  -t|--thumb     Creating thumbnails in DjVu bundle
     jakém pořadí byly stránky, či jejich pořadová čísla předány.
   * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
 """
-        ;;
-		suffix) echo """
-[1mParametr[0m
-         -e|--ext  <[2msuffix[22m>  Přípona souborů, ze kterých se má sestavit 
-                                DjVu soubor.
-[4mPopis:[24m
-  [2mSuffix[22m je nutné uvést pouze v případě, že soubory s názvem odpovídajícím
-  vzorku dosud nebyly do DjVu zkonvertovány. Jinak se vždy předpokládá, že
-  se bude pracovat s již konvertovanými DjVu soubory.
-
-  Je-li [2msuffix[22m uveden, budou konvertovány soubory vyhovující vzorku.
-  Pokud některé z nich již konvertovány byly, tak se se fáze konverze
-  přeskočí. Pracuje se pak s již existujícím DjVu souborem.
-
-  Konvertovány jsou pouze soubory, které chybí. Kvalitu konverze lze
-  ovlivnit  dalšími parametry. Mají-li být soubory překonvertovány znovu,
-  lze si to vynutit parametrem -f (--force) a stávající soubory  přepsat.
-
-  Akceptované sufixy: 
-     djvu (default), jpg, gif, png, bmp, pnm, pbm, pgm.
-  Vícevrstvé soubory:
-     xcf, tiff, pdf 
-"""
-			;;
-		value) echo """  VALUE - is normal text string in quotes"""
-		;;
-		verbose) echo """volbu [1m-v[0m ([1m--verbose[0m)
+    ;;
+    verbose) echo """
+  Volba [1m-v[0m ([1m--verbose[0m)
+  
   Prostřednictvím této volby si lze přesměrovat výstup doplňujících
   informačních výpisů na konzoli. Díky nim pak lze podrobně sledovat
   postup skriptu při zpracování souboru
 
   [1m${0##*/}[0m ... {-v|--verbose} ...
-"""
-		;;
-		xml) echo """volba [1m-x[0m ([1m--xml[0m)
 
-  Extrakce skryté textové vrstvy DjVu stránky ve formátu XML.
-  Parametrem lze zvolit, co se má při akci [2mexport[22m uložit.
+  Použít lze pouze čísla od 1 do 9. Nastavení lze provést těmito způsoby:
 
-  [1m${0##*/}[0m ... {-d|--dsed} [yes|no|all|txt|ant] ...
-  
-         yes - stejný efekt jako volba all
-         no  - textová vrstva se neexportuje (default)
-         all - exportuje se celý obsah skryté textové vrstvy
-         txt - exportuje se pouze obsah stránky
-         ant - exportují se meta atributy stránky
+    … -v2 …
+    … -v 2 …
+    … -v=2 …
+    … --verbose 2 …
+    … --verbose=2 …
 
-[4mPoznámka:[24m
-  * Pokud za volbou není uveden žádný další parametr, tak se automaticky
-    předpokládá - yes.
-  * Výchozí parametr - no - lze implicitně změnit nastavením proměnné
-    XML do souboru v adresáři ${HOME}/.config/${NAME}/
-  * Exportovaná data se ukládají do souborů s příponou [3m.xml[23m.
-
-[1mPozor:[0m  Při exportu do XML nelze podchytit všechny meta atributy!!!
+  0 Je výchozí stav, při kterém se logovací zprávy nevypisují nikam.
+  1 Vypisuje pouze chybové (ERR) zprávy pouze na standardní chybový
+    výstup.
+  2 Zapisuje pouze do logu a pouze chybové (ERR) zprávy.
+  3 Vypisuje chybové (ERR) zprávy na standardní výstup a zároveň je
+    zapisuje do logu.
+  4 Vypisuje chybové (ERR) a varovné (WARN) zprávy pouze na standardní
+    chybový výstup.
+  5 Zapisuje chybové (ERR) a varovné (WARN) zprávy pouze do logu.
+  6 Zapisuje chybové (ERR) a varovné (WARN) zprávy na standardní výstup
+    a zároveň je zapisuje do logu.
+  7 Vypisuje všechny zprávy pouze na standardní chybový výstup.
+  8 Zapisuje všechny zprávy pouze do logu.
+  9 Vypisuje všechny zprávy na standardní výstup a zároveň je zapisuje
+    do logu.
 """
     ;;
     xmp) echo """Nastavení XMP
@@ -5838,7 +5917,6 @@ xx  -t|--thumb     Creating thumbnails in DjVu bundle
       </dc:title>
       </rdf:Description>
       </rdf:RDF>
-
 """
     ;;
     *) echo "Nápověda pro $1 nebyla dosud implementována" >> /dev/stderr
@@ -5875,12 +5953,10 @@ do
         exif|xmp) help ${1}
             return 0
         ;;
-        help) echo "Otevřít ke čtení externí manuál"
-            return 0
-        ;;
-        -a|--algorithm) #/ Volba pro akci insert
-            #/ Není-li uveden žádný kompresní algoritmus, je aplikováno
-            #/ výchozí nastavení proměnné $ALG z konfigurace"
+        -a|--algorithm) #/ S proměnnou ALG, která se nastavuje přes tuto volbu
+            #/ pracuje funkce fromcontainer
+            #/ Není-li uveden žádný kompresní algoritmus, tak se bude aplikovat
+            #/ výchozí nastavení proměnné příslušné $ALG z konfigurace
             case ${2} in
                 -h|--help) help algorithm
                     exit 0
@@ -5898,18 +5974,18 @@ do
                     shift && shift
                     ;;
             esac
-            ;;
-        -d|--diff) # Volba pro akci import
-            DIFF="yes"
-            [ ! ${DIFF} ] && exit 18
+        ;;
+        -d|--diff) # Je-li nastavena tato volba, pak se při importu nabízí možnost 
+            # zobrazení rozdílů prostřednictvím aplikace vimdiff
             case ${2} in
                 -h*|--help*) help diff && exit 0
-                    ;;
-                *) DSED="yes"
+                ;;
+                *) DIFF="yes"
+                    [ ! ${DIFF} ] && exit 18
                     shift
-                    ;;
+                ;;
             esac
-            ;;
+        ;;
         --dpi) # Volba pro akci insert
             case ${2} in
                 -h*|--help*) help dpi && exit 0
@@ -5928,7 +6004,7 @@ do
                     exit 1
                     ;;
             esac
-            ;;
+        ;;
         -f|--force)
             case ${2} in
                 -h*|--help*) help force && exit 0
@@ -5943,13 +6019,13 @@ do
                     ;;
             esac
             log set "main() FORCE –> ${FORCE}"
-            ;;
+        ;;
         --clean) LEVEL="--loss-level=1" && shift
-            ;;
+        ;;
         --lossy) LEVEL="--loss-level=100" && shift
-            ;;
+        ;;
         --lossless) LEVEL="--loss-level=0" && shift
-            ;;
+        ;;
         --level) # Volba pro akci insert
             case ${2} in
                 -h*|--help*) help force && exit 0
@@ -5968,114 +6044,7 @@ do
                     ;;
             esac
             log info "main() Úroveň ztrátovosti při kompresi ${LEVEL}"
-            ;;
-        -o|--ocr) # Volba pro akci insert
-            case "${2}" in
-                -h*|--help*) help ocr
-                    ${TESSERACT} --list-langs 2>&1 | sed -n '1!p'
-                    exit 0
-                    ;;
-                *)
-#			echo $(${TESSERACT} --list-langs 2>&1 | sed '1d;x') >> /dev/stderr
-                for i in ${2//+/ } ; do
-                    local TEST="no"
-                    local OCR=(${i//:/\ })
-                    if [ "${#OCR[@]}" -eq 2 ] ; then
-                        # ${OCR[0]} engine
-                        # ${OCR[1]} jazyk
-                        case "${OCR[0]:0:1}" in
-                            c) CUNEIFORM=$(command -v cuneiform)
-                                [ ! -x "${CUNEIFORM}" ] && exit 31
-                                if [ "${OCR[1]}" == "?" ] ; then
-                                    ${CUNEIFORM} -l
-                                    exit 0
-                                else
-                                    local LANGUAGES=($(${CUNEIFORM} -l | grep languages | sed 's/^[a-Z ]*://'))
-                                    if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
-                                        OCRLANG=$y && local TEST="yes"
-                                        log info "main() OCR lang –> $y"
-                                    fi
-                                fi
-                                ;;
-                            t) TESSERACT=$(command -v tesseract)
-                                [ ! -x "${TESSERACT}" ] && exit 31
-                                if [ "${OCR[1]}" == "?" ] ; then
-                                    ${TESSERACT} --list-langs
-                                    exit 0
-                                else
-                                    local LANGUAGES=($(${TESSERACT} --list-langs 2>&1 | sed -n '1!p'))
-                                    if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
-                                        OCRLANG=$y && local TEST="yes"
-                                        log info "main() OCR lang –> $y"
-                                    fi
-                                fi
-                                ;;
-                            *) help keywords-convert-ocr
-                                exit 0
-                                ;;
-                        esac
-                    elif [ "${#OCR[@]}" -eq 1 ] ; then
-                        # ${OCR[0]} jazyk
-                        # výchozí engine je tesseract
-                        TESSERACT=$(command -v tesseract)
-                        [ ! -x "${TESSERACT}" ] && exit 31
-                        if [ "${OCR[0]}" == "?" ] ; then
-                            ${TESSERACT} --list-langs
-                            exit 0
-                        else
-                            local LANGUAGES=($(${TESSERACT} --list-langs 2>&1 | sed -n '1!p'))
-                            if [[ ${LANGUAGES[@]} =~ (^|[^[:alpha:]])$y([^[:alpha:]]|$) ]] ; then
-                                OCRLANG=$y && local TEST="yes"
-                                log info "main() OCR lang –> $y"
-                            fi
-                        fi
-                    else
-                        help keywords-convert-ocr
-                        exit 0
-                    fi
-                    echo "OCR ${#OCR[@]}" >> /dev/stderr
-                    echo "OCRLANG ${OCRLANG}" >> /dev/stderr
-                    echo "TESSERACT ${TESSERACT}" >> /dev/stderr
-                    echo "CUNEIFORM ${CUNEIFORM}" >> /dev/stderr
-                    if [ "${TEST}" == "no" ] ; then
-                        echo "Pro OCR engine $i není nainstalovanájazyková podpora" >> /dev/stderr
-#					exit 1
-                    fi
-                done
-
-                if [ "${TEST}" == "yes" ] ; then
-                    OCR="${2%%+([[:blank:]])}"
-                    log info "main() Aplikuji pro OCR parametr - ${OCR}"
-                    shift && shift
-                else
-                    OCR="${OCR=ces}"
-                    echo "Nebyl uveden žádný parametr, pro OCR použiji výchozí jazyk - ${OCR}" >> /dev/stderr
-#				exit 1
-                    shift
-                fi
-                ;;
-            esac
-            ;;
-        -t|--thumb) # Volba pro akci insert
-            case "${2}" in
-                -h*|--help*) help thumb && exit 0
-                    ;;
-                *) if [ "${2//+([[:digit:]])}" == "" ] ; then
-                        if [ "${2}" -ge "32" ] && [ "${2}" -le "256" ] ; then
-                            THUMB="${2%%+([[:blank:]])}"
-                            log info "main() Aplikuji pro THUMB parametr - ${DPI}"
-                            shift && shift
-                        else
-                            echo "Hodnota u volby --thumb se musí pohybovat v rozmezí od 32 do 256" >> /dev/stderr
-                            exit 1
-                        fi
-                    else
-                        echo "Nebyla uvedena hodnota velikosti náhledu. Pokud chcete volbou --thumb nastavit výchozí hodnotu, musíte ji uvést jako číselný parametr" >> /dev/stderr
-                        exit 1
-                    fi
-                    ;;
-            esac
-            ;;
+        ;;
         -v*|--verbose*) #/ Změna výchozí hodnoty proměnné $DEBUG
             case ${1} in
                 -v|--verbose)
@@ -6109,60 +6078,47 @@ do
                     ;;
             esac
             log set "DEBUG –> ${DEBUG}"
-            ;;
-        -x|--xml) # Volba pro akci export
-            case "${2}" in
-                -h*|--help*) help xml && exit 0
-                    ;;
-                yes|no|txt|ant|all) XML="${2%%+([[:blank:]])}"
-                    log info "main() Aplikuji pro XML parametr - ${XML}"
-                    shift && shift
-                    ;;
-                *) log warn "main() Nebyl uveden žádný parametr, aplikuji pro XML parametr - yes"
-                    XML="yes"
-                    shift
-                    ;;
-            esac
-            ;;
-            *.[dD][jJ][vV][uU]|\
-            *.[gG][iI][fF]|\
-            *.[jJ][pP][gG]|\
-            *.[jJ][pP]2|\
-            *.[zZ][iI][pP]|\
-            *.[pP][nN][gG]|\
-            *.[pP][nNpPgGaAbB][mM]|\
-            *.fore|\
-            *.[pP][cC][dD]|\
-            *.[mM][nN][gG]|\
-            *.[pP][dD][fF]|\
-            *.[tT][aA][rR]|\
-            *.[tT][iI][fF][fF]|\
-            *.[tT][iI][fF]|\
-            *.[xX][cC][fF])
-                local FILE=$(realpath -P "${1}")
-                [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
+        ;;
+        *.[dD][jJ][vV][uU]|\
+        *.[gG][iI][fF]|\
+        *.[jJ][pP][gG]|\
+        *.[jJ][pP]2|\
+        *.[zZ][iI][pP]|\
+        *.[pP][nN][gG]|\
+        *.[pP][nNpPgGaAbB][mM]|\
+        *.fore|\
+        *.[pP][cC][dD]|\
+        *.[mM][nN][gG]|\
+        *.[pP][dD][fF]|\
+        *.[tT][aA][rR]|\
+        *.[tT][iI][fF][fF]|\
+        *.[tT][iI][fF]|\
+        *.[xX][cC][fF])
+            local FILE=$(realpath -P "${1}")
+            [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
+            shift
+            if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
+                ACTION=${1}
                 shift
-                if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
-                    ACTION=${1}
-                    shift
-                    local CHARSTRING="$@"
-                    log info "ACTION –> ${ACTION}"
-                    log info "CHARSTRING –> ${CHARSTRING}"
-                    break
-                else
-                    case ${1} in
-                        -h|--help|help|?) help actions
-                            printf "\t"
-                            printf "%s " ${ACTIONS[@]}
-                            help keywords
-                            return 0
-                        ;;
-                        *) echo "Neimplementovaná ekce, nebo parametr –> ${1}" >> /dev/stderr
-                            return 1
-                        ;;
-                    esac
-                fi
-                ;;
+                local CHARSTRING="$@"
+                log info "ACTION –> ${ACTION}"
+                log info "CHARSTRING –> ${CHARSTRING}"
+                break
+            else
+                case ${1} in
+                    -h|--help|help|?)
+                        help
+                        help actions
+                        printf "\t"
+                        printf "%s " ${ACTIONS[@]}
+                        return 0
+                    ;;
+                    *) echo "Neimplementovaná ekce, nebo parametr –> ${1}" >> /dev/stderr
+                        return 1
+                    ;;
+                esac
+            fi
+        ;;
         *) if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
                 ACTION=${1}
                 shift
@@ -6188,6 +6144,7 @@ do
                         local CHARSTRING="$@"
                         log info "main() ACTION –> ${ACTION}"
                         log info "main() CHARSTRING –> ${CHARSTRING}"
+                        echo ""
                         break
                     ;;
                     *) echo "${1} – Nepodporovaný typ souboru" >> /dev/stderr
@@ -6199,10 +6156,11 @@ do
 # který by byl ošetřen pomocí voleb. Další paramtery jsou pak již číslovány
 # 1, 2, 3 atd..
                 case ${1} in
-                    -h|--help|help|?) help actions
+                    -h|--help|help|?) help
+                        help actions
                         printf "\t"
                         printf "%s " ${ACTIONS[@]}
-                        help keywords
+                        echo ""
                         return 0
                     ;;
                     *) log warn "Neimplementovaný parametr ${1}"
@@ -6242,6 +6200,7 @@ if [[ "${CHARSTRING}" =~ "-h" ]] ; then
                                 lineclr|\
                                 mode|\
                                 none|\
+                                ocr|\
                                 oval|\
                                 poly|\
                                 pushpin|\
