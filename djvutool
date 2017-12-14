@@ -1528,6 +1528,165 @@ isscale() {
     fi
 }
 
+# ### <span id="importdjvu">importdjvu()</span> ([top](#FUNCTIONS))
+# Funkce zajišťuje akce import a edit
+importdjvu() {
+                case "${CHARSTRING}" in
+                    ant*) #/ Importuji obsah .ant souboru
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
+                        local ANTFILE="${CHARSTRING#ant+([[:blank:]])}"
+                        #/ ořezat mezery před a za
+                        if [ -f "${ANTFILE}" ] ; then
+                            cat "${ANTFILE}" > "${TEMPFILE}"
+                        else
+                            writefile "${TEMPFILE}"
+                            if [ $? -eq 1 ] ; then
+                                (
+                                printf '; Pravidla pro obsah souboru .ant :\n'
+                                printf '; * Globální meta informace se píší jako součást stránky "shared_anno.iff" \n'
+                                printf '; * Stránka může být identifikována buď pořadovým číslem, nebo jménem\n'
+                                printf '; * Blok meta informací vždy začíná řádkem uvozeným znakem # za kterým následuje identifikátor stránky (číslo, nebo jméno)\n'
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
+                                printf '; * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
+                                printf '; * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
+                                printf '; * Soubor nesmí končit prázdným řádkem!\n'
+                                printf '; * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
+                                printf ';\n'
+                                printf ';Author "Aleš Novák"\n'
+                                printf ';\n'
+                                printf ';; Aktivní link bez bubliny"\n'
+                                printf ';maparea "https://www.thewoodcraft.org/" ""\n'
+                                printf ';rect 225 0 804 61\n'
+                                printf ';xor\n'
+                                printf ';\n'
+                                printf ';; Aktivní link s bublinou"\n'
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                printf ';        (rect 225 0 804 61 )\n'
+                                printf ';        (xor )\n'
+                                printf ';; Aktivní link s bublinou u textu přes dva řádky"\n'
+                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
+                                $0 "${FILE}" export ${CHARSTRING}
+                                echo "" ) | tee "${TEMPDIR}/ant.orig" >> "${TEMPFILE}"
+                            fi
+                        fi
+                        case ${ACTION} in
+                            edit)
+                                editor "${TEMPFILE}"
+                            ;;
+                        esac
+                        if [ -n "${DIFF}" ] ; then
+                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
+                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
+                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
+                            if [ ! $? -eq 1 ] ; then
+                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/ant.orig" "${TEMPFILE}"
+                            fi
+                            anone "Uložit změny?"
+                            [ $? -eq 1 ] && return 1
+                        fi
+                        local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+                        ant2dsed "${TEMPFILE}" > "${DSEDFILE}"
+                        if [ $? -eq 1 ] ; then
+                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
+                            exit 33
+                        fi
+                        ${DJVUSED} "${FILE}" -f "${DSEDFILE}" -s
+                        return $?
+                    ;;
+                    outline*) echo "Importuji záložky"
+                        echo "Přijato k importu ${CHARSTRING}"
+                        #/ Může být předaný i soubor
+                        #/ Není-li předaný soubor, zkus načíst stdin
+                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
+                        local OUTLINEFILE="${CHARSTRING#outline+([[:blank:]])}"
+                        #/ ořezat mezery před a za
+                        if [ -f "${OUTLINEFILE}" ] ; then
+                            log info "main() Importuji .outline soubor ${OUTLINEFILE}"
+                            cat "${OUTLINEFILE}" > "${TEMPFILE}"
+                        else
+                            writefile "${TEMPFILE}"
+                            if [ $? -eq 1 ] ; then
+                                log info "main() Na stdin nebylo nic, přidám záhlaví a vytáhnu stávající záložky"
+                                (
+                                printf '; Pravidla pro obsah souboru .outline :\n'
+                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
+                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n'
+                                printf ';  * Identifikátor vždy začíná znakem #\n'
+                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n'
+                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
+                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
+                                printf ';  * Soubor nesmí končit prázným řádkem!\n'
+                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
+                                printf ';\n'
+                                printf ';"Link první úrovně" "#1"\n'
+                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n'
+                                $0 "${FILE}" info list | sed 's/^/; /'
+                                $0 "${FILE}" export outline ) | tee "${TEMPDIR}/outline.orig" >> "${TEMPFILE}"
+                            fi
+                        fi
+#                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
+                        case ${ACTION} in
+                            edit) editor "${TEMPFILE}"
+                            ;;
+                        esac
+                        if [ -n "${DIFF}" ] ; then
+                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
+                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
+                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
+                            if [ ! $? -eq 1 ] ; then
+                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/outline.orig" "${TEMPFILE}"
+                            fi
+                        fi
+                        outlinetodjvu "${FILE}" "${TEMPFILE}"
+                        if [ $? -eq 1 ] ; then
+                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
+                            exit 33
+                        else
+                            echo "Záložky byly aktualizovány" >> /dev/stderr
+                        fi
+                        return 0
+                    ;;
+                    page*)
+                        #/ Importovat lze jednu stránku i soubor
+                        #/ Importuje se na určitou pozici
+                        local TEMP="${CHARSTRING#page+([[:blank:]])}"
+                        local RANGE=$(isrange "${TEMP}")
+                        case "${RANGE}" in
+                            +([[:digit:]]))
+                                local DJVUFILE=$(${REALPATH} -m -P "${TEMP#${RANGE}+([[:blank:]])}")
+                            ;;
+                            *) if [ -n "${RANGE}" ] ; then
+                                    echo "Při importu nelze použít rozsah." >> /dev/stderr
+                                    return 1
+                                else
+                                    local DJVUFILE=$(${REALPATH} -m -P "${TEMP}")
+                                fi
+                            ;;
+                        esac
+                        if [ -f "${DJVUFILE}" ] ; then
+                            if [ -n "${RANGE}" ] ; then
+                                anone "Opravdu vložit soubor ${DJVUFILE} na pozici ${RANGE}?"
+                                [ $? -eq 1 ] && return 1
+                                ${DJVM} -i "${FILE}" "${DJVUFILE}" "${RANGE}"
+                            else
+                                anone "Opravdu připojit soubor ${DJVUFILE}?"
+                                [ $? -eq 1 ] && return 1
+                                ${DJVM} -i "${FILE}" "${DJVUFILE}"
+                            fi
+                        else
+                            echo "Neplatná cesta k souboru –> ${DJVUFILE}" >> /dev/stderr
+                            return 1
+                        fi
+                        return $?
+                    ;;
+                    xml*) xmlimport "${FILE}" "${CHARSTRING#xml+([[:blank:]])}"
+                    ;;
+                    *) help keyword-${CHARSTRING%% *}
+                    ;;
+                esac
+}
+
 # ### <span id="exportdjvu">exportdjvu()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportfile, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
@@ -5129,6 +5288,17 @@ FORMAT
     ;;
     import-ant)
     help edit-ant
+    echo """
+  Import předhozeného souboru a případná editace jeho obsahu
+  Před editací meta informací, je doporučeno zkontrolovat a případně 
+  vyexportovat aktuální stav, příkazem
+  
+  djvutool <DJVU soubor> export ant [> aktualni_stav.ant]
+  
+  Pokud chcete mít obarvený výstup a zároveň ho uložit obvarvený do souboru, použijte následující kombinaci:
+  
+  ( grc djvutool soubor.djvu export ant | tee >(sed -r \"s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})*)?m//g\" > soubor.ant) )
+"""
         ;;
     import-note)
         help metadata-note
@@ -6249,184 +6419,22 @@ case ${FILETYPE} in
                     [ $? -eq 1 ] && echo "Page isn't in ${FILE} –> $i" >> /dev/stderr && return 1
                 done
             ;;
-            fore|back) #/ Přesouvám
+            fore|back)
                 djvumove "${FILE}" "${CHARSTRING}"
             ;;
-            export) #/ Exportuji stránku
-                log info "main() export from page ${CHARSTRING}"
-                exportdjvu "${FILE}" "${CHARSTRING}" | xxd -p | paste -s -d'-' | sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' | tr '-' '\n' |  xxd -r -p
+            export) exportdjvu "${FILE}" "${CHARSTRING}" |\
+                xxd -p |\
+                paste -s -d'-' |\
+                sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' |\
+                tr '-' '\n' | xxd -r -p
             ;;
-            import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
-                # Před editací meta informací, je doporučeno zkontrolovat a případně 
-                # vyexportovat aktuální stav, příkazem
-                #
-                # djvutool <DJVU soubor> export ant [> aktualni_stav.ant]
-                #
-                # Pokud chcete mít obarvený výstup a zároveň ho uložit obvarvený do souboru, použijte následující kombinaci:
-                #
-                # ( grc djvutool soubor.djvu export ant | tee >(sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})*)?m//g" > soubor.ant) )
-                case "${CHARSTRING}" in
-                    ant*) #/ Importuji obsah .ant souboru
-                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
-                        local ANTFILE="${CHARSTRING#ant+([[:blank:]])}"
-                        #/ ořezat mezery před a za
-                        if [ -f "${ANTFILE}" ] ; then
-                            cat "${ANTFILE}" > "${TEMPFILE}"
-                        else
-                            writefile "${TEMPFILE}"
-                            if [ $? -eq 1 ] ; then
-                                (
-                                printf '; Pravidla pro obsah souboru .ant :\n'
-                                printf '; * Globální meta informace se píší jako součást stránky "shared_anno.iff" \n'
-                                printf '; * Stránka může být identifikována buď pořadovým číslem, nebo jménem\n'
-                                printf '; * Blok meta informací vždy začíná řádkem uvozeným znakem # za kterým následuje identifikátor stránky (číslo, nebo jméno)\n'
-                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
-                                printf '; * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
-                                printf '; * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
-                                printf '; * Soubor nesmí končit prázdným řádkem!\n'
-                                printf '; * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
-                                printf ';\n'
-                                printf ';Author "Aleš Novák"\n'
-                                printf ';\n'
-                                printf ';; Aktivní link bez bubliny"\n'
-                                printf ';maparea "https://www.thewoodcraft.org/" ""\n'
-                                printf ';rect 225 0 804 61\n'
-                                printf ';xor\n'
-                                printf ';\n'
-                                printf ';; Aktivní link s bublinou"\n'
-                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
-                                printf ';        (rect 225 0 804 61 )\n'
-                                printf ';        (xor )\n'
-                                printf ';; Aktivní link s bublinou u textu přes dva řádky"\n'
-                                printf ';URL ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
-                                printf ';        ("https://www.thewoodcraft.org/" "_blank" ) "Odkaz na stránky Thewoodcraft.org"\n'
-                                $0 "${FILE}" export ${CHARSTRING}
-                                echo "" ) | tee "${TEMPDIR}/ant.orig" >> "${TEMPFILE}"
-                            fi
-                        fi
-                        case ${ACTION} in
-                            edit)
-                                editor "${TEMPFILE}"
-                            ;;
-                        esac
-                        if [ -n "${DIFF}" ] ; then
-                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
-                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
-                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
-                            if [ ! $? -eq 1 ] ; then
-                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/ant.orig" "${TEMPFILE}"
-                            fi
-                            anone "Uložit změny?"
-                            [ $? -eq 1 ] && return 1
-                        fi
-                        local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
-                        ant2dsed "${TEMPFILE}" > "${DSEDFILE}"
-                        if [ $? -eq 1 ] ; then
-                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
-                            exit 33
-                        fi
-                        ${DJVUSED} "${FILE}" -f "${DSEDFILE}" -s
-                        return $?
-                    ;;
-                    outline*) echo "Importuji záložky"
-                        echo "Přijato k importu ${CHARSTRING}"
-                        #/ Může být předaný i soubor
-                        #/ Není-li předaný soubor, zkus načíst stdin
-                        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .outline)
-                        local OUTLINEFILE="${CHARSTRING#outline+([[:blank:]])}"
-                        #/ ořezat mezery před a za
-                        if [ -f "${OUTLINEFILE}" ] ; then
-                            log info "main() Importuji .outline soubor ${OUTLINEFILE}"
-                            cat "${OUTLINEFILE}" > "${TEMPFILE}"
-                        else
-                            writefile "${TEMPFILE}"
-                            if [ $? -eq 1 ] ; then
-                                log info "main() Na stdin nebylo nic, přidám záhlaví a vytáhnu stávající záložky"
-                                (
-                                printf '; Pravidla pro obsah souboru .outline :\n'
-                                printf '; * Text záložky i její cíl musí být v uvozovkách\n'
-                                printf ';  * Cíl může být identifikován buď pořadovým číslem stránky, nebo jejím jménem\n'
-                                printf ';  * Identifikátor vždy začíná znakem #\n'
-                                printf ';  * Úroveň zanoření záložky je daná odsazením pomocí tabelátoru\n'
-                                printf ';  * Veškerý text na řádcích začínajících středníkem je považován za komentář\n'
-                                printf ';  * Při importu souboru bude zakomentovaný obsah odfiltrován\n'
-                                printf ';  * Soubor nesmí končit prázným řádkem!\n'
-                                printf ';  * Pokud se do soubory změny neuloží, tak se vloží zpět původní obsah.\n'
-                                printf ';\n'
-                                printf ';"Link první úrovně" "#1"\n'
-                                printf ';      "Link druhé úrovně" "#strana-001.djvu"\n'
-                                $0 "${FILE}" info list | sed 's/^/; /'
-                                $0 "${FILE}" export outline ) | tee "${TEMPDIR}/outline.orig" >> "${TEMPFILE}"
-                            fi
-                        fi
-#                        echo "Obsah záložek byl zapsán do souboru ${TEMPFILE}" >> /dev/stderr
-                        case ${ACTION} in
-                            edit) editor "${TEMPFILE}"
-                            ;;
-                        esac
-                        if [ -n "${DIFF}" ] ; then
-                            echo "Pokud máte nainstalovaný vim, můžete se ještě přes realizací změn podívat, v čem se bude nový obsah stránky lišit od stávajícího." >> /dev/stderr
-                            echo "V případě, že v obsahu nebude rozdíl, neozobrazí se nic! Aplikaci vimdiff ukončíte tím, že napíšete :qa" >> /dev/stderr
-                            anone "Chcete si prohlédnout změny?" >> /dev/stderr
-                            if [ ! $? -eq 1 ] ; then
-                                vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/outline.orig" "${TEMPFILE}"
-                            fi
-                        fi
-                        outlinetodjvu "${FILE}" "${TEMPFILE}"
-                        if [ $? -eq 1 ] ; then
-                            echo "V importovaném souboru ${TEMPFILE} je syntaktická chyba" >> /dev/stderr
-                            exit 33
-                        else
-                            echo "Záložky byly aktualizovány" >> /dev/stderr
-                        fi
-                        return 0
-                    ;;
-                    page*)
-                        #/ Importovat lze jednu stránku i soubor
-                        #/ Importuje se na určitou pozici
-                        local TEMP="${CHARSTRING#page+([[:blank:]])}"
-                        local RANGE=$(isrange "${TEMP}")
-                        case "${RANGE}" in
-                            +([[:digit:]]))
-                                local DJVUFILE=$(${REALPATH} -m -P "${TEMP#${RANGE}+([[:blank:]])}")
-                            ;;
-                            *) if [ -n "${RANGE}" ] ; then
-                                    echo "Při importu nelze použít rozsah." >> /dev/stderr
-                                    return 1
-                                else
-                                    local DJVUFILE=$(${REALPATH} -m -P "${TEMP}")
-                                fi
-                            ;;
-                        esac
-                        if [ -f "${DJVUFILE}" ] ; then
-                            if [ -n "${RANGE}" ] ; then
-                                anone "Opravdu vložit soubor ${DJVUFILE} na pozici ${RANGE}?"
-                                [ $? -eq 1 ] && return 1
-                                ${DJVM} -i "${FILE}" "${DJVUFILE}" "${RANGE}"
-                            else
-                                anone "Opravdu připojit soubor ${DJVUFILE}?"
-                                [ $? -eq 1 ] && return 1
-                                ${DJVM} -i "${FILE}" "${DJVUFILE}"
-                            fi
-                        else
-                            echo "Neplatná cesta k souboru –> ${DJVUFILE}" >> /dev/stderr
-                            return 1
-                        fi
-                        return $?
-                    ;;
-                    xml*) xmlimport "${FILE}" "${CHARSTRING#xml+([[:blank:]])}"
-                    ;;
-                    *) help keyword-${CHARSTRING%% *}
-                    ;;
-                esac
+            import|edit) importdjvu "${FILE}" "${CHARSTRING}"
             ;;
             info) djvuinfo "${FILE}" "${CHARSTRING}"
             ;;
-            rename) #/ Přejmenovávám stránky
-                djvurename "${FILE}" "${CHARSTRING}"
+            rename) djvurename "${FILE}" "${CHARSTRING}"
             ;;
-            rotate) #/ Otáčím stránku
-                djvurotate "${FILE}" "${CHARSTRING}"
+            rotate) djvurotate "${FILE}" "${CHARSTRING}"
             ;;
             set|unset) setdjvu  "${FILE}" "${CHARSTRING}"
             ;;
