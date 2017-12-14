@@ -2868,13 +2868,13 @@ EOF
     esac
 }
 
-# ### <span id="fromcontainer">fromcontainer()</span> ([top](#FUNCTIONS))
+# ### <span id="exportimg">exportimg()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportfile, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
-fromcontainer() {
-    log goto "fromcontainer() $1 –> $2"
+exportimg() {
+    log goto "exportimg() $1 –> $2"
 
     local INTO=$(isformat "${2}")
     if [ -n "${INTO}" ] ; then
@@ -2900,13 +2900,13 @@ fromcontainer() {
         local PARAM=(${SCALE})
         case "${PARAM[$((${#PARAM[@]}-1))]}" in
             -filter=*)
-                log info "fromcontainer()" \
+                log info "exportimg()" \
                 "Scale use any resize filter –> ${PARAM[$((${#PARAM[@]}-1))]}"
                 local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
             ;;
             [0-9]*)
                 case ${#PARAM[@]} in
-                1) log info "fromcontainer()" \
+                1) log info "exportimg()" \
                     "Only resize scale –> ${PARAM[$((${#PARAM[@]}-1))]}"
                     local TEMPORAR="${TEMPORAR#*${PARAM[$((${#PARAM[@]}-1))]}}"
                 ;;
@@ -2962,7 +2962,7 @@ fromcontainer() {
     echo "ALG ${ALG[@]}"
     # exit 33
     case ${FILETYPE} in
-        pbm|pgm|ppm) log info "fromcontainer() Export from ${FILETYPE^^}"
+        pbm|pgm|ppm) log info "exportimg() Export from ${FILETYPE^^}"
             if [ -n "${RANGE}" ] && [ ! ${RANGE} -eq 1 ] ; then
                 echo "Formát ${FILETYPE} podporuje pouze jednu stránku" >> /dev/stderr
                 return 1
@@ -3061,7 +3061,7 @@ fromcontainer() {
                 ;;
             esac
         ;;
-        jpeg) log info "fromcontainer() Export from JPEG into ${INTO}"
+        jpeg) log info "exportimg() Export from JPEG into ${INTO}"
             #exit 33
             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
             if [ -n "${TARGETSAMPLE}" ] ; then
@@ -3121,7 +3121,7 @@ fromcontainer() {
                 ;;
             esac
         ;;
-        png)   log info "fromcontainer() Export from PNG"
+        png)   log info "exportimg() Export from PNG"
             case "${INTO}" in
                 images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
                     return 1
@@ -3132,7 +3132,7 @@ fromcontainer() {
                     return 1
                 ;;
                 *)
-                    log info "fromcontainer() Original file is exported from container without conversion"
+                    log info "exportimg() Original file is exported from container without conversion"
                     local PAGES=($(range "${RANGE}"))
                     local LISTPAGES=($(listpng "${FILE}"))
                     #/ echo "${LISTPAGES[-1]}"
@@ -3225,7 +3225,7 @@ fromcontainer() {
                 ;;
             esac
         ;;
-        pdf)  log info "fromcontainer() Export from PDF"
+        pdf)  log info "exportimg() Export from PDF"
             case "${INTO}" in
                 images) log info "exportuji pouze obrázky z ředaného rozsahu"
                 ;;
@@ -3260,7 +3260,7 @@ fromcontainer() {
                 ;;
             esac
         ;;
-        gimp|xcf) log info "fromcontainer() Export from XCF"
+        gimp|xcf) log info "exportimg() Export from XCF"
             case "${INTO}" in
                 images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
                     return 1
@@ -3271,7 +3271,7 @@ fromcontainer() {
                     return 1
                 ;;
                 *)
-                    log info "fromcontainer() Original file is exported from container without conversion"
+                    log info "exportimg() Original file is exported from container without conversion"
                     local PAGES=($(range "${RANGE}"))
                     local LISTPAGES=($(listxcf "${FILE}"))
                     #/ echo "${LISTPAGES[-1]}"
@@ -3335,7 +3335,7 @@ fromcontainer() {
                 ;;
             esac
         ;;
-        zip|tar) log info "fromcontainer() Export from archive"
+        zip|tar) log info "exportimg() Export from archive"
             case "${INTO}" in
                 images) echo "Parametr použitelný pouze u PDF - exportují se obrázky místo stránek" >> /dev/stderr
                     return 1
@@ -3459,7 +3459,7 @@ fromcontainer() {
                                         ;;
                                     esac
                             else
-                                log info "fromcontainer() Original file ${PAGE} is exported from container without conversion"
+                                log info "exportimg() Original file ${PAGE} is exported from container without conversion"
                                 $(itemzip "${FILE}" "${PAGE}" > "${TARGET}")
                             fi
                             echo "Page $i saved as ${TARGET}" >> /dev/stderr
@@ -3553,13 +3553,13 @@ exportfile() {
             local TARGET="${CHARSTRING#*.list}"
             while read line ; do
                 CHARSTRING="$line ${TARGET}"
-                fromcontainer "${FILE}" "${CHARSTRING}"
+                exportimg "${FILE}" "${CHARSTRING}"
             done < "${SOURCE}"
         else
             return 1
         fi
     else
-        fromcontainer "${FILE}" "${CHARSTRING}"
+        exportimg "${FILE}" "${CHARSTRING}"
     fi
     return $?
 }
@@ -5952,7 +5952,7 @@ do
             return 0
         ;;
         -a|--algorithm) #/ S proměnnou ALG, která se nastavuje přes tuto volbu
-            #/ pracuje funkce fromcontainer
+            #/ pracuje funkce exportimg
             #/ Není-li uveden žádný kompresní algoritmus, tak se bude aplikovat
             #/ výchozí nastavení proměnné příslušné $ALG z konfigurace
             case ${2} in
