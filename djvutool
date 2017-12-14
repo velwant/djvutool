@@ -1529,7 +1529,7 @@ isscale() {
 }
 
 # ### <span id="exportdjvu">exportdjvu()</span> ([top](#FUNCTIONS))
-# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# Na rozdíl od funkce exportfile, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
@@ -2363,7 +2363,7 @@ EOF
 }
 
 # ### <span id="setdjvu">setdjvu()</span> ([top](#FUNCTIONS))
-# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# Na rozdíl od funkce exportfile, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
@@ -2869,7 +2869,7 @@ EOF
 }
 
 # ### <span id="fromcontainer">fromcontainer()</span> ([top](#FUNCTIONS))
-# Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
+# Na rozdíl od funkce exportfile, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
@@ -3473,7 +3473,7 @@ fromcontainer() {
     return 0
 }
 
-# ### <span id="exportimg">exportimg()</span> ([top](#FUNCTIONS))
+# ### <span id="exportfile">exportfile()</span> ([top](#FUNCTIONS))
 # Funkce exportuje ze souboru stránky jako obrázky.
 # Vstupními parametry jsou globální proměnné:
 # * FILE - Soubor ze kterého se stránka exportuje.
@@ -3540,8 +3540,8 @@ fromcontainer() {
 # řetězce jako výchozí vzor pro pojmenování stránky
 # (obrázku) cílový soubor se tedy bude v tomto případě
 # jmenovat example_30%_001.jpg
-exportimg() {
-    log goto "exportimg() ${FILE} –> ${CHARSTRING}"
+exportfile() {
+    log goto "exportfile() ${FILE} –> ${CHARSTRING}"
     if [[ "${CHARSTRING}" =~ "?" ]] ||\
         [[ "${CHARSTRING}" =~ "-h" ]] ||\
         [[ "${CHARSTRING}" =~ "help" ]] ; then
@@ -3549,7 +3549,7 @@ exportimg() {
     elif [[ "${CHARSTRING}" =~ ".list" ]] ; then
         local SOURCE=$(${REALPATH} -m -P "${CHARSTRING%.list*}.list" 2>/dev/null)
         if [ -f "${SOURCE}" ] ; then
-            log info "exportimg() Read params from –> ${SOURCE}"
+            log info "exportfile() Read params from –> ${SOURCE}"
             local TARGET="${CHARSTRING#*.list}"
             while read line ; do
                 CHARSTRING="$line ${TARGET}"
@@ -6439,7 +6439,7 @@ case ${FILETYPE} in
     ;;
     *) log info "Input bitmap file (or archive) ${FILE} in format –> ${FILETYPE}"
         case ${ACTION} in
-            export) exportimg
+            export) exportfile
             ;;
             info) infoimg
             ;;
