@@ -1528,7 +1528,7 @@ isscale() {
     fi
 }
 
-# ### <span id="fromdjvu">fromdjvu()</span> ([top](#FUNCTIONS))
+# ### <span id="exportdjvu">exportdjvu()</span> ([top](#FUNCTIONS))
 # Na rozdíl od funkce exportimg, se zde zpracovávají předané parametry
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
@@ -1539,8 +1539,8 @@ isscale() {
 # * mask|background|foreground|color|black - oxportuje obrázek pozadí
 # * dsed-*
 # * xml-*
-fromdjvu() {
-    log goto "fromdjvu() ${FILETYPE} $1 –> $2"
+exportdjvu() {
+    log goto "exportdjvu() ${FILETYPE} $1 –> $2"
     local INTO=$(isformat "${2}")
     if [ -n "${INTO}" ] ; then
         local TEMPORAR="${2#*${INTO}}"
@@ -1556,7 +1556,7 @@ fromdjvu() {
 
     case "${TEMPORAR:$((${#TEMPORAR}-1)):1}" in
         /) TARGETDIR=$(${REALPATH} -m -P "${TEMPORAR## }")
-            log info "fromdjvu() Export pages with a original names into –> ${TARGETDIR}"
+            log info "exportdjvu() Export pages with a original names into –> ${TARGETDIR}"
             [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
         ;;
         *) if [[ "${TEMPORAR}" =~ "/" ]] ; then
@@ -1564,7 +1564,7 @@ fromdjvu() {
                 local TEMPORARY=$(${REALPATH} -m -P "${TEMPORAR## }")
                 TARGETDIR="${TEMPORARY%/*}"
                 TARGETSAMPLE="${TEMPORARY##*/}"
-                log info "fromdjvu() Export pages a named by sample ${TARGETSAMPLE} –> ${TARGETDIR}"
+                log info "exportdjvu() Export pages a named by sample ${TARGETSAMPLE} –> ${TARGETDIR}"
                 [ ! -d "${TARGETDIR}" ] && mkdir -p "${TARGETDIR}"
             else
                 #/ jde o vzorek
@@ -2873,8 +2873,6 @@ EOF
 # __$1__ je cesta ke kontejneru ze kterého se exportuje stránka
 # __$2__ obsahuje parametry
 #
-# Rozdíl oproti podobné funkci fromfile je ve zpracování výstupu
-# Cílem téhle funkce je nahradit funkce fromfile() a extractionpage() a filters()
 fromcontainer() {
     log goto "fromcontainer() $1 –> $2"
 
@@ -6256,7 +6254,7 @@ case ${FILETYPE} in
             ;;
             export) #/ Exportuji stránku
                 log info "main() export from page ${CHARSTRING}"
-                fromdjvu "${FILE}" "${CHARSTRING}" | xxd -p | paste -s -d'-' | sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' | tr '-' '\n' |  xxd -r -p
+                exportdjvu "${FILE}" "${CHARSTRING}" | xxd -p | paste -s -d'-' | sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' | tr '-' '\n' |  xxd -r -p
             ;;
             import|edit) #/ Import předhozeného souboru a případná editace jeho obsahu
                 # Před editací meta informací, je doporučeno zkontrolovat a případně 
