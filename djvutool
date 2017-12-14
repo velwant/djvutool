@@ -1391,7 +1391,7 @@ parsecut() {
     echo "$W $H $X $Y"
 }
 
-# ### <span id="imgcut">imgcut()</span> ([top](#FUNCTIONS))
+# ### <span id="cutimg">cutimg()</span> ([top](#FUNCTIONS))
 # Funkce zpracovává řetězec, kterým je identifikována oblast vyžadující
 # speciální ošetření. Ta může být nastavena dvěma možnými způsoby:
 # LEFT,TOP,SIRKA,VYSKA nebo SIRKAxVYSKA+LEFT+TOP
@@ -1407,8 +1407,8 @@ parsecut() {
 # Pro nastavení oblastí lze použít i nástroj djvusmooth, ale souřadnice se musí přepočítat
 # rect 225 0 804 61
 #     LEFT,BOTTOM, LEFT+WIDTH,HEIGHT
-imgcut() {
-    log goto "imgcut() $1 –> $2"
+cutimg() {
+    log goto "cutimg() $1 –> $2"
     local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
     local SIZE=(${1/:/ })
     local W=($(parsecut ${SIZE[0]}))
@@ -1421,23 +1421,23 @@ imgcut() {
     local X="${W[2]}"
     local H="${W[1]}"
     local W="${W[0]}"
-    log info "imgcut W $W H $H X $X Y $Y"
+    log info "cutimg W $W H $H X $X Y $Y"
     local FILENAME="${2%.*}"
     case ${#SIZE[@]} in
         1) #/ Vyjme vybranou oblast za černou plochu
             ${PBMMAKE} -black ${W} ${H} > ${TEMPFILE}
-            log info "imgcut() ${FILENAME}.fore –> ${FILENAME}.temp"
+            log info "cutimg() ${FILENAME}.fore –> ${FILENAME}.temp"
             ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
             mv -f "${FILENAME}.temp" "${FILENAME}.fore"
             rm -f ${TEMPFILE}
-            log info "imgcut() Plocha $1 byla zamaskována"
+            log info "cutimg() Plocha $1 byla zamaskována"
         ;;
         2) case ${SIZE[1]} in
             M) #/ Nahradí oblast za bílou plochu (ve výsledku dojde k rozmazání
                 ${PBMMAKE} -white ${W} ${H} > ${TEMPFILE}
                 ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.fore"
-                log info "imgcut() Plocha $1 byla odmaskována"
+                log info "cutimg() Plocha $1 byla odmaskována"
             ;;
             T) #/ Text - vybraná plocha z fore je naklíčovaná na bílou plochu
                 #/ maska bude mít příponu text
@@ -1446,13 +1446,13 @@ imgcut() {
                     ${PBMMAKE} -white $(head -2 "${FILENAME}.fore" |tail -1) > "${FILENAME}.text"
                 ${PAMTOPNM} "${FILENAME}.text" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.text"
-                log info "imgcut() Plocha textu $1 byla vyseparovaná"
+                log info "cutimg() Plocha textu $1 byla vyseparovaná"
             ;;
             I) #/ Obrázek - vybraná plocha je na masce začerněná
                 ${PBMMAKE} -black ${W} ${H} > ${TEMPFILE}
                 ${PAMTOPNM} "${FILENAME}.fore" | ${PNMPASTE} ${TEMPFILE} "${X}" "${Y}" > "${FILENAME}.temp"
                 mv -f "${FILENAME}.temp" "${FILENAME}.fore"
-                log info "imgcut() Plocha $1 byla zamaskována"
+                log info "cutimg() Plocha $1 byla zamaskována"
             ;;
             G) #/ Grafika - v rámci vybrané plochy zredukuje barvy a pak ji naklíčuje do barevného pozadí
             ;;
@@ -3165,7 +3165,7 @@ exportimg() {
                 local BOX=( "${CUT//;/ }" )
                 echo "${CUT}" >> /dev/stderr
                 for i in ${BOX[@]} ; do
-                    imgcut "${i}" "${TEMPFILE}"
+                    cutimg "${i}" "${TEMPFILE}"
                 done
             fi
             #exit 33
