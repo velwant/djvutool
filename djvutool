@@ -3730,11 +3730,11 @@ viewdjvu() {
     (${DJVIEW} "${FILE}" &)
 }
 
-# ### <span id="viewimg">viewimg()</span> ([top](#FUNCTIONS))
+# ### <span id="imgview">imgview()</span> ([top](#FUNCTIONS))
 # Funkce se volá při akci view, když si chceš prohlédnout bitmapový 
 # obrázek
-viewimg() {
-    log info "viewimg() open –> ${FILE}"
+imgview() {
+    log info "imgview() open –> ${FILE}"
     case ${FILETYPE} in
         pnm|ppm|pgm|pbm|pam|\
         png|jpg|jpeg|bmp|gif|tiff) if [ -n "${FEH}" ] ; then
@@ -3799,7 +3799,7 @@ viewimg() {
     esac
 }
 
-# ### <span id="infoimg">infoimg()</span> ([top](#FUNCTIONS))
+# ### <span id="imginfo">imginfo()</span> ([top](#FUNCTIONS))
 # Funkce vypisuje info o bitmapových souborech a případně vicestránkových
 # formátů i jejich stránkách.
 # Vstupními parametry jsou globální proměnné:
@@ -3807,8 +3807,8 @@ viewimg() {
 # * CHARSTRING - Proměnná, která obsahuje další parametry:
 # ** typ zobrazované informace
 # ** a případně číslo konkrétní stránky (vrstvy)
-infoimg() {
-    log goto "infoimg() ${FILE} –> ${CHARSTRING}"
+imginfo() {
+    log goto "imginfo() ${FILE} –> ${CHARSTRING}"
     if [[ "${CHARSTRING}" =~ "?" ]] ||\
         [[ "${CHARSTRING}" =~ "-h" ]] ||\
         [[ "${CHARSTRING}" =~ "help" ]] ; then
@@ -6449,9 +6449,9 @@ case ${FILETYPE} in
         case ${ACTION} in
             export) exportfile
             ;;
-            info) infoimg
+            info) imginfo
             ;;
-            view) viewimg
+            view) imgview
             ;;
             set) log info "main() set exif tag in img ${FILE} –> ToDo"
             ;;
