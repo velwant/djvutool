@@ -1,14 +1,16 @@
+
 = DjVutool =
 
-'''DjVutool''' je shellový skript určený konverzi bitmapových skenů do DjVu souborů a k práci s nimi v prostředí GNU/Linux. 
+'''DjVutool''' je shellový skript určený pro práci s DjVu soubory a zpracování bitmapových skenů do DjVu souborů v prostředí GNU/Linux.
 
-Pro práci s textem využívá standardních nástrojů<ref>awk, sed, vim</ref> ale využívá i další open source nástroje:
+Pro práci s textem využívá standardních unixových nástrojů<ref>awk, sed, vim</ref> ale využívá i další open source nástroje:
 
 * utility z '''DjVuLibre'''<ref>[http://sourceforge.net/projects/djvu DjVuLibre]</ref>
-* enkódovací utilitu didjvu<ref>[http://jwilk.net/software/didjvu didjvu] - autor Jakub Wilk</ref>
-* OCR nadstavbu '''ocrodjvu'''<ref>[http://jwilk.net/software/ocrodjvu ocrodjvu] - autor Jakub Wilk</ref>
-* konverzní nástroje z balíku '''ImageMagick'''<ref>[http://www.imagemagick.org ImageMagick]</ref>
-* XML command line toolkit  '''xmlstarlet'''<ref>[http://xmlstar.sourceforge.net xmlstarlet]</ref>
+* enkódovací utilitu '''didjvu''' při separaci černobílé masky s využitím pokročilých algoritmů z <ref>[http://jwilk.net/software/didjvu didjvu] - autor Jakub Wilk</ref>
+* OCR nadstavbu '''ocrodjvu''' k rozpoznávání textu<ref>[http://jwilk.net/software/ocrodjvu ocrodjvu] - autor Jakub Wilk</ref>
+* nástroje z balíku '''ImageMagick''' (pouze v omezené míře při detekci vrstev u MNG souborů)<ref>[http://www.imagemagick.org ImageMagick]</ref>
+* Nástroj xmllint z '''libxml2-utils''' při extrakci částí XML kódu u souborů DjVuXML <ref>[http://xmlsoft.org/]</ref>
+* aktuálně se nepoužívá - XML command line toolkit  '''xmlstarlet'''<ref>[http://xmlstar.sourceforge.net xmlstarlet]</ref>
 
 S jeho pomocí lze:
 
@@ -18,22 +20,74 @@ S jeho pomocí lze:
 * Odstraňovat stránky z DjVu svazku
 * Exportovat a importovat data skryté textové vrstvy i celé DjVu stránky z DjVu svazků
 * Editovat obsah (''outline'') a meta atributy DjVu souborů
+* Vkládat navigační prvky a poznámky do DjVu souborů
+* …
 
 Po vyexportování obsahu skryté textové vrstvy lze použít pro další zpracování obsahu použít javascriptový editor '''WebDjVuTextEd'''<ref>[http://sourceforge.net/projects/webdjvutexted WebDjVuTextEd] autor Ferenc Veres</ref>, a upravené XML soubory importovat zpět.
 
-Pro vytvoření hyperlinků je vhodným nástrojem  '''djvusmooth'''<ref>[http://jwilk.net/software/djvusmooth djvusmooth] - autor Jakub Wilk</ref>.
+Pro generování hyperlinků je vhodný nástroj  '''djvusmooth'''<ref>[http://jwilk.net/software/djvusmooth djvusmooth] - autor Jakub Wilk</ref>.
+
+== Formáty ==
+
+=== .dsed ===
+Je základní formát se kterým pracuje základní nástroj pro zpracování textové vrstvy a meta atributů z DjVuLibre '''djvused'''
+
+=== .outline ===
+Zjednodušený formát pro editaci obsahu DjVu souborů
+
+=== .ant ===
+Zjednodušený formát pro editaci metadatové vrstvy ANT
+
+=== .xml ===
+XML formát se využívá při práci s textovou vrstvou TXT, ovšem při importu se XML převádí na formát ''.dsed''.
+
+Je to z toho důvodu, že při importu formátu DjVuXML pomocí nástroje '''djvuparser''' (DjVuLibre) není korektně ošetřena metadatová vrstva – při importu pomocí tohoto nástroje tím pádem ztratíte prakticky veškeré meta atributy a vložené poznámky z vrstvy ANT.
 
 == Použití ==
-Při konverzi bitmapového souboru do DjVu:
+Původně bylo striktně určeno v jakém pořadí má následovat soubor a příslušná akce. Současné verze podporuje obě varianty
 
- djvutool [volby] <bitmapový sken> [ /cesta ]
+ djvutool [volby] [<soubor>] {AKCE} [ ... ]
 
-Při práci s DjVu soubory:
+i 
 
- djvutool [volby] <DjVu soubor> {akce} [ ... ]
+ djvutool [volby] {AKCE} [<soubor>] [ ... ] 
+
+U většiny akcí jsou parametry vyžadované pro příslušnou akci závislé na tom, jakého typu je zpracovávaný soubor. Protože pomocí nástroje '''djvutool''' lze pracovat s bitmapovými soubory i se soubory DjVu. Existují však i speciální akce, které žádný soubor nevyžadují (např. akce [[#coords]]
 
 === Jak předávat data ===
 Vzhledem k tomu, že se v djvu souborech mohou vyskytovat i stránky s opakovanými mezerami, je třeba na to pamatovat při práci na příkazové řádce a v takovém případě použít znak '\' (''backslash'')
+
+
+=== Vytvoření informační bubliny k obrázku ===
+Dejme tomu, že máme v souboru obrázek, ke kterému bychom chtěli přidat informační bublinu, ev. doplněnou o hyperlink na některou ze stránek dokumentu.
+
+Máme několik možností, jak to udělat.
+
+1, Můžeme použít '''djvusmooth''' a nastavit na obrázek element [[#rect]] v něm
+2, Můžeme "nastřelit" element [[#rect]] přes akci <code>set</code> z příkazové řádky rovnou od oka
+3, Můžeme nejprve připravit oblast s obrázkem jako prázdný textový element (písmeno, slovo, řádek, odstavec či oblast) buď přes '''webdjvutexted''', nebo při zpracování textové vrstvy přes OCR
+
+ ~$ djvutool out.djvu export line 24
+ …
+        (word 2035 2222 2087 2254 "")
+ …
+ ~$ djvutool coords 2035 2222 2087 2254
+ 2035 2222 52 32
+ ~$ djvutool -f out.djvu set 24 rect 2035 2222 52 32 Poznámka k bublině
+ ~$ djvutool out.djvu export ant 24
+ maparea
+        "" "Poznámka k bublině"
+        rect 2035 2222 52 32
+
+Úprava popisu v bublině:
+
+ ~$ djvutool -f out.djvu set 24 rect 2035 2222 52 32 Popis k obrázku
+
+Zrušení bubliny k obrázku:
+
+ ~$ djvutool -f out.djvu unset 24 rect 2035 2222 52 32 Popis k obrázku
+
+{{Poznámka|Při rušení elementu nemusí nutně popis odpovídat popisu příslušného elementu. Rozhodující jsou koordináty, ale neměl by být pokud možno identický s popisem jiného elementu, aby ho to nevzalo pryč sebou.}}
 
 == Konverze bitmapových souborů ==
 Konverze bitmapových skenů probíhá tak, že se nejprve vyexportují jednotlivé vrstvy jako samostatné stránky ve formátu PNG do adresáře s názvem souboru bez přípony, a ty se postupně konvertují podle nastavených voleb do DjVu formátu.
@@ -66,20 +120,17 @@ Pomocí voleb lze nastavit, co vše má být předmětem zpracování během akc
 === -a|--algorithm ===
 Volbou algoritmu, který se má použít pro vytvoření masky, lze ovlivnit výsledek separace obrazové vrstvy DjVu dokumentu. Není-li touto volbou určeno jinak, použije se výchozí algoritmus ''djvu'', ale protože se výsledek může značně lišit, podle typu předlohy, značně lišit, je možné nastavit i více algoritmů a pomocí akce '''test''' provést testovací konverzi předlohy.
 
-=== -d|--dsed ===
+=== -d|--diff ===
+
+Zobrazování rozdílů s využitím aplikace vimdiff
 
 === --dpi ===
 
 === -f|--force ===
 
+Ukládání změn bez dotazování
+
 === --clean|--lossy|--lossless|--level ===
-
-=== -i|--image ===
-
-=== -m|--meta ===
-
-=== -o|--ocr ===
-Je volba, která umožňuje předat utilitě [[ocrodjvu]] kódy jazyků, se kterými se má pracovat při OCR zpracování skryté textové vrstvy
 
 === -p|--page ===
 Při akci '''export''' a '''import''' 
@@ -98,12 +149,12 @@ Nastavení vzoru pro pojmenování stránek při akcích '''rename''', '''fore''
 === delete ===
 Akce je určena pro odstraňování DjVu stránek z DjVu svazku
 
-=== edit ===
+=== edit, import ===
 Akce určena pro přímou editaci obsahu meta atributů a záložek v rámci DjVu svazku.
 
 Pro nepřímou editaci (formou úpravy vyexportovaných souborů) jsou určeny akce export a import
 
-=== export, import ===
+=== export ===
 Akce pro export a import je určena pro extrakci stránek, jejich náhledů, meta informací a obsahu skryté textové vrstvy DjVu svazku.
 
 === fore, back ===
@@ -120,6 +171,11 @@ Akce pro přejmenování stránek DjVu svazku podle zvoleného vzoru
 
 === rotate ===
 Akce pro změnu výchozího natočení DjVu stránek
+
+=== set ===
+
+Je volba, která umožňuje předat utilitě [[ocrodjvu]] kódy jazyků, se kterými se má pracovat při OCR zpracování skryté textové vrstvy
+
 
 == Funkce v DjVuTool ==
 Konvence:
@@ -390,7 +446,7 @@ Mělo by vypsat tyto informace..
 
 = Jak vytvořit obsah (outline) =
 
-Nástroje z DjVuLibre umožňují obsah DjVu svazku vyexportovat pouze v dsed formátu, proto tato utilita provádí při importu a exportu jeho konverzi do lépe editovatelné formy.
+Nástroje z DjVuLibre umožňují obsah DjVu svazku vyexportovat pouze v ''.dsed'' formátu, proto tato utilita provádí při importu a exportu jeho konverzi do lépe editovatelné formy.
 
 == Pojmenování souboru s obsahem ==
 U souboru s obsahem svazku se předpokládá, že má stejný název, jako DjVu svazek, pouze s tím rozdílem, že má místo ''.djvu'' příponu ''.outline''

@@ -34,6 +34,11 @@ shopt -s extglob
 #    echo ${pole[@]: -1}
 
 # ToDo
+# * Ověřit jestli se používá při separaci masky didjvu vždy, nebo jen když
+#   je nastaven pomocí -a nějaký algoritmus
+#   - přidat případné varování pro situaci, kdy aplikace didjvu není k dispozici
+# * XML import potřebuje důkladný popis..
+# * export čistého textu
 # * Konverze z bundle na unbundle a naopak
 # * ? implementace generování náhledů
 # * implementovat kontrolu obrazové vrstvy při importu, aby nedocházelo
@@ -94,7 +99,7 @@ case $CHYBA in
  ;;
  30) echo "ERROR: PDF viewer not installed"
  ;;
- 31) echo "Není nainstalován balík ocrodjvu, na djvu soubory nelze aplikovat OCR. Buďto jej doinstalujte, nebo odstraňte z příkazové řádky parametr -o (--ocr)" >> /dev/stderr
+ 31) echo "Není nainstalován balík ocrodjvu, takže OCR není možné aplikovat." >> /dev/stderr
  ;;
  32) echo "Pokud má při operaci zpracovat do DjVu bitmapový soubor, je třeba uvést na příkazové řádce parametrem -a jaký se má použít algoritmus. Jaké parametry lze použít se dozvíte pokud místo jména algoritmu napíšete znak ?" >> /dev/stderr
  ;;
@@ -130,7 +135,7 @@ GEEQIE=$(command -v geeqie)
 DIDJVU=$(command -v didjvu)
 [ ! ${DIDJVU} ] && echo 'Není nainstalován balík didjvu, nebude možné aplikovat pokročilé algoritmy pro separaci popředí při konverzi do DjVu' >> /dev/stderr && DIDJVU=false
 OCRODJVU=$(command -v ocrodjvu)
-[ ! ${OCRODJVU} ] && OCRODJVU=31
+[ ! ${OCRODJVU} ] && echo "Není k dispozici ocrodjvu takže u na DjVu stránek tak nebude možné při akci set aplikovat OCR." >> /dev/stderr
 DJVIEW=$(command -v djview)
 [ ! ${DJVIEW} ] && echo 'Není nainstalován balík djview, nebude fungovat testovací zobrazení djvu.souborů' >> /dev/stderr && DJVIEW=false
 DDJVU=$(command -v ddjvu)
@@ -166,8 +171,6 @@ EXIFTOOL=$(command -v exiftool)
 #[ ! -x "${TESSERACT}" ] && exit 31
 IDENTIFY=$(command -v identify)
 [ ! -x "${IDENTIFY}" ] && echo exit 24
-CONVERT=$(command -v convert)
-[ ! -x "${CONVERT}" ] && echo exit 24
 XCFINFO=$(command -v xcfinfo)
 [ ! -x "${XCFINFO}" ] && echo exit 26
 XCF2PNM=$(command -v xcf2pnm)
@@ -208,7 +211,6 @@ ACTIONS=(
     rotate
     export
     import
-    convert
     edit
     info
     rename
@@ -430,7 +432,7 @@ help_debug() {
 anone() {
     if [ -n "${1}" ] ; then
         if [ "${FORCE}" != "yes" ] ; then
-            echo "$1"
+            echo "$1" >> /dev/stderr
             while true ; do
 #                read -p "(ANO/NE) : " yn
                 read -er yn
@@ -475,7 +477,7 @@ ant2dsed() {
     local INVALID="INVALID –> Neplatný typ datového bloku"
     local START="yes"
     while read -r line ; do
-    log info "textsyntax() –> ${line}"
+    log info "ant2dsed() –> ${line}"
         case "${line}" in
             \#+([[:blank:]])+([[:digit:]]))
                 if [ -n "${START}" ] ; then
@@ -760,7 +762,7 @@ ant2dsed() {
                 [ -n "${META}" ] || echo "${ERR}" >> /dev/stderr
                 local KEYS="${KEYS} (${line})"
             ;;
-            *) echo "Na řádku je chyba –> ${line}" >> /dev/stderr
+            *) echo "Na řádku je chyba –> #${line}#" >> /dev/stderr
                 return 1
             ;;
         esac
@@ -1593,13 +1595,14 @@ importdjvu() {
                 if [ ! $? -eq 1 ] ; then
                     vimdiff -c 'set encoding=utf-8' "${TEMPDIR}/ant.orig" "${TEMPFILE}"
                 fi
-                anone "Uložit změny?"
+                anone "Uložit změny?" >> /dev/stderr
                 [ $? -eq 1 ] && return 1
             fi
             local DSEDFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
             ant2dsed "${TEMPFILE}" > "${DSEDFILE}"
             if [ $? -eq 1 ] ; then
                 echo "V importovaném souboru ${TEMPFILE} byla syntaktická chyba" >> /dev/stderr
+                exit 33
                 return 1
             fi
             ${DJVUSED} "${1}" -f "${DSEDFILE}" -s
@@ -2571,7 +2574,7 @@ stránka, tak máte dvě možnosti:
                     fi
                 ;;
             esac
-            anone "Uložit změny?"
+            anone "Uložit změny?" >> /dev/stderr
             [ $? -eq 1 ] && return 1
             outlinetodjvu "${FILE}" "${TEMPFILE}"
             if [ $? -eq 1 ] ; then
@@ -2594,7 +2597,7 @@ stránka, tak máte dvě možnosti:
                             replacexmp
                             #/ Na konci musí být alespoň jedna prázdná linka 
                             echo ""  >> "${TEMPFILE}"
-                            anone "Uložit změny?"
+                            anone "Uložit změny?" >> /dev/stderr
                             [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
@@ -2616,7 +2619,7 @@ stránka, tak máte dvě možnosti:
                             replacexmp
                             #/ Na konci musí být alespoň jedna prázdná linka 
                             echo "" >> "${TEMPFILE}"
-                            anone "Uložit změny?"
+                            anone "Uložit změny?" >> /dev/stderr
                             [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
@@ -2639,7 +2642,7 @@ stránka, tak máte dvě možnosti:
                                     replacenote
                                     #/ Na konci musí být alespoň jedna prázdná linka 
                                     echo ""  >> "${TEMPFILE}"
-                                    anone "Uložit změny?"
+                                    anone "Uložit změny?" >> /dev/stderr
                                     [ $? -eq 1 ] && return 1
                                     cat "${TEMPFILE}" | $0 "${1}" import ant
                                 else
@@ -2661,14 +2664,15 @@ stránka, tak máte dvě možnosti:
                                     replacenote
                                     #/ Na konci musí být alespoň jedna prázdná linka 
                                     echo "" >> "${TEMPFILE}"
-                                    anone "Uložit změny?"
+                                    anone "Uložit změny?" >> /dev/stderr
                                     [ $? -eq 1 ] && return 1
                                     cat "${TEMPFILE}" | $0 "${1}" import ant
                                 done
                             fi
                         ;;
                         ocr) case "${ACTION}" in
-                                set) echo "Aplikuji OCR na DjVu soubor #${STRING}#" >> /dev/stderr
+                                set) [ ! ${OCRODJVU} ] && exit 31
+                                    echo "Aplikuji OCR na DjVu soubor #${STRING}#" >> /dev/stderr
                                     local VALUE="${STRING#ocr}"
                                     case "${VALUE##+([[:blank:]])}" in
                                         help) ${OCRODJVU} -h
@@ -2719,7 +2723,7 @@ stránka, tak máte dvě možnosti:
                                     esac
                                     #/ Na konci musí být alespoň jedna prázdná linka 
                                     echo ""  >> "${TEMPFILE}"
-                                    anone "Uložit změny?"
+                                    anone "Uložit změny?" >> /dev/stderr
                                     [ $? -eq 1 ] && return 1
                                     cat "${TEMPFILE}" | $0 "${1}" import ant
                                 else
@@ -2750,7 +2754,7 @@ stránka, tak máte dvě možnosti:
                                         ;;
                                     esac
                                     echo "" >> "${TEMPFILE}"
-                                    anone "Uložit změny?"
+                                    anone "Uložit změny?" >> /dev/stderr
                                     [ $? -eq 1 ] && return 1
                                     cat "${TEMPFILE}" | $0 "${1}" import ant
                                 done
@@ -2834,7 +2838,7 @@ stránka, tak máte dvě možnosti:
                             log info "From shared_ant –> $i"
                             $0 "${1}" export ant 0 > "${TEMPFILE}"
                             [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
-                            anone "Uložit změny?"
+                            anone "Uložit změny?" >> /dev/stderr
                             [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         else
@@ -2852,7 +2856,7 @@ stránka, tak máte dvě možnosti:
                             log info "From page –> $i"
                             $0 "${1}" export ant $i > "${TEMPFILE}"
                             [ -n "${VALUE}" ] && setmeta "${TEMPFILE}" "${KEY}" "${KEY} ${VALUE}" || setmeta "${TEMPFILE}" "${KEY}"
-                            anone "Uložit změny?"
+                            anone "Uložit změny?" >> /dev/stderr
                             [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" | $0 "${1}" import ant
                         done
@@ -3005,7 +3009,7 @@ EOF
                             case ${DEBUG} in
                                 -d1|-d3|-d4|-d6|-d7|-d9) cat "${TEMPFILE}" >> /dev/stderr
                             esac
-                            anone "Uložit změny?"
+                            anone "Uložit změny?" >> /dev/stderr
                             [ $? -eq 1 ] && return 1
                             cat "${TEMPFILE}" ) | $0 "${1}" import ant
                         done
@@ -5589,6 +5593,26 @@ ATRIBUTY elementů:
   volba -h.
 """
     ;;
+    set-align)
+        help metadata-align
+        echo """
+  [1m${0##*/}[0m [volby] <DjVu svazek> set {RANGE} align HORIZONTAL VERTICAL
+
+HORIZONTAL
+    left,center,right
+VERTICAL
+    top,center,bottom
+
+Příklad zarovnání stránky do levého dolního rohu:
+ … set 0 align left bottom
+
+Příklad zarovnání stránky do středu okna:
+ … set 1,5,10-25 center center
+
+[3mPoznámka:[23m
+  Pro globální nastavení použijte hodnotu RANGE nula – 0.
+"""
+    ;;
     set-arrow) echo """
   ELEMENT [1m${1#set-}[0m
 
@@ -5620,22 +5644,16 @@ Barva pozadí prvku. Dává smysl pouze u typu:
 V případě prvků typu oval, poly, line nebo arrow, se vybarví pravoúhlá plocha
 """
     ;;
-    set-background) echo """
-  METADATA [1m${1#set-}[0m
-
-  Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
-  se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
-  barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
-  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-  stránky.
-
+    set-background)
+        help metadata-background
+        echo """
   [1m${0##*/}[0m [volby] <DjVu svazek> set {RANGE} background {COLOR}
 
      COLOR - Barva v RGB
 
 Příklad:
- … set set 0 background F8F8F8
- … set set 1,5,10-25 background FF0000
+ … set 0 background F8F8F8
+ … set 1,5,10-25 background FF0000
 
 [3mPoznámka:[23m
   Pro globální nastavení barnu pozadí použijte hodnota RANGE nula – 0.
@@ -5946,20 +5964,9 @@ Pro více informací o XMP spusťte:
   [1m${0##*/}[0m xmp
 """
     ;;
-    set-zoom) echo """
-  METADATA [1m${1#set-}[0m
-
-  Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
-  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-  stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné
-  různě velké stránky.
-
-  Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
-  se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
-  barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
-  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
-  stránky.
-
+    set-zoom)
+    help metadata-zoom
+    echo """
   [1m${0##*/}[0m [volby] <DjVu svazek> set {RANGE} zoom {SIZE}
 
 SIZE
@@ -5971,8 +5978,8 @@ SIZE
      
 
 Příklad:
- … set set 0 zoom stretch
- … set set 1,5,10-25 zoom 150d
+ … set 0 zoom stretch
+ … set 1,5,10-25 zoom d150
 
 [3mPoznámka:[23m
   * Pro globální nastavení velikosti stránky použijte hodnotu RANGE nula – 0.
@@ -6019,6 +6026,22 @@ ani při importu.
         --lossy        100 - ignorují se plochy
 """
 		;;
+    metadata-align) echo """
+  METADATA [1m${1#*-}[0m
+
+  Metadatový atribut align určuje jakým způsobem má být zarovnána stránka
+  vůči oknu prohlížečky DjVu souborů v horizontálním a vertikálním směru.
+"""
+    ;;
+    metadata-background) echo """
+  METADATA [1m${1#*-}[0m
+
+  Meta atribut background nastavuje barvu pozadí okna prohlížeče, ve kterém
+  se zobrazuje příslušná stránka. Smysl dává především tehdy. je-li vhodné
+  barvu pozadí změnit vůči stránce tak, aby dávala lepší barevný kontrast.
+  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+  stránky."""
+    ;;
     metadata-key) echo """
   METADATA [1m${1#*-}[0m
 
@@ -6059,6 +6082,14 @@ ani při importu.
 
   Metadatový element xmp obsahuje XMP kód, který se pak interpretuje
   podobně jako EXIF tagy."""
+    ;;
+    metadata-zoom) echo """
+  METADATA [1m${1#*-}[0m
+
+  Meta atribut zoom umožňuje změnit výchozí velikost zobrazovaných stránek.
+  Většinou se nastavuje globálně, ale je možné ho nastavit také pro konkrétní
+  stránky. To se může hodit, pokud jsou v rámci jednoho DjVu svazku umístěné
+  různě velké stránky."""
     ;;
     options) echo """
 Volby:
@@ -6488,7 +6519,8 @@ case ${FILETYPE} in
                 sed 's/0a-09/-0a09/g ; s/0a09-0a09/-0a09/g ; s/0a090a09/0a09/g ; s/0a0928/2028/g' |\
                 tr '-' '\n' | xxd -r -p
             ;;
-            import|edit) importdjvu "${FILE}" "${CHARSTRING}"
+            import|edit)
+                importdjvu "${FILE}" "${CHARSTRING}"
             ;;
             info) djvuinfo "${FILE}" "${CHARSTRING}"
             ;;
