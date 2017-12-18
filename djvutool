@@ -1316,7 +1316,7 @@ isformat() {
         bookmark) #/ Volba pro DjVu
             #/ Záložky
             ;;
-        dsed-*) #/ Volba pro DjVu
+        dsed*) #/ Volba pro DjVu
             #/ Export textové vrstvy v dsed formátu
             #/ dsed-ant
             #/ dsed-all
@@ -1749,7 +1749,7 @@ exportdjvu() {
     TARGETSAMPLE ${TARGETSAMPLE}
     TEMPORAR ${TEMPORAR}
     Můžeme přikročit k akci
-    """ >> /dev/null
+    """ >> /dev/stderr
     mapfile -t ARRAY <<< $($0 "${1}" info list)
     case "${ARRAY:0:1}" in
         0) mapfile -t LISTPAGES <<< $(printf "%s\n" "${ARRAY[@]}")
@@ -1761,7 +1761,7 @@ exportdjvu() {
 #/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
 #/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
-        djvu|ant|note|meta|mask|background|foreground|color|black|dsed-*|xmp|xml|\
+        djvu|ant|note|meta|mask|background|foreground|color|black|dsed*|xmp|xml|\
         line|word|para)
             if [ -n "${RANGE}" ] ; then
                 local PAGES=($(range "${RANGE}"))
@@ -1789,7 +1789,16 @@ exportdjvu() {
             for i in ${PAGES[@]} ; do
                 local PAGENAME="${LISTPAGES[$i]##+([[:digit:]])+([[:blank:]])}"
                 local PAGEORDER="${LISTPAGES[$i]%% *}"
-#/                echo "PAGEORDER ${#PAGEORDER[@]} ${PAGEORDER[@]}" >> /dev/stderr
+                echo "PAGEORDER ${#PAGEORDER[@]} ${PAGEORDER[@]}" >> /dev/stderr
+                echo "PAGENAME ${#PAGENAME} ${PAGENAME}" >> /dev/stderr
+                case "${TARGETSAMPLE}" in
+                    orig*) local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}")
+                    ;;
+                    '') unset TARGET
+                    ;;
+                    *)  local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TARGETSAMPLE}_${PAGEORDER}")
+                    ;;
+                esac
                 case "${PAGEORDER}" in
                     0) case "${PAGENAME}" in
                             none)
@@ -1802,31 +1811,35 @@ exportdjvu() {
                                 ;;
                                 meta) printf "# 'shared_anno.iff'\n"
                                     local META=$(${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-meta" | decode)
-                                echo -e "${META}"
+                                    echo -e "${META}"
                                 ;;
                                 note) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | dsed2ant | grep ^note | xargs -n1 | grep -v ^note
                                 ;;
                                 xmp) ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; print-ant" | dsed2ant | while read line
-                                do
-                                    case "${line}" in
-                                        xmp) local PRINT="yes" ;;
-                                        \<*) echo "${line}" ;;
-                                        *) [ -n "${PRINT}" ] && break ;;
-                                    esac
-                                done
+                                    do
+                                        case "${line}" in
+                                            xmp) local PRINT="yes" ;;
+                                            \<*) echo "${line}" ;;
+                                            *) [ -n "${PRINT}" ] && break ;;
+                                        esac
+                                    done
                                 ;;
                                 djvu) log info "Pořadové číslo 0 má vždy soubor sdílených poznámek, který nelze vyexportovat jako DjVu stránku"
                                 ;;
-                                dsed-*) local EXPORT="output-ant"
-                                    local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME}.dsed")
-                                    if [ -f "${TARGET}" ] ; then
-                                        anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
-                                        [ $? -eq 1 ]&& return 1
-                                    fi
-                                    printf "select '${PAGENAME}' ; remove-ant\n" > "${TARGET}"
-                                    ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}" >> "${TARGET}"
-                                    [ $? -eq 1 ] && return 1
-                                    echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
+                                dsed) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
+                                    case ${INTO} in
+                                        dsed-all|dsed-ant|dsed) (
+                                                local EXPORT="output-ant"
+                                                printf "select '${PAGENAME}' ; remove-ant\n"
+                                                ${DJVUSED} "${1}" -e "select 'shared_anno.iff'; ${EXPORT}"
+                                            ) >> "${TEMPFILE}"
+                                            if [ -n "${TARGET}" ] ; then
+                                                mv -i "${TEMPFILE}" "${TARGET}"
+                                            else
+                                                cat "${TEMPFILE}"
+                                            fi
+                                            ;;
+                                        esac
                                 ;;
                                 xml) if [ ! -n "${TARGETSAMPLE}" ] ; then
                                         local TARGETSAMPLE="${1##*/}"
@@ -1834,7 +1847,7 @@ exportdjvu() {
                                     local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${TARGETSAMPLE/.djvu/.xml}")
                                     if [ -f "${TARGET}" ] ; then
                                         anone "XML soubor ${TARGET} již existuje a může obsahovat změny. Mám ho přepsat?" >> /dev/stderr
-                                        [ $? -eq 1 ]&& return 1
+                                        [ $? -eq 1 ] && return 1
                                     fi
                                     touch "${TARGET}"
                                     ${DJVUTOXML} --with-text --without-anno "${1}" "${TARGET}"
@@ -1892,31 +1905,34 @@ exportdjvu() {
                                 [ $? -eq 1 ] && return 1
                                 echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
-                            dsed-*)
+                            dsed*) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .dsed)
                                 case ${INTO} in
-                                    dsed-all) local EXPORT="output-all"
+                                    dsed-all)
+                                        local EXPORT="output-all"
                                         local IMPORT="remove-ant; remove-txt"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.dsed}")
-                                    ;;
-                                    dsed-txt) local EXPORT="output-txt"
+                                        [ -n "${TARGET}" ] && local TARGET="${TARGET}.dsed"
+                                        ;;
+                                    dsed-txt)
+                                        local EXPORT="output-txt"
                                         local IMPORT="remove-txt"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.txt.dsed}")
-                                    ;;
-                                    dsed-ant) local EXPORT="output-ant"
+                                        [ -n "${TARGET}" ] && local TARGET="${TARGET}.txt.dsed"
+                                        ;;
+                                    dsed-ant|dsed)
+                                        local EXPORT="output-ant"
                                         local IMPORT="remove-ant"
-                                        local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.ant.dsed}")
-                                    ;;
-                                    *) return 1
+                                        [ -n "${TARGET}" ] && TARGET="${TARGET}.ant.dsed"
                                     ;;
                                 esac
-                                if [ -f "${TARGET}" ] ; then
-                                    anone "Soubor ${TARGET##*/} již existuje a může obsahovat změny. Mám ho přepsat?"
-                                    [ $? -eq 1 ]&& return 1
+                                log info "export ${INTO} –> ${TARGET}"
+                                (
+                                    printf "select '${PAGENAME}' ; ${IMPORT}\n"
+                                    ${DJVUSED} "${1}" -e "select ${PAGEORDER}; ${EXPORT}"
+                                ) >> "${TEMPFILE}"
+                                if [ -n "${TARGET}" ] ; then
+                                    mv -i "${TEMPFILE}" "${TARGET}"
+                                else
+                                    cat "${TEMPFILE}"
                                 fi
-                                printf "select '${PAGENAME}' ; ${IMPORT}\n" > "${TARGET}"
-                                ${DJVUSED} "${1}" -e "select ${PAGEORDER}; ${EXPORT}" >> "${TARGET}"
-                                [ $? -eq 1 ] && return 1
-                                echo "Soubor ${TARGET} byl zapsán" >> /dev/stderr
                             ;;
                             xml)local TARGET=$(${REALPATH} -m -P "${TARGETDIR}/${PAGENAME/.djvu/.xml}")
                                 if [ -f "${TARGET}" ] ; then
@@ -5253,6 +5269,28 @@ TARGET
 Nápověda pro export metainformacé
 """
     ;;
+    export-dsed) echo """
+ACTION [1mexport[0m –> dsed
+
+  [1m${0##*/}[0m [volby] <DjVu soubor> export DSED [RANGE] [TARGET]
+
+  Tato akce vrací na základě parametru DSED informace z DjVu souboru v [3m.dsed[23m formátu.
+
+DSED
+     dsed - na výstup bude vypsán obsah metadatové vrstvy (dsed-ant)
+ dsed-txt - na výstup bude vypsán obsah skryté textové vrstvy
+ dsed-all - na výstup bude vypsán obsah obou textových vrstev"""
+    help target
+    echo """
+[4mPoznámky:[24m
+  Výstup je zpracováván pro každou stránku samostatně. Vrstva sdílených
+  poznámem (shared_annotation.iff) je zahrnuta pouze je-li součástí RANGE
+  0 (nula). Pokud chcete kompletní výstup v .dsed formátu, využijte příkaz
+  předaný při akci info:
+
+    [1m${0##*/}[0m svazek.djvu info dsed output-all > svazek.dsed
+"""
+    ;;
     export-meta) echo """
 ACTION [1mexport[0m –> meta
 
@@ -6121,6 +6159,22 @@ Volby:
     jakém pořadí byly stránky, či jejich pořadová čísla předány.
   * Jména stránek co v DjVu svazku neexistují se při zpracování ignorují
 """
+    ;;
+    target) echo """
+TARGET
+  Určuje kam má jít výstup akce. Není-li uvedeno nic, tak se automaticky předpokládá,
+  že je cílem standardní výstup (/dev/stdout), ze kterého je možné datový proud
+  přesměrovat buď do souboru, nebo k dalšímu zpracování.
+
+  orig - Je-li uvedeno klíčové slovo orig, použije se jméno stránky v DjVu svazku
+
+  Prostřednictvím parametru TARGET lze určit nejenom PATTERN pro název cílového
+  souboru, ale také cílový adresář. Viz příklad použití při exportu stránky č. 1
+
+    … export djvu 1 nekam_na_disk/vzor
+
+   jehož výsledkem bude uložení DjVu souboru s názvem vzor_1.djvu do relativně
+   umístěného podadresáře nekam_na_disk"""
     ;;
     verbose) echo """
   Volba [1m-v[0m ([1m--verbose[0m)
