@@ -1136,6 +1136,224 @@ separatemask() {
     return $?
 }
 
+# ### <span id="chunkdec">chunkdec()</span> ([top](#FUNCTIONS))
+# Vytažení bloku dat z chunku
+# $1 je vstupní chunk
+chunkdec() {
+    return 0
+}
+
+# ### <span id="chunkenc">chunkenc()</span> ([top](#FUNCTIONS))
+# zabalení bloku dat do chunku
+# $1 je blok dat k zabalení do chunku
+# $2 je flag, podle typu chunku
+chunkenc() {
+    local SIZE=$(${STAT} --printf "%s" "${1}")
+    (
+        case "${2}" in
+            sjbz)
+                #printf "AT&TFORM"
+                #printf "%08x" $((${SIZE} +)) | xxd -r -p
+                #printf "DJVUINFO"
+                printf "Sjbz"
+                printf "%08x" ${SIZE} | xxd -r -p
+                cat "${1}"
+            ;;
+            info) #/ export info chunku znamená, že se mají vypsat obsažené informace
+                local STRING=$(xxd -p "${1}")
+                printf "%d,%d,%d" "0x${STRING:0:4}" "0x${STRING:4:4}" "0x${STRING:14:2}${STRING:12:2}"
+                printf " v%d" "0x${STRING:8:2}"
+                local GAMMA=$(printf "%d" "0x${STRING:16:2}")
+                printf " %d.%d" "${GAMMA:0:1}" "${GAMMA:1:1}"
+                local ROTATE=$(printf "%d" "0x${STRING:18:2}")
+                case ${ROTATE} in
+                    1) printf " 0°"
+                    ;;
+                    2) printf " 180°"
+                    ;;
+                    5) printf " 270°"
+                    ;;
+                    6) printf " 90°"
+                    ;;
+                esac
+                printf "\n"
+            ;;
+            incl)
+            ;;
+        esac
+    )
+}
+
+# ### <span id="chunkdec">chunkdec()</span> ([top](#FUNCTIONS))
+# Otestování bloku dat typu unknown
+# $1 je vstupní chunk
+chunkinfo() {
+    local SIZE=$(${STAT} --printf "%s" "${1}")
+    case ${FILETYPE} in
+        unknown)
+            case "${SIZE}" in
+                10) # INFO >= v18
+                    local TEST=$(xxd -p "${1}")
+                    case "${TEST:8:2}" in
+                        1[2-9AB]) printf "INFO="
+                            chunkenc "${1}" info
+                            return 0
+                        ;;
+                    esac
+                ;;
+                5) # INFO =< v17
+                    local TEST=$(xxd -p "${1}")
+                    echo "${#TEST} ${TEST}" >> /dev/stderr
+                    case "${TEST:8:2}" in
+                        1[01]) local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .info)
+                            printf "${TEST}0000000000" | xxd -r -p > "${TEMPFILE}"
+                            printf "INFO="
+                            chunkenc "${TEMPFILE}" info
+                            return 0
+                        ;;
+                    esac
+                ;;
+            esac
+            bzz -d "${1}" /dev/null 2>> /dev/null
+            case $? in
+                1) # chunk zabalený jiným způsobem
+                    echo "Blok dat komprimovaný neznámým způsobem o velikosti ${SIZE} bajtů" >> /dev/stderr
+                    echo "${1}" >> /dev/stderr
+                    exit 33
+                ;;
+                *) # chunk komprimovaný přes bzz
+                    echo "Blok dat komprimovaný přes bzz o velikosti ${SIZE} bajtů"  >> /dev/stderr
+                    local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .debzz)
+                    bzz -d "${1}" "${TEMPFILE}"
+                    local TEST=$(file -s "${TEMPFILE}")
+                    echo "${TEST}" >> /dev/stderr
+                    case "${TEST#*:+([[:blank:]])}" in
+                        ASCII\ text) echo "${TEST#*:+([[:blank:]])} bzz compressed ${SIZE}b ANT or TXT"
+                        ;;
+                        ASCII\ text,*) echo "${TEST#*:+([[:blank:]])} bzz compressed ${SIZE}b INCL"
+                        ;;
+                        data) log info "Datový blok může obsahovat textovou vrstvu, délku textu udávají první tři bajty"
+                            local ADDRESS=$(dd if="${TEMPFILE}" bs=1 count=3 2>/dev/null | xxd -p -c 3)
+                            echo "${ADDRESS}" >> /dev/stderr
+                            local SKIP=$(printf "%d" "0x${ADDRESS}")
+                            echo "${SKIP}" >> /dev/stderr
+                            local END=$(dd if="${TEMPFILE}" skip=$((${SKIP}-3)) bs=1 count=6 2>/dev/null | xxd -p -c 6)
+                            if [ "${END/200a/}" == "${END}" ] ; then
+                                echo "určitě nejde o TXT"
+                            else
+                                echo "TXT bzz compressed ${SIZE}b"
+                                return 0
+                            fi
+                        ;;
+                    esac
+                ;;
+            esac
+        ;;
+        plain) #printf "${SIZE}"
+            local TEST=$(file -s "${1}")
+            #echo "${TEST#*:\ }" >> /dev/stderr
+            case "${TEST#*:+([[:blank:]])}" in
+                ASCII\ text) echo "${TEST#*:+([[:blank:]])} ${SIZE}b ANT"
+                ;;
+                ASCII\ text,*) echo "${TEST#*:+([[:blank:]])} ${SIZE}b INCL"
+                ;;
+            esac
+        ;;
+    esac
+}
+
+# ### <span id="bgslices">bgslices()</span> ([top](#FUNCTIONS))
+# Rozsekání vrstvy pozadí na jednotlivé řezy
+# $1 je vstupní soubor
+bgslices() {
+    djvudump $1 >> /dev/stderr
+    local SKIP=0
+    local FORM=$(dd if="${1}" skip=${SKIP} bs=1 count=4 2>/dev/null)
+    case ${FORM} in
+        FORM) local SKIP=$((${SKIP} + 4))
+            local ALLSIZE=$(dd if="${1}" skip=${SKIP} bs=1 count=4 | xxd -p -c 4)
+            local SIZE=$(printf "%d\n" "0x${ALLSIZE}")
+            local SKIP=$((${SKIP} + 4))
+            #/ První řez, obsahuje informace o rozměrech, verzi, dpi a nastavení gammy
+            local CHUNKS=$(dd if="${1}" skip=${SKIP} bs=1 count=4 2>/dev/null)
+            echo "${CHUNKS}" >> /dev/stderr
+            case ${CHUNKS} in
+                PM44) local SKIP=$((${SKIP} + 8))
+                    local CHUNKSIZE=$(dd if="${1}" skip=${SKIP} bs=1 count=4 | xxd -p -c 4)
+                    local CHUNK=$(printf "%d\n" "0x${CHUNKSIZE}")
+                    local SKIP=$((${SKIP} + 4))
+                    local HEXORDER=$(dd if="${1}" skip=${SKIP} bs=1 count=1 | xxd -p -c 1)
+                    local ORDER=$(printf "%d\n" "0x${HEXORDER}")
+                    local SKIP=$((${SKIP} + 1))
+                    local HEXSLICES=$(dd if="${1}" skip=${SKIP} bs=1 count=1 | xxd -p -c 1)
+                    local SLICES=$(printf "%d\n" "0x${HEXSLICES}")
+                    local SKIP=$((${SKIP} + 1))
+                    local HEXVERSION=$(dd if="${1}" skip=${SKIP} bs=1 count=2 | xxd -p -c 2)
+                    local VERSION="${HEXVERSION:0:2}.${HEXVERSION:2:2}"
+                    local SKIP=$((${SKIP} + 2))
+                    local HEXHEIGHT=$(dd if="${1}" skip=${SKIP} bs=1 count=2 | xxd -p -c 2)
+                    local HEIGHT=$(printf "%d\n" "0x${HEXHEIGHT}")
+                    local SKIP=$((${SKIP} + 2))
+                    local HEXWIDTH=$(dd if="${1}" skip=${SKIP} bs=1 count=2 | xxd -p -c 2)
+                    local WIDTH=$(printf "%d\n" "0x${HEXWIDTH}")
+                    echo "${1} SKIP:${SKIP} CHUNK:${CHUNK} ORDER:${ORDER} SLICES:${SLICES} VERSION:${VERSION} HEIGHT:${HEIGHT} WIDTH:${WIDTH}" >> /dev/stderr
+                    #/ odečítají se 4 bajty za hlavičku + 1 bajt pořadí
+                    local SKIP=$((${SKIP} - 5))
+                    dd if="${1}" skip=${SKIP} bs=1 count=${CHUNK} > /tmp/chunk_00.pm44
+                    # dokud odečet od celkové velikosti není 0
+                    z=1
+                    while [ $((${SIZE} - ${SKIP})) -gt 0 ]
+                    do
+                    # 1. řez
+                        local SKIP=$((${SKIP} + ${CHUNK} + 4))
+                        local CHUNKSIZE=$(dd if="${1}" skip=${SKIP} bs=1 count=4 | xxd -p -c 4)
+                        local CHUNK=$(printf "%d\n" "0x${CHUNKSIZE}")
+                        local SKIP=$((${SKIP} + 4))
+                        local HEXORDER=$(dd if="${1}" skip=${SKIP} bs=1 count=1 | xxd -p -c 1)
+                        local ORDER=$(printf "%d\n" "0x${HEXORDER}")
+                        local SKIP=$((${SKIP} + 1))
+                        local HEXSLICES=$(dd if="${1}" skip=${SKIP} bs=1 count=1 | xxd -p -c 1)
+                        local SLICES=$(printf "%d\n" "0x${HEXSLICES}")
+                        echo "SKIP:${SKIP} CHUNK:${CHUNK} ORDER:${ORDER} SLICES:${SLICES} VERSION:${VERSION} HEIGHT:${HEIGHT} WIDTH:${WIDTH}" >> /dev/stderr
+                        dd if="${1}" skip=${SKIP} bs=1 count=${CHUNK} > "/tmp/chunk_$z.pm44"
+                        # Pro vytvoření vrstvy z řezu je nutné přidat..
+                        # FORM(celkovou velikost v HEX)PM44PM44(velikost chunku v HEX)(pořadí 0 v HEX)(počet řezů chunku v HEX)(verzi,výšku a šířku v HEX)
+                        (
+                        echo -n "464f524d" # FORM
+                        # 0005F745 veliksot celková 0006036F,
+                        # je o 8 bajtů menší než celková velikost souboru
+                        local VSIZE=$((${CHUNK} + 20))
+                        local DIGIT=$(printf '%8x' "${VSIZE}")
+                        echo "DIGIT ${DIGIT}" >> /dev/stderr
+                        local STRING="${DIGIT// /0}"
+                        echo "STRING ${STRING}" >> /dev/stderr
+                        echo -n "${STRING}"
+                        echo -n "504d3434" # PM44
+                        echo -n "504d3434" # PM44
+                        # 5F734 velikost chunku 00060363 (o 12 menší než celková velikost a o 20 menší než celková velikost souboru
+                        local MSIZE=$((${CHUNK} + 8))
+                        local DIGIT=$(printf '%8x' "${MSIZE}")
+                        echo "DIGIT ${DIGIT}" >> /dev/stderr
+                        local STRING="${DIGIT// /0}"
+                        echo "STRING ${STRING}" >> /dev/stderr
+                        echo -n "${STRING}"
+                        echo -n "00"
+                        echo -n "${HEXSLICES}" # 1
+                        echo -n "${HEXVERSION}" # 2
+                        echo -n "${HEXHEIGHT}" # 2
+                        echo -n "${HEXWIDTH}" # 2
+                        ) | tee prubezny_retezec | xxd -r -p > "/tmp/bg_$z.djvu"
+                        cat /tmp/chunk_$z.pm44 >> "/tmp/bg_$z.djvu"
+                        #echo '00' | xxd -r -p >> "/tmp/bg_$z.djvu"
+                        # na konci je 00
+                        ((z++))
+                    done
+                ;;
+            esac
+        ;;
+    esac
+}
+
 # ### <span id="bookmarktooutline">bookmarktooutline()</span> ([top](#FUNCTIONS))
 # Funkce zpracovává záložky z DjVu souboru do formátu s odsazením
 bookmarktooutline() {
@@ -1360,9 +1578,13 @@ isformat() {
             ;;
         orig*) #/ původní formát
             ;;
+        bg*) #/ vytažení řezů z vrstvy pozadí
+            ;;
         jpg|jpeg|jp2)
             ;;
         pnm|pam|pbm)
+            ;;
+        png)
             ;;
         mask|black|background|foreground|color) #/ Typ exportované obrazové vrstvy
             ;;
@@ -1786,7 +2008,7 @@ exportdjvu() {
 #/    echo "ARRAY ${#ARRAY[@]} ${ARRAY[@]}" >> /dev/stderr
 #/    echo "LISTPAGES ${#LISTPAGES[@]} ${LISTPAGES[@]}" >> /dev/stderr
     case "${INTO}" in
-        djvu|ant|note|meta|mask|background|foreground|color|black|dsed*|xmp|xml|\
+        djvu|bg|ant|note|meta|mask|background|foreground|color|black|dsed*|xmp|xml|\
         line|word|para)
             if [ -n "${RANGE}" ] ; then
                 local PAGES=($(range "${RANGE}"))
@@ -1886,7 +2108,7 @@ exportdjvu() {
                     ;;
                     '') echo ""
                     ;;
-                    *) log info "Jdu exportovat xml"
+                    *) log info "Jdu exportovat ${INTO}"
                         local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .ant)
                         case ${INTO} in
                             line|word|para)  printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
@@ -1894,6 +2116,11 @@ exportdjvu() {
                                 ;;
                             ant) printf "# '${PAGENAME}' # page ${PAGEORDER}\n"
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; print-ant" | dsed2ant
+                            ;;
+                            bg|fg)
+                                ${DJVUEXTRACT} "${1}" -page="${PAGEORDER}" BG44="${TEMPFILE}"
+                                bgslices "${TEMPFILE}"
+                                exit 33
                             ;;
                             meta) printf "# '${PAGENAME}' # page ${PAGEORDER} "
                                 ${DJVUSED} "${1}" -e "select ${PAGEORDER}; size"
@@ -6736,6 +6963,25 @@ case ${FILETYPE} in
             ;;
         esac
         return $?
+    ;;
+    plain) log info "${ACTION} chunk –> ${CHARSTRING}"
+        local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .z)
+        case ${ACTION} in
+            export) bzz "${FILE}" "${TEMPFILE}"
+                chunkenc "${TEMPFILE}" "${CHARSTRING}"
+            ;;
+            info) chunkinfo "${FILE}" "${CHARSTRING}"
+            ;;
+        esac
+    ;;
+    unknown) log info "${ACTION} chunk –> ${CHARSTRING}"
+        case ${ACTION} in
+            export) log info "Sestavuji chunk –> ${CHARSTRING}"
+                chunkenc "${FILE}" "${CHARSTRING}"
+            ;;
+            info) chunkinfo "${FILE}" "${CHARSTRING}"
+            ;;
+        esac
     ;;
     *) log info "Input bitmap file (or archive) ${FILE} in format –> ${FILETYPE}"
         case ${ACTION} in
