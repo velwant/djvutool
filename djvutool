@@ -116,6 +116,17 @@ TEMPDIR=$(mktemp -d -p /tmp ${NAME}-XXX) || exit 1
 
 #=== testy závislostí ===
 # Dependencies:
+#   * coreutils
+#   * exiftools
+#   * mimetype
+#   * netpbm-sf
+#   * xcftools ( GIMP file support)
+#   * libtiff-tools (support for manipulation with TIFF)
+#   * libopenjp2-tools (JPEG-2000 decompression support)
+#   * 7z (support for archives)
+#   * ocrodjvu (OCR support for DjVu files)
+#   * didjvu (advanced support for bitonal mask separate)
+#   * pdftk (support for manipulation with PDF pages and objects)
 #   * feh      ( http://feh.finalrewind.org/ )
 #   * exiftool ( http://www.sno.phy.queensu.ca/~phil/exiftool ) in Debian package: libimage-exiftool-perl 
 #   * yad      ( http://sourceforge.net/projects/yad-dialog )
