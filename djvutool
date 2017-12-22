@@ -6392,105 +6392,70 @@ do
             esac
             log set "DEBUG –> ${DEBUG}"
         ;;
-        *.[dD][jJ][vV][uU]|\
-        *.[gG][iI][fF]|\
-        *.[jJ][pP][gG]|\
-        *.[jJ][pP]2|\
-        *.[zZ][iI][pP]|\
-        *.[pP][nN][gG]|\
-        *.[pP][nNpPgGaAbB][mM]|\
-        *.fore|\
-        *.[pP][cC][dD]|\
-        *.[mM][nN][gG]|\
-        *.[pP][dD][fF]|\
-        *.[tT][aA][rR]|\
-        *.[tT][iI][fF][fF]|\
-        *.[tT][iI][fF]|\
-        *.[xX][cC][fF])
-            local FILE=$(realpath -P "${1}")
-            [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
-            shift
-            if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
-                ACTION=${1}
-                shift
-                local CHARSTRING="$@"
-                log info "ACTION –> ${ACTION}"
-                log info "CHARSTRING –> ${CHARSTRING}"
-                break
-            else
-                case ${1} in
-                    -h|--help|help|?)
-                        help
-                        help actions
-                        printf "\t"
-                        printf "%s " ${ACTIONS[@]}
-                        return 0
-                    ;;
-                    *) echo "Neimplementovaná ekce, nebo parametr –> ${1}" >> /dev/stderr
-                        return 1
-                    ;;
-                esac
-            fi
-        ;;
         *) if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
                 ACTION=${1}
                 shift
                 case ${1} in
-                    *.[dD][jJ][vV][uU]|\
-                    *.[gG][iI][fF]|\
-                    *.[jJ][pP][gG]|\
-                    *.[jJ][pP]2|\
-                    *.[zZ][iI][pP]|\
-                    *.[pP][nN][gG]|\
-                    *.[pP][nNpPgGaAbB][mM]|\
-                    *.fore|\
-                    *.[pP][cC][dD]|\
-                    *.[mM][nN][gG]|\
-                    *.[pP][dD][fF]|\
-                    *.[tT][aA][rR]|\
-                    *.[tT][iI][fF][fF]|\
-                    *.[tT][iI][fF]|\
-                    *.[xX][cC][fF])
-                        local FILE=$(realpath -P "${1}")
-                        [ ! -n "${FILE}" ] && echo "Invalid filepath ${1}" && exit 1
-                        shift
-                        local CHARSTRING="$@"
-                        log info "main() ACTION –> ${ACTION}"
-                        log info "main() CHARSTRING –> ${CHARSTRING}"
-                        echo ""
-                        break
-                    ;;
-                    *) echo "${1} – Nepodporovaný typ souboru" >> /dev/stderr
-                        return 1
-                    ;;
-                esac
-            else
-# Smyčka se přeruší, pokud není předaná žádná známá akce, ani parametr,
-# který by byl ošetřen pomocí voleb. Další paramtery jsou pak již číslovány
-# 1, 2, 3 atd..
-                case ${1} in
-                    -h|--help|help|?) help
-                        help actions
-                        printf "\t"
-                        printf "%s " ${ACTIONS[@]}
-                        echo ""
+                    -h|--help|help|?) help keywords-${ACTION}
                         return 0
                     ;;
-                    *) log warn "Neimplementovaný parametr ${1}"
-                        help options
-                        return 1
+                esac
+                local FILE=$(realpath -P "${1}")
+                FILETYPE=$(mimefile "${1}")
+                if [[ ${FORMATS[@]} =~ ${FILETYPE} ]] ; then
+                    shift
+                    local CHARSTRING="$@"
+                    log info "ACTION before FILE –> ${ACTION}"
+                    log info "Set CHARSTRING –> ${CHARSTRING}"
+                    break
+                else
+                    echo "${1} – Nepodporovaný typ souboru" >> /dev/stderr
+                    return 1
+                fi
+            else
+                case ${1} in
+                    -h|--help|help|?) help
+                        return 0
                     ;;
                 esac
+                local FILE=$(realpath -P "${1}")
+                FILETYPE=$(mimefile "${1}")
+                if [[ ${FORMATS[@]} =~ ${FILETYPE} ]] ; then
+                    shift
+                    if [[ ${ACTIONS[@]} =~ (^|[^[:alpha:]])${1}([^[:alpha:]]|$) ]] && [ "?" != "${1}" ]; then
+                        ACTION=${1}
+                        shift
+                        local CHARSTRING="$@"
+                        log info "ACTION after FILE –> ${ACTION}"
+                        log info "Set CHARSTRING –> ${CHARSTRING}"
+                        break
+                    else
+                        case ${1} in
+                            -h|--help|help|?) help
+                                help actions
+                                printf "\t"
+                                printf "%s " ${ACTIONS[@]}
+                                echo ""
+                                return 0
+                            ;;
+                            *) echo "For file ${FILE} unknown ACTION –> $@" >> /dev/stderr
+                                return 1
+                            ;;
+                        esac
+                    fi
+                else
+                    echo "Se souborem ${FILETYPE} tento skript neumí pracovat" >> /dev/stderr
+                    return 1
+                fi
             fi
-            ;;
+        ;;
     esac
 done
 
+#/ echo "${ACTION}" >> /dev/stderr
+#/ echo "${FILETYPE}" >> /dev/stderr
+#/ echo "$@" >> /dev/stderr
 
-# echo "${ACTION}" >> /dev/stderr
-# echo "$@" >> /dev/stderr
-
-FILETYPE=$(mimefile "${FILE}")
 if [[ "${CHARSTRING}" =~ "-h" ]] ; then
         if [ -n "${ACTION}" ] ; then
             case ${FILETYPE} in
