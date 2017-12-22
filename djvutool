@@ -233,16 +233,19 @@ ACTIONS=(
     )
 
 # ## Akceptované formáty bitmapových souborů
-#
 # Neztrátové formáty 
 FORMATS_FULL=(
     bmp
+    mng
+    jpeg-2000
+    pbm
+    pgm
     pnm
     png
-    tif
 )
-# Formáty, které mohou mít ztrítovou kompresi
+# Formáty, které mohou mít ztrátovou kompresi
 FORMATS_MISS=(
+    gimp
     jpg
     xcf
     jp2
@@ -252,8 +255,17 @@ FORMATS_CONT=(
     pdf
     zip
     tar
+    tiff
 )
-FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]})
+# Formáty DjVu
+FORMATS_CHUNKS=(
+    djvu
+    iff
+    plain
+    unknown
+)
+
+FORMATS=(${FORMATS_FULL[@]} ${FORMATS_MISS[@]} ${FORMATS_CONT[@]} ${FORMATS_CHUNKS[@]})
 
 PGMTOPBM=$(command -v pgmtopbm)
 [ ! -x "${PGMTOPBM}" ] && exit 23
