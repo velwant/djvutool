@@ -283,6 +283,8 @@ TIFFTOPNM=$(command -v tifftopnm)
 [ ! -x "${TIFFTOPNM}" ] && exit 23
 PNMTOPNG=$(command -v pnmtopng)
 [ ! -x "${PNMTOPNG}" ] && exit 23
+PAMTOPNG=$(command -v pamtopng)
+[ ! -x "${PAMTOPNG}" ] && exit 23
 PAMTOJPEG2K=$(command -v pamtojpeg2k)
 [ ! -x "${PAMTOJPEG2K}" ] && exit 23
 JPEG2KTOPAM=$(command -v jpeg2ktopam)
@@ -3245,9 +3247,9 @@ exportimg() {
                 ;;
                 jp2)
                     if [ -n "${SCALE}" ] ; then
-                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOJPEG2K} > "${TARGET}"
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | jp2in > "${TARGET}"
                     else
-                        ${PAMTOJPEG2K} ${TEMPFILE} > "${TARGET}"
+                        cat ${TEMPFILE} | jp2in > "${TARGET}"
                     fi
                 ;;
                 *) log info "Konverze do výchozího formátu ${FILETYPE} není nutná"
@@ -3255,9 +3257,69 @@ exportimg() {
                 ;;
             esac
         ;;
+        jpeg-2000)  log info "exportimg() Export from JPEG-2000 into ${INTO}"
+            local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
+            #${JPEG2KTOPAM} ${FILE} > ${TEMPFILE}
+            jp2to "${FILE}" > "${TEMPFILE}"
+            if [ -n "${TARGETSAMPLE}" ] ; then
+                # jedu podle vzorku
+                local TARGET="${TARGETDIR}/${TARGETSAMPLE}.${INTO}"
+            else
+                local TARGET="${TARGETDIR}/${FILE##*/}.${INTO}"
+            fi
+            case "${INTO}" in
+                djvu) #/ V tomto bodě se v případě DjVu provede konverze
+                    encodefile ${TEMPFILE} "${TARGET}"
+                    # na anglicke texty dává lepší výsledky cuneiform
+                ;;
+                mask|pbm) #/ Výsledkem je soubor s cílovým názvem, ale příponou pbm
+                    $0 ${TEMPFILE} export 1 mask ${TARGET}
+                    #if [ -f "${TEMPFILE/.pam/.text}" ] ; then
+                    #    cp "${TEMPFILE/.pam/.text}" "${TARGET/.mask/.pbm}"
+                    #else
+                    #    cp "${TEMPFILE/.pam/.fore}" "${TARGET/.mask/.pbm}"
+                    #fi
+                ;;
+                back) #/ Výsledkem je PNG soubor pozadí s cílovým názvem, a příponou back.png
+                    $0 ${TEMPFILE} export 1 back ${TARGET}
+                ;;
+                pnm)if [ -n "${SCALE}" ] ; then
+                        ${PAMCUT} ${TEMPFILE} | ${PAMSCALE} ${SCALE} > "${TARGET}"
+                    else
+                        cp ${TEMPFILE} "${TARGET}"
+                    fi
+                ;;
+                png) log info "export do PNG"
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMCUT} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOPNG} > "${TARGET}"
+                    else
+                        ${PAMCUT} ${TEMPFILE} | ${PAMTOPNG} ${TEMPFILE} > "${TARGET}"
+                    fi
+                ;;
+                jpg|jpeg)
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMCUT} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PNMTOJPEG} > "${TARGET}"
+                    else
+                        log info "export do výchozího formátu ${FILETYPE} má smysl pouze při přeškálování"
+                        ${PAMCUT} ${TEMPFILE} | ${PNMTOJPEG} > "${TARGET}"
+                    fi
+                ;;
+                jp2)
+                    if [ -n "${SCALE}" ] ; then
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | jp2in > "${TARGET}"
+                    else
+                        log info "export do výchozího formátu ${FILETYPE} má smysl pouze při přeškálování"
+                    fi
+                ;;
+                *) log info "Konverze do výchozího formátu ${FILETYPE} má smysl pouze při škálování"
+                    return 1
+                ;;
+            esac
+        ;;
         jpeg) log info "exportimg() Export from JPEG into ${INTO}"
             #exit 33
             local TEMPFILE=$(tempfile -d ${TEMPDIR} -s .pam)
+            ${JPEGTOPNM} -dct float -dumpexif -exif="${TEMPFILE/.pam/.exif}" -repair "${FILE}" > ${TEMPFILE}
             if [ -n "${TARGETSAMPLE}" ] ; then
                 # jedu podle vzorku
                 local TARGET="${TARGETDIR}/${TARGETSAMPLE}.${INTO}"
@@ -3289,9 +3351,10 @@ exportimg() {
                 ;;
                 png) log info "export do PNG"
                     if [ -n "${SCALE}" ] ; then
-                        $0 ${FILE} export 1 png ${TEMPFILE}
+                        ${PAMCUT} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOPNG} > "${TARGET}"
                     else
-                        $0 ${FILE} export 1 png ${TEMPFILE}
+                        echo "${PAMCUT} ${TEMPFILE} | ${PAMTOPNG} > ${TARGET}" >> /dev/stderr
+                        ${PAMCUT} ${TEMPFILE} | ${PAMTOPNG} > "${TARGET}"
                     fi
                 ;;
                 jpg|jpeg) 
@@ -3304,9 +3367,9 @@ exportimg() {
                 ;;
                 jp2)
                     if [ -n "${SCALE}" ] ; then
-                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | ${PAMTOJPEG2K} > "${TARGET}"
+                        ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} | jp2in > "${TARGET}"
                     else
-                        ${PAMTOJPEG2K} ${TEMPFILE} > "${TARGET}"
+                        cat ${TEMPFILE} | jp2in > "${TARGET}"
                     fi
                 ;;
                 *) log info "Konverze do výchozího formátu ${FILETYPE} má smysl pouze při škálování"
@@ -3548,7 +3611,7 @@ exportimg() {
                             pnm|pam|png|jpg|tiff|jp2) local SUFFIX="${PAGE##*.}"
                                 case ${SUFFIX} in
                                     jp2) $(itemzip "${FILE}" "${PAGE}" |\
-                                        ${JPEG2KTOPAM} > "${TEMPFILE}")
+                                        jp2to > "${TEMPFILE}")
                                     ;;
                                     jpg) $(itemzip "${FILE}" "${PAGE}" |\
                                         ${JPEGTOPNM} > "${TEMPFILE}")
@@ -3575,10 +3638,10 @@ exportimg() {
                                     jp2) if [ -n "${SCALE}" ] ; then
                                             $(${PAMTOPNM} ${TEMPFILE} |\
                                                 ${PAMSCALE} ${SCALE} |\
-                                                ${PAMTOJPEG2K} > "${TARGET}")
+                                                jp2in > "${TARGET}")
                                         else
                                             $(${PAMTOPNM} ${TEMPFILE} |\
-                                                ${PAMTOJPEG2K} > "${TARGET}")
+                                                jp2in > "${TARGET}")
                                         fi
                                     ;;
                                     jpg)if [ -n "${SCALE}" ] ; then
@@ -3631,9 +3694,9 @@ exportimg() {
                                     [ $? -eq 1 ] && return 1
                                     case ${SUFFIX} in
                                         jp2) $(itemzip "${FILE}" "${PAGE}" |\
-                                                ${JPEG2KTOPAM} |\
+                                                jp2to |\
                                                 ${PAMSCALE} ${SCALE} |\
-                                            ${PAMTOJPEG2K} > "${TARGET}")
+                                            jp2in > "${TARGET}")
                                         ;;
                                         jpg) $(itemzip "${FILE}" "${PAGE}" |\
                                             ${JPEGTOPNM} |\
@@ -3785,7 +3848,7 @@ imgview() {
             fi
         ;;
         plain|jpeg-2000) local TEMPFILE="${TEMPDIR}/${FILE##*/}"
-            ${JPEG2KTOPAM} ${FILE} > ${TEMPFILE}
+            jp2to "${FILE}" > "${TEMPFILE}"
             #opj_decompress -i ${FILE} -o ${TEMPFILE} -l 1
             ls -alh ${TEMPFILE}
             exiftool ${TEMPFILE}
@@ -4315,6 +4378,102 @@ infile() {
 # Na vstupu je stream a výstupem je sada hodnot
 infoitem() {
     ${EXIFTOOL} -s3 -FileType -ImageSize -Compression -AnimationFrames -FrameCount -
+}
+
+# ### <span id="jp2to">jp2to()</span> ([top](#FUNCTIONS))
+# Konvertuje obrázky z formátu JPEG-2000 do formátu pnm
+# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
+# Využívá se při tom nástroj libopenjp2-tools, který je rychlejší, než
+# původně používaný nástroj z netpbm
+#
+# Při konverzi do PNG je vyžadována knihovna libpng a při konverzi do
+# formátu TIFF zase knihovna libtiff.
+#
+# Srovnání: Cca 4,1M jp2 ve stupních šedi, mizerné kvality má po konverzi
+# do DjVu při použití výchozího algoritmu (`djvu`) 1,1M. O něco lepší výsledek
+# jak z hlediska vizuálního, tak velikosti souboru nabídnul algoritmus
+# `otsu` – 0.7MB
+# Stejný soubor nekomprimovaný zabral 33M a v PNG 21M
+jp2to() {
+    local FROM=$(tempfile -d ${TEMPDIR} -s .jp2)
+    local TO=$(tempfile -d ${TEMPDIR} -s .pnm)
+    if [ -n "${JP2TO}" ] ; then
+        if [ -f "${1}" ] ; then
+            if [ -n "${2}" ] ; then
+                log info "opj_decompres ze ${1} do ${2}"
+                echo "konvertuji ze ${1} do ${2}" >> /dev/stderr
+                ${JP2TO} -i "${1}" -o "${2}"
+            else
+                log info "opj_decompres ze ${1} do ${TO} a pak na stdout"
+                ${JP2TO} -i "${1}" -o "${TO}"
+                cat "${TO}"
+            fi
+        else
+            log info "zapisuji do ${FROM}"
+            writefile "${FROM}"
+            log info "opj_decompres z ${FROM} do ${TO} a pak na stdout"
+            ${JP2TO} -i "${FROM}" -o "${TO}"
+            cat "${TO}"
+        fi
+    else
+        if [ -f "${1}" ] ; then
+            if [ -n "${2}" ] ; then
+                log info "jpeg2ktopam ze ${1} do ${2}"
+                cat "${1}" | ${JPEG2KTOPAM} > "${2}"
+            else
+                log info "jpeg2ktopam ze ${1} na stdout"
+                cat "${1}" | ${JPEG2KTOPAM}
+            fi
+        else
+            log info "jpeg2ktopam ze stdin na stdout"
+            ${JPEG2KTOPAM}
+        fi
+    fi
+    return $?
+}
+
+# ### <span id="jp2in">jp2in()</span> ([top](#FUNCTIONS))
+# Konvertuje obrázek z PNM do formátu JPEG-2000
+# `.bmp`, `.pgm`, `.pgx`, `.png`, `.pnm`, `.ppm`, `.raw`, `.tga`, `.tif`.
+# Využívá se při tom nástroj libopenjp2-tools.
+#
+# Konverze zpracovaného obrázku je bezztrátová, takže výsledný soubor může být větší než originál 8-/
+jp2in() {
+    local FROM=$(tempfile -d ${TEMPDIR} -s .pnm)
+    local TO=$(tempfile -d ${TEMPDIR} -s .jp2)
+    if [ -n "${JP2IN}" ] ; then
+        if [ -f "${1}" ] ; then
+            if [ -n "${2}" ] ; then
+                log info "opj_compres ze ${1} do ${2}"
+                echo "konvertuji ze ${1} do ${2}" >> /dev/stderr
+                ${JP2IN} -i "${1}" -o "${2}"
+            else
+                log info "opj_compres ze ${1} do ${TO} a pak na stdout"
+                ${JP2IN} -i "${1}" -o "${TO}"
+                cat "${TO}"
+            fi
+        else
+            log info "zapisuji do ${FROM}"
+            writefile "${FROM}"
+            log info "opj_compres z ${FROM} do ${TO} a pak na stdout"
+            ${JP2IN} -i "${FROM}" -o "${TO}"
+            cat "${TO}"
+        fi
+    else
+        if [ -f "${1}" ] ; then
+            if [ -n "${2}" ] ; then
+                log info "pamtojpeg2k ze ${1} do ${2}"
+                cat "${1}" | ${PAMTOJPEG2K} > "${2}"
+            else
+                log info "pamtojpeg2k ze ${1} na stdout"
+                cat "${1}" | ${PAMTOJPEG2K}
+            fi
+        else
+            log info "pamtojpeg2k ze stdin na stdout"
+            ${PAMTOJPEG2K}
+        fi
+    fi
+    return $?
 }
 
 # ### <span id="convertovergimp">convertovergimp()</span> ([top](#FUNCTIONS))
