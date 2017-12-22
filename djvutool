@@ -81,7 +81,7 @@ case $CHYBA in
  ;;
  21) echo "ERROR: mimetype - tool for detection type of image"
  ;;
- 22) echo "ERROR: readlink - tool for detection absolute path of directory"
+ 22) echo "ERROR: coreutils - tool for detection absolute path of directory"
  ;;
  23) echo "ERROR: netpbm-sf - pack of utilities for image conversions not installed "
  ;;
@@ -162,7 +162,7 @@ DJVUMAKE=$(command -v djvumake)
 #[ ! ${YAD} ] && echo 'Není nainstalován balík yad' && exit 1
 MIME=$(command -v mimetype)
 [ ! -x "${MIME}" ] && exit 21
-STAT=$(command -v readlink)
+STAT=$(command -v stat)
 [ ! -x "${STAT}" ] && exit 22
 EXIFTOOL=$(command -v exiftool)
 [ ! -x "${EXIFTOOL}" ] && exit 23
