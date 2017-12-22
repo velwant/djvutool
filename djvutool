@@ -3269,7 +3269,6 @@ exportimg() {
                     $0 ${FILE} export 1 back ${TEMPFILE}
                 ;;
                 pnm) echo "POZOR! Při konverzi do PNM formátu dojde ke ztrátě meta informací a tím i k anonymizaci obrázku" >> /dev/stderr
-                    ${JPEGTOPNM} -dct float -dumpexif -exif="${TEMPFILE/.pam/.exif}" -repair "${FILE}" > ${TEMPFILE}
                     if [ -n "${SCALE}" ] ; then
                         ${PAMTOPNM} ${TEMPFILE} | ${PAMSCALE} ${SCALE} > "${TARGET}"
                     else
